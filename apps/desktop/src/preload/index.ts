@@ -85,8 +85,21 @@ const api = {
         IpcContracts.profileGetCanonical.channel,
         profileId ? { profileId } : {}
       ),
-    createStarter: (input: { legalName: string; email?: string | null; location?: string | null }) =>
+    createStarter: (input: {
+      legalName: string;
+      email?: string | null;
+      location?: string | null;
+      applicationEmail: string;
+      applicationPassword: string;
+      gmailOtpEnabled?: boolean;
+    }) =>
       invoke<typeof input, Profile>(IpcContracts.profileCreateStarter.channel, input),
+    configureApplicationCredentials: (input: {
+      profileId: string;
+      applicationEmail: string;
+      applicationPassword: string;
+      gmailOtpEnabled?: boolean;
+    }) => invoke<typeof input, Profile>(IpcContracts.profileConfigureApplicationCredentials.channel, input),
     update: (profile: Profile) => invoke<{ profile: Profile }, Profile>(IpcContracts.profileUpdate.channel, { profile })
   },
   files: {

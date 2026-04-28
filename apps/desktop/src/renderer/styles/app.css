@@ -706,6 +706,25 @@ button:disabled {
   margin-top: 1rem;
 }
 
+.credential-editor {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+.toggle-row {
+  align-items: center;
+  display: grid;
+  gap: 0.6rem;
+  grid-template-columns: 1rem 1fr;
+}
+
+.starter-profile .toggle-row input {
+  height: 1rem;
+  min-height: 1rem;
+  padding: 0;
+  width: 1rem;
+}
+
 .settings-actions {
   display: grid;
   gap: 0.65rem;

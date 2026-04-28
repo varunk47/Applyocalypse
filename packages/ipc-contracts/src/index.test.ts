@@ -47,6 +47,25 @@ describe("ipc contracts", () => {
     expect(IpcContracts.profileGetCanonical.response.parse(null)).toBeNull();
   });
 
+  it("requires strong application credentials during starter profile setup", () => {
+    const parsed = IpcContracts.profileCreateStarter.request.parse({
+      legalName: "Ada Lovelace",
+      email: "ada@example.com",
+      applicationEmail: "ada@gmail.com",
+      applicationPassword: "Str0ng!Pass12",
+      gmailOtpEnabled: true
+    });
+
+    expect(parsed.gmailOtpEnabled).toBe(true);
+    expect(() =>
+      IpcContracts.profileCreateStarter.request.parse({
+        legalName: "Ada Lovelace",
+        applicationEmail: "ada@gmail.com",
+        applicationPassword: "weak-password"
+      })
+    ).toThrow();
+  });
+
   it("validates explicit approval types", () => {
     expect(
       IpcContracts.runsApprove.request.parse({

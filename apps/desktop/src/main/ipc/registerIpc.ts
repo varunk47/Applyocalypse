@@ -112,6 +112,65 @@ export const registerIpcHandlers = ({
     }
     throw new Error("Path is not an Applyocalypse artifact or approved picked file");
   };
+  const configureApplicationCredentials = (input: {
+    profileId: string;
+    applicationEmail: string;
+    applicationPassword: string;
+    gmailOtpEnabled: boolean;
+  }) => {
+    const applicationEmail = input.applicationEmail.trim().toLowerCase();
+    if (!profileRepository.getById(input.profileId)) {
+      throw new Error("Profile was not found for application credential setup");
+    }
+    const encryptedReference = secureSecretStore.encryptSecret(input.applicationPassword);
+    const secretRefId = providerRepository.createEncryptedSecretReference({
+      provider: input.gmailOtpEnabled ? "gmail" : "local",
+      keyName: input.gmailOtpEnabled ? "gmail_otp_password" : "application_password",
+      encryptedReference,
+      redactedHint: secureSecretStore.redactedHint(input.applicationPassword)
+    });
+    const gmailConnection = input.gmailOtpEnabled
+      ? providerRepository.upsertConnection({
+          provider: "gmail",
+          displayName: `Gmail OTP (${applicationEmail})`,
+          status: "CONNECTED",
+          secretRefId,
+          metadata: {
+            email: applicationEmail,
+            purpose: "otp",
+            authMode: "password_or_app_password",
+            scope: "gmail_imap_otp_search",
+            configuredAt: new Date().toISOString()
+          }
+        })
+      : null;
+    if (!input.gmailOtpEnabled) {
+      providerRepository.disconnectProvider("gmail", {
+        email: applicationEmail,
+        purpose: "otp",
+        disabledAt: new Date().toISOString()
+      });
+    }
+    const profile = profileRepository.configureApplicationCredentials({
+      profileId: input.profileId,
+      applicationEmail,
+      passwordSecretRefId: secretRefId,
+      otpProviderConnectionId: gmailConnection?.id ?? null,
+      otpHandlingEnabled: input.gmailOtpEnabled
+    });
+    auditRepository.append({
+      action: "profile.application_credentials_saved",
+      entityType: "profile",
+      entityId: profile.id,
+      metadata: {
+        applicationEmail,
+        gmailOtpEnabled: input.gmailOtpEnabled,
+        passwordSecretRefId: secretRefId,
+        gmailProviderConnectionId: gmailConnection?.id ?? null
+      }
+    });
+    return profile;
+  };
 
   ipcMain.on(IpcChannels.themeGetInitialState, (event) => {
     event.returnValue = themeController.getState();
@@ -214,11 +273,25 @@ export const registerIpcHandlers = ({
     const resolvedProfileId = profileId ?? profileRepository.getDefaultProfile()?.id ?? null;
     return resolvedProfileId ? profileRepository.getCanonicalProfile(resolvedProfileId) : null;
   });
-  handleContract(IpcContracts.profileCreateStarter, (input) =>
-    profileRepository.createStarterProfile({
+  handleContract(IpcContracts.profileCreateStarter, (input) => {
+    const profile = profileRepository.createStarterProfile({
       legalName: input.legalName,
       email: input.email ?? null,
       location: input.location ?? null
+    });
+    return configureApplicationCredentials({
+      profileId: profile.id,
+      applicationEmail: input.applicationEmail,
+      applicationPassword: input.applicationPassword,
+      gmailOtpEnabled: input.gmailOtpEnabled
+    });
+  });
+  handleContract(IpcContracts.profileConfigureApplicationCredentials, (input) =>
+    configureApplicationCredentials({
+      profileId: input.profileId,
+      applicationEmail: input.applicationEmail,
+      applicationPassword: input.applicationPassword,
+      gmailOtpEnabled: input.gmailOtpEnabled
     })
   );
   handleContract(IpcContracts.profileUpdate, ({ profile }) => profileRepository.upsert(profile));

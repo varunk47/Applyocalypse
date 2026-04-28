@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import time
 
-from .answers import propose_answer_for_detected_field, propose_profile_answers
+from .answers import ProposedApplicationAnswer, propose_answer_for_detected_field, propose_profile_answers
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.portal_adapters import COMMON_STEP_PROGRESSION_LABELS, progression_labels_for_workflow
@@ -32,6 +32,7 @@ from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent, utc_now
 from .jd_analysis import analyze_with_optional_llm
+from .otp import read_gmail_otp_from_env
 from .tailoring.engine import TailoringEngine
 from .validation import TextArtifactValidator
 
@@ -63,6 +64,17 @@ SUBMISSION_CONFIRMATION_PATTERNS = (
     "thanks for applying",
     "received your application",
     "we have received your application",
+)
+
+APPLICATION_PASSWORD_SENTINEL = "Use stored application password"
+
+OTP_FIELD_HINTS = (
+    "otp",
+    "one-time code",
+    "one time code",
+    "verification code",
+    "security code",
+    "passcode",
 )
 
 
@@ -342,11 +354,144 @@ def blocker_payload_from(blockers: list[BrowserBlocker]) -> list[dict[str, objec
     ]
 
 
+def is_password_field(field: BrowserField) -> bool:
+    label = normalize_field_label(field.label)
+    return field.field_type == "password" or "password" in label
+
+
+def is_otp_field(field: BrowserField) -> bool:
+    label = normalize_field_label(field.label)
+    return any(hint in label for hint in OTP_FIELD_HINTS)
+
+
+def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: dict[str, object]) -> ProposedApplicationAnswer:
+    if is_password_field(field) and os.getenv("APPLYO_APPLICATION_PASSWORD"):
+        return ProposedApplicationAnswer(
+            field_label=field.label,
+            field_type=field.field_type,
+            proposed_value=APPLICATION_PASSWORD_SENTINEL,
+            confidence=0.84,
+            source="PROFILE",
+            requires_review=True,
+        )
+    return propose_answer_for_detected_field(
+        field_label=field.label,
+        field_type=field.field_type,
+        canonical_profile=canonical_profile,
+    )
+
+
+def resolve_secret_reviewed_value(field: BrowserField, reviewed_value: str | None) -> tuple[str | None, str | None]:
+    if reviewed_value == APPLICATION_PASSWORD_SENTINEL and is_password_field(field):
+        password = os.getenv("APPLYO_APPLICATION_PASSWORD")
+        return (password if password else None, "APPLICATION_PASSWORD_SECRET")
+    return reviewed_value, None
+
+
+async def apply_otp_code_to_detected_field(adapter: object, run_id: str, code: str) -> bool:
+    fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    otp_field = next((field for field in fields if is_otp_field(field)), None)
+    if otp_field is None:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message="Gmail OTP was retrieved, but no OTP input field could be identified",
+            machine_state={"reason": "OTP_FIELD_NOT_FOUND"},
+            ui_state={"requires_user_review": True, "current_step": "otp"},
+            payload={"field_count": len(fields)},
+        ).emit()
+        return False
+
+    result = await adapter.apply_field_value(otp_field, code)  # type: ignore[attr-defined]
+    if not result.ok:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message="Gmail OTP was retrieved, but the OTP field could not be filled",
+            machine_state={"reason": "OTP_FIELD_FILL_FAILED", "selector": otp_field.selector},
+            ui_state={"requires_user_review": True, "current_step": "otp"},
+            payload={"field_label": otp_field.label, "field_type": otp_field.field_type, **result.payload},
+        ).emit()
+        return False
+
+    WorkerEvent(
+        event_type=EventType.FIELD_VALUE_APPLIED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.INFO,
+        message=f"Applied Gmail OTP to {otp_field.label}",
+        machine_state={"selector": otp_field.selector, "field_type": otp_field.field_type, "source": "GMAIL_OTP"},
+        ui_state={"current_step": "otp"},
+        payload={
+            "field_label": otp_field.label,
+            "field_type": otp_field.field_type,
+            "selector": otp_field.selector,
+            "value_length": None,
+            "source": "GMAIL_OTP",
+            "applied_action": result.payload.get("action"),
+        },
+    ).emit()
+    return True
+
+
+async def try_resolve_otp_with_gmail(adapter: object, run_id: str, *, context: str) -> bool:
+    if os.getenv("APPLYO_GMAIL_OTP_ENABLED") != "1":
+        return False
+
+    WorkerEvent(
+        event_type=EventType.OTP_RETRIEVAL_STARTED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.INFO,
+        message="Gmail OTP retrieval started",
+        machine_state={"provider": "gmail", "context": context},
+        ui_state={"current_step": "otp"},
+        payload={"provider": "gmail"},
+    ).emit()
+    result = await asyncio.to_thread(read_gmail_otp_from_env)
+    if not result.ok or not result.code:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message=result.message,
+            machine_state={"provider": "gmail", "context": context},
+            ui_state={"requires_user_review": True, "current_step": "otp"},
+            payload=result.safe_payload(),
+        ).emit()
+        return False
+
+    WorkerEvent(
+        event_type=EventType.OTP_RETRIEVAL_COMPLETED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.INFO,
+        message="Gmail OTP retrieved without exposing the code",
+        machine_state={"provider": "gmail", "context": context},
+        ui_state={"current_step": "otp"},
+        payload=result.safe_payload(),
+    ).emit()
+    return await apply_otp_code_to_detected_field(adapter, run_id, result.code)
+
+
 async def pause_for_blockers(adapter: object, work_dir: Path, run_id: str, blockers: list[BrowserBlocker], *, context: str) -> bool:
     active_blockers = blockers
     while active_blockers:
         blocker_payload = blocker_payload_from(active_blockers)
         primary_blocker = active_blockers[0]
+        if any(blocker.blocker_type == "OTP" for blocker in active_blockers) and await try_resolve_otp_with_gmail(
+            adapter, run_id, context=context
+        ):
+            active_blockers = await adapter.detect_blockers()  # type: ignore[attr-defined]
+            if not active_blockers:
+                return False
+            blocker_payload = blocker_payload_from(active_blockers)
+            primary_blocker = active_blockers[0]
         WorkerEvent(
             event_type=EventType.PAUSED,
             run_id=run_id,
@@ -1200,11 +1345,7 @@ async def run_url_observation_flow(
             ui_state={"current_step": "field_review"},
             payload=field_payload,
         ).emit()
-        proposed_answer = propose_answer_for_detected_field(
-            field_label=field.label,
-            field_type=field.field_type,
-            canonical_profile=canonical_profile,
-        )
+        proposed_answer = proposed_answer_for_browser_field(field, canonical_profile)
         WorkerEvent(
             event_type=EventType.FIELD_VALUE_PROPOSED,
             run_id=run_id,
@@ -1452,13 +1593,15 @@ async def run_browser_apply_after_review(
                     ).emit()
                 continue
 
-            value = approved_value_for_field(field, approved_answers)
+            reviewed_value = approved_value_for_field(field, approved_answers)
+            value, secret_source = resolve_secret_reviewed_value(field, reviewed_value)
             if value is None:
                 if field.required:
                     missing_required_answers.append(required_answer_missing_payload(field))
                 continue
             result = await adapter.apply_field_value(field, value)
             if result.ok:
+                is_secret_value = secret_source is not None
                 WorkerEvent(
                     event_type=EventType.FIELD_VALUE_APPLIED,
                     run_id=run_id,
@@ -1471,8 +1614,9 @@ async def run_browser_apply_after_review(
                         "field_label": field.label,
                         "field_type": field.field_type,
                         "selector": field.selector,
-                        "value_length": len(value),
-                        "source": "USER_EDIT",
+                        "value_length": None if is_secret_value else len(value),
+                        "source": secret_source or "USER_EDIT",
+                        "secret_ref": secret_source,
                         "applied_action": result.payload.get("action"),
                         "checked": result.payload.get("checked") if isinstance(result.payload.get("checked"), bool) else None,
                         "selected_label": result.payload.get("selected_label"),

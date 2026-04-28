@@ -1,6 +1,6 @@
-import type { ProviderType } from "@applyocalypse/db";
+import type { LlmProviderType } from "@applyocalypse/db";
 
-const PROVIDER_API_KEY_ENV: Record<ProviderType, string> = {
+const PROVIDER_API_KEY_ENV: Record<LlmProviderType, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   gemini: "GEMINI_API_KEY",
@@ -18,7 +18,7 @@ const metadataString = (metadata: Record<string, unknown> | undefined, key: stri
 };
 
 export const buildProviderRuntimeEnv = (input: {
-  provider: ProviderType;
+  provider: LlmProviderType;
   apiKey: string;
   metadata?: Record<string, unknown>;
 }): Record<string, string> => {

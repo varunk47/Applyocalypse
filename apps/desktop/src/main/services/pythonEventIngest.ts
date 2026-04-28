@@ -80,6 +80,9 @@ const stepTypeForEvent = (eventType: string): string | null => {
     FIELD_VALUE_APPLIED: "FIELD_REVIEW",
     FILE_UPLOADED: "FILE_UPLOAD",
     SCREENSHOT_CAPTURED: "SCREENSHOT_CAPTURE",
+    OTP_RETRIEVAL_STARTED: "OTP_RETRIEVAL",
+    OTP_RETRIEVAL_COMPLETED: "OTP_RETRIEVAL",
+    OTP_RETRIEVAL_FAILED: "OTP_RETRIEVAL",
     USER_REVIEW_REQUIRED: "USER_REVIEW",
     READY_TO_SUBMIT: "FINAL_SUBMIT_GATE",
     SUBMITTED: "FINAL_SUBMIT",
@@ -94,6 +97,7 @@ const stepTypeForEvent = (eventType: string): string | null => {
 const stepStatusForEvent = (eventType: string): string => {
   if (eventType === "FAILED") return "FAILED";
   if (eventType === "PAUSED") return "PAUSED";
+  if (eventType === "OTP_RETRIEVAL_FAILED") return "WAITING_FOR_USER";
   if (eventType === "USER_REVIEW_REQUIRED" || eventType === "READY_TO_SUBMIT") return "WAITING_FOR_USER";
   if (
     [
@@ -107,6 +111,7 @@ const stepStatusForEvent = (eventType: string): string => {
       "FIELD_VALUE_APPLIED",
       "FILE_UPLOADED",
       "SCREENSHOT_CAPTURED",
+      "OTP_RETRIEVAL_COMPLETED",
       "SUBMITTED",
       "CLEANUP_COMPLETED"
     ].includes(eventType)
@@ -316,6 +321,106 @@ const persistValidationReport = (input: {
     });
 };
 
+const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEvent): void => {
+  if (!["OTP_RETRIEVAL_STARTED", "OTP_RETRIEVAL_COMPLETED", "OTP_RETRIEVAL_FAILED"].includes(event.event_type)) {
+    return;
+  }
+  const now = event.timestamp;
+  const providerConnection = db
+    .prepare(
+      `
+      SELECT id
+      FROM provider_connections
+      WHERE provider = 'gmail'
+        AND status = 'CONNECTED'
+        AND deleted_at IS NULL
+      ORDER BY updated_at DESC
+      LIMIT 1
+    `
+    )
+    .get() as { id: string } | undefined;
+  const openSession = db
+    .prepare(
+      `
+      SELECT id
+      FROM otp_sessions
+      WHERE application_run_id = @runId
+        AND status IN ('REQUESTED', 'WAITING')
+      ORDER BY requested_at DESC
+      LIMIT 1
+    `
+    )
+    .get({ runId: event.run_id }) as { id: string } | undefined;
+
+  if (event.event_type === "OTP_RETRIEVAL_STARTED") {
+    db.prepare(
+      `
+      INSERT INTO otp_sessions (
+        id, application_run_id, provider_connection_id, status, purpose,
+        requested_at, metadata_json, created_at, updated_at
+      )
+      VALUES (
+        @id, @runId, @providerConnectionId, 'REQUESTED', 'job_portal_otp',
+        @requestedAt, @metadataJson, @requestedAt, @requestedAt
+      )
+    `
+    ).run({
+      id: randomUUID(),
+      runId: event.run_id,
+      providerConnectionId: providerConnection?.id ?? null,
+      requestedAt: now,
+      metadataJson: parsePayloadJson({ provider: "gmail", eventId: event.step_id, payload: event.payload })
+    });
+    return;
+  }
+
+  const status =
+    event.event_type === "OTP_RETRIEVAL_COMPLETED"
+      ? "COMPLETED"
+      : event.payload["metadata"] && typeof event.payload["metadata"] === "object" && (event.payload["metadata"] as Record<string, unknown>)["status"] === "timeout"
+        ? "TIMEOUT"
+        : "FAILED";
+  if (openSession) {
+    db.prepare(
+      `
+      UPDATE otp_sessions
+      SET status = @status,
+          completed_at = CASE WHEN @status = 'COMPLETED' THEN @now ELSE completed_at END,
+          metadata_json = @metadataJson,
+          updated_at = @now
+      WHERE id = @id
+    `
+    ).run({
+      id: openSession.id,
+      status,
+      now,
+      metadataJson: parsePayloadJson({ provider: "gmail", payload: event.payload })
+    });
+    return;
+  }
+
+  db.prepare(
+    `
+    INSERT INTO otp_sessions (
+      id, application_run_id, provider_connection_id, status, purpose,
+      requested_at, completed_at, metadata_json, created_at, updated_at
+    )
+    VALUES (
+      @id, @runId, @providerConnectionId, @status, 'job_portal_otp',
+      @now, CASE WHEN @status = 'COMPLETED' THEN @now ELSE NULL END,
+      @metadataJson, @now, @now
+    )
+  `
+  ).run({
+    id: randomUUID(),
+    runId: event.run_id,
+    providerConnectionId: providerConnection?.id ?? null,
+    status,
+    now,
+    metadataJson: parsePayloadJson({ provider: "gmail", payload: event.payload })
+  });
+};
+
 export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots }: PythonEventIngestInput): void => {
   const event = PythonWorkerEventSchema.parse(JSON.parse(rawLine));
   const runRepository = new RunRepository(db);
@@ -347,6 +452,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
   });
 
   const materializedStepId = materializeApplicationStep(db, event);
+  persistOtpSessionEvent(db, event);
 
   if (event.event_type === "SCREENSHOT_CAPTURED") {
     const screenshot = ScreenshotPayloadSchema.parse(event.payload);
@@ -725,6 +831,9 @@ const statusForEvent = (eventType: string, machineState: Record<string, unknown>
     BROWSER_ARTIFACT_CAPTURED: "RUNNING_AUTOMATION",
     FIELD_VALUE_APPLIED: "RUNNING_AUTOMATION",
     FILE_UPLOADED: "RUNNING_AUTOMATION",
+    OTP_RETRIEVAL_STARTED: "RUNNING_AUTOMATION",
+    OTP_RETRIEVAL_COMPLETED: "RUNNING_AUTOMATION",
+    OTP_RETRIEVAL_FAILED: "BLOCKED_OTP",
     USER_REVIEW_REQUIRED: "READY_FOR_REVIEW",
     RESUMED: "RUNNING_AUTOMATION",
     READY_TO_SUBMIT: "READY_TO_SUBMIT",

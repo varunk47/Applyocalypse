@@ -55,7 +55,20 @@ type AppStateContextValue = {
   setThemePreference: (preference: ThemePreference) => Promise<void>;
   setMaxConcurrentApplications: (value: number) => Promise<void>;
   chooseOutputDir: () => Promise<void>;
-  createStarterProfile: (input: { legalName: string; email?: string | null; location?: string | null }) => Promise<void>;
+  createStarterProfile: (input: {
+    legalName: string;
+    email?: string | null;
+    location?: string | null;
+    applicationEmail: string;
+    applicationPassword: string;
+    gmailOtpEnabled?: boolean;
+  }) => Promise<void>;
+  configureApplicationCredentials: (input: {
+    profileId: string;
+    applicationEmail: string;
+    applicationPassword: string;
+    gmailOtpEnabled?: boolean;
+  }) => Promise<void>;
   saveProfile: (profile: Profile) => Promise<void>;
   saveProviderApiKey: (input: {
     provider: ProviderConnection["provider"];
@@ -215,7 +228,14 @@ export const AppStateProvider = (props: ParentProps) => {
     }
   };
 
-  const createStarterProfile = async (input: { legalName: string; email?: string | null; location?: string | null }): Promise<void> => {
+  const createStarterProfile = async (input: {
+    legalName: string;
+    email?: string | null;
+    location?: string | null;
+    applicationEmail: string;
+    applicationPassword: string;
+    gmailOtpEnabled?: boolean;
+  }): Promise<void> => {
     setState("isLoading", true);
     try {
       const profile = await window.applyocalypse.profile.createStarter(input);
@@ -224,6 +244,26 @@ export const AppStateProvider = (props: ParentProps) => {
       setState("error", null);
     } catch (error) {
       setState("error", error instanceof Error ? error.message : "Unable to create profile");
+    } finally {
+      setState("isLoading", false);
+    }
+  };
+
+  const configureApplicationCredentials = async (input: {
+    profileId: string;
+    applicationEmail: string;
+    applicationPassword: string;
+    gmailOtpEnabled?: boolean;
+  }): Promise<void> => {
+    setState("isLoading", true);
+    try {
+      const updated = await window.applyocalypse.profile.configureApplicationCredentials(input);
+      setState("profile", updated);
+      setState("canonicalProfile", await window.applyocalypse.profile.getCanonical(updated.id));
+      setState("providerConnections", (await window.applyocalypse.providers.list()).items);
+      setState("error", null);
+    } catch (error) {
+      setState("error", error instanceof Error ? error.message : "Unable to save application credentials");
     } finally {
       setState("isLoading", false);
     }
@@ -678,6 +718,7 @@ export const AppStateProvider = (props: ParentProps) => {
         setMaxConcurrentApplications,
         chooseOutputDir,
         createStarterProfile,
+        configureApplicationCredentials,
         saveProfile,
         saveProviderApiKey,
         pickAndRegisterResume,

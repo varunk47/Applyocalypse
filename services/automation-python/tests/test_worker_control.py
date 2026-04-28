@@ -6,9 +6,10 @@ import time
 import pytest
 
 from applyocalypse_automation import runner as runner_module
-from applyocalypse_automation.browser.adapter import BrowserBlocker, BrowserField
+from applyocalypse_automation.browser.adapter import BrowserBlocker, BrowserField, BrowserStepResult
 from applyocalypse_automation.control import WorkerControl, read_worker_control
 from applyocalypse_automation.browser.field_detection import build_click_by_text_script, build_final_submit_script
+from applyocalypse_automation.otp import GmailOtpResult
 from applyocalypse_automation.runner import (
     approved_value_for_field,
     control_auto_submit_enabled,
@@ -201,6 +202,60 @@ def test_pause_for_blockers_cancel_stops_worker(tmp_path, capsys):
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert should_stop is True
     assert [event["event_type"] for event in events] == ["PAUSED", "FAILED"]
+
+
+def test_pause_for_blockers_fills_gmail_otp_without_logging_code(tmp_path, capsys, monkeypatch):
+    class FakeAdapter:
+        def __init__(self):
+            self.applied_values: list[str] = []
+
+        async def detect_fields(self):
+            return [
+                BrowserField(
+                    field_id="otp-1",
+                    label="Verification code",
+                    field_type="text",
+                    selector="#otp",
+                    required=True,
+                    confidence=0.91,
+                )
+            ]
+
+        async def apply_field_value(self, field, value):
+            self.applied_values.append(value)
+            return BrowserStepResult(True, "field value applied", {"action": "set_value", "field_id": field.field_id})
+
+        async def detect_blockers(self):
+            return []
+
+    fake_adapter = FakeAdapter()
+    monkeypatch.setenv("APPLYO_GMAIL_OTP_ENABLED", "1")
+    monkeypatch.setattr(
+        runner_module,
+        "read_gmail_otp_from_env",
+        lambda: GmailOtpResult(True, "493821", "Gmail OTP code extracted", metadata={"message_id_sha256": "hash"}),
+    )
+
+    should_stop = asyncio.run(
+        pause_for_blockers(
+            fake_adapter,
+            tmp_path,
+            "run-otp",
+            [BrowserBlocker(blocker_type="OTP", message="One-time code required", confidence=0.92)],
+            context="approved field application",
+        )
+    )
+
+    output = capsys.readouterr().out
+    events = [json.loads(line) for line in output.splitlines()]
+    assert should_stop is False
+    assert fake_adapter.applied_values == ["493821"]
+    assert [event["event_type"] for event in events] == [
+        "OTP_RETRIEVAL_STARTED",
+        "OTP_RETRIEVAL_COMPLETED",
+        "FIELD_VALUE_APPLIED",
+    ]
+    assert "493821" not in output
 
 
 def test_portal_entry_pause_keeps_worker_alive_until_user_handles_action(tmp_path, capsys):

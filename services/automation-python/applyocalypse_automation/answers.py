@@ -24,11 +24,11 @@ def propose_profile_answers(canonical_profile: dict[str, Any]) -> list[ProposedA
 
     for label, key in [
         ("Legal name", "legalName"),
-        ("Email", "email"),
+        ("Email", "applicationEmail"),
         ("Phone", "phone"),
         ("Location", "location"),
     ]:
-        value = profile.get(key)
+        value = profile.get(key) or (profile.get("email") if key == "applicationEmail" else None)
         if value:
             answers.append(
                 ProposedApplicationAnswer(
@@ -89,14 +89,14 @@ def propose_answer_for_detected_field(
     label = field_label.lower()
 
     candidates: list[tuple[tuple[str, ...], str, float]] = [
-        (("email", "e-mail"), "email", 0.96),
+        (("email", "e-mail", "login"), "applicationEmail", 0.96),
         (("phone", "mobile", "telephone"), "phone", 0.94),
         (("full name", "legal name", "name"), "legalName", 0.92),
         (("location", "city", "address"), "location", 0.78),
     ]
     for aliases, profile_key, confidence in candidates:
         if any(alias in label for alias in aliases):
-            value = profile.get(profile_key)
+            value = profile.get(profile_key) or (profile.get("email") if profile_key == "applicationEmail" else None)
             return ProposedApplicationAnswer(
                 field_label=field_label,
                 field_type=field_type,

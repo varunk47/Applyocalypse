@@ -6,6 +6,7 @@ import {
   ChevronRight,
   FileText,
   FolderOpen,
+  KeyRound,
   Pause,
   Play,
   RefreshCcw,
@@ -98,6 +99,7 @@ export const CommandCenter = () => {
     setMaxConcurrentApplications,
     chooseOutputDir,
     createStarterProfile,
+    configureApplicationCredentials,
     saveProfile,
     saveProviderApiKey,
     enqueueJobText,
@@ -122,12 +124,18 @@ export const CommandCenter = () => {
     legalName: "",
     email: "",
     location: "",
+    applicationEmail: "",
+    applicationPassword: "",
+    gmailOtpEnabled: false,
     profileLegalName: "",
     profileDisplayName: "",
     profileEmail: "",
     profilePhone: "",
     profileLocation: "",
     profileWorkAuthorization: "",
+    profileApplicationEmail: "",
+    profileApplicationPassword: "",
+    profileGmailOtpEnabled: false,
     jobInput: "",
     provider: "openai" as (typeof providerOptions)[number]["value"],
     providerDisplayName: "OpenAI",
@@ -156,16 +164,29 @@ export const CommandCenter = () => {
       profileEmail: profile.email ?? "",
       profilePhone: profile.phone ?? "",
       profileLocation: profile.location ?? "",
-      profileWorkAuthorization: String(profile.workAuthorization["summary"] ?? "")
+      profileWorkAuthorization: String(profile.workAuthorization["summary"] ?? ""),
+      profileApplicationEmail: profile.applicationEmail ?? profile.email ?? "",
+      profileApplicationPassword: "",
+      profileGmailOtpEnabled: profile.otpHandlingEnabled
     });
   });
 
+  const applicationPasswordIsValid = (value: string): boolean =>
+    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(value);
+
   const submitStarterProfile = (): void => {
+    if (!applicationPasswordIsValid(form.applicationPassword)) {
+      return;
+    }
     void createStarterProfile({
       legalName: form.legalName,
       email: form.email || null,
-      location: form.location || null
+      location: form.location || null,
+      applicationEmail: form.applicationEmail,
+      applicationPassword: form.applicationPassword,
+      gmailOtpEnabled: form.gmailOtpEnabled
     });
+    setForm("applicationPassword", "");
   };
 
   const submitProfileEdits = (): void => {
@@ -184,6 +205,19 @@ export const CommandCenter = () => {
         ...(form.profileWorkAuthorization ? { summary: form.profileWorkAuthorization } : {})
       }
     });
+  };
+
+  const submitApplicationCredentials = (): void => {
+    if (!state.profile || !applicationPasswordIsValid(form.profileApplicationPassword)) {
+      return;
+    }
+    void configureApplicationCredentials({
+      profileId: state.profile.id,
+      applicationEmail: form.profileApplicationEmail,
+      applicationPassword: form.profileApplicationPassword,
+      gmailOtpEnabled: form.profileGmailOtpEnabled
+    });
+    setForm("profileApplicationPassword", "");
   };
 
   const runForQueueItem = (queueItemId: string) => state.applicationRuns.find((run) => run.queueItemId === queueItemId) ?? null;
@@ -960,10 +994,42 @@ export const CommandCenter = () => {
                     <input value={form.email} onInput={(event) => setForm("email", event.currentTarget.value)} />
                   </label>
                   <label>
+                    <span>Application email</span>
+                    <input
+                      type="email"
+                      value={form.applicationEmail}
+                      autocomplete="username"
+                      onInput={(event) => setForm("applicationEmail", event.currentTarget.value)}
+                    />
+                  </label>
+                  <label>
+                    <span>Application password</span>
+                    <input
+                      type="password"
+                      value={form.applicationPassword}
+                      autocomplete="new-password"
+                      onInput={(event) => setForm("applicationPassword", event.currentTarget.value)}
+                    />
+                  </label>
+                  <label class="toggle-row">
+                    <input
+                      type="checkbox"
+                      checked={form.gmailOtpEnabled}
+                      onChange={(event) => setForm("gmailOtpEnabled", event.currentTarget.checked)}
+                    />
+                    <span>Use Gmail OTP extraction for this inbox</span>
+                  </label>
+                  <p class="fine-print">Password policy: 12 or more characters with lowercase, uppercase, number, and symbol.</p>
+                  <label>
                     <span>Location</span>
                     <input value={form.location} onInput={(event) => setForm("location", event.currentTarget.value)} />
                   </label>
-                  <button class="secondary-action" type="button" onClick={submitStarterProfile}>
+                  <button
+                    class="secondary-action"
+                    type="button"
+                    disabled={!form.legalName.trim() || !form.applicationEmail.trim() || !applicationPasswordIsValid(form.applicationPassword)}
+                    onClick={submitStarterProfile}
+                  >
                     <ShieldCheck size={17} aria-hidden="true" />
                     <span>Save profile</span>
                   </button>
@@ -1018,6 +1084,55 @@ export const CommandCenter = () => {
                 <button class="secondary-action" type="button" onClick={submitProfileEdits}>
                   <Save size={17} aria-hidden="true" />
                   <span>Save profile</span>
+                </button>
+              </div>
+              <div class="starter-profile profile-editor credential-editor">
+                <div class="section-header">
+                  <div>
+                    <div class="panel-kicker">Application identity</div>
+                    <h2>Portal login defaults</h2>
+                  </div>
+                  <KeyRound size={20} aria-hidden="true" />
+                </div>
+                <p class="fine-print">
+                  Passwords are encrypted by Electron Main and never exposed back to the renderer.
+                  {state.profile?.applicationPasswordConfigured ? " A password is configured." : " No password is configured."}
+                </p>
+                <label>
+                  <span>Application email</span>
+                  <input
+                    type="email"
+                    value={form.profileApplicationEmail}
+                    autocomplete="username"
+                    onInput={(event) => setForm("profileApplicationEmail", event.currentTarget.value)}
+                  />
+                </label>
+                <label>
+                  <span>Application password</span>
+                  <input
+                    type="password"
+                    value={form.profileApplicationPassword}
+                    autocomplete="new-password"
+                    onInput={(event) => setForm("profileApplicationPassword", event.currentTarget.value)}
+                  />
+                </label>
+                <label class="toggle-row">
+                  <input
+                    type="checkbox"
+                    checked={form.profileGmailOtpEnabled}
+                    onChange={(event) => setForm("profileGmailOtpEnabled", event.currentTarget.checked)}
+                  />
+                  <span>Use Gmail OTP extraction for this inbox</span>
+                </label>
+                <p class="fine-print">Password policy: 12 or more characters with lowercase, uppercase, number, and symbol.</p>
+                <button
+                  class="secondary-action"
+                  type="button"
+                  disabled={!form.profileApplicationEmail.trim() || !applicationPasswordIsValid(form.profileApplicationPassword)}
+                  onClick={submitApplicationCredentials}
+                >
+                  <ShieldCheck size={17} aria-hidden="true" />
+                  <span>Save application identity</span>
                 </button>
               </div>
               <Show when={state.canonicalProfile}>

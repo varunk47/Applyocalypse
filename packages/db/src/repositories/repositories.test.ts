@@ -280,6 +280,75 @@ describe("db repositories", () => {
     }
   });
 
+  it("keeps Gmail OTP connections out of the LLM provider runtime selector", () => {
+    const { db } = createDb();
+    try {
+      const providers = new ProviderRepository(db);
+      const gmailSecretRefId = providers.createEncryptedSecretReference({
+        provider: "gmail",
+        keyName: "gmail_otp_password",
+        encryptedReference: "gmail-encrypted-reference",
+        redactedHint: "gm...1234"
+      });
+      providers.upsertConnection({
+        provider: "gmail",
+        displayName: "Gmail OTP",
+        status: "CONNECTED",
+        secretRefId: gmailSecretRefId,
+        metadata: { email: "ada@gmail.com" }
+      });
+
+      expect(providers.getFirstConnectedSecretReference()).toBeNull();
+
+      const openAiSecretRefId = providers.createEncryptedSecretReference({
+        provider: "openai",
+        keyName: "api_key",
+        encryptedReference: "openai-encrypted-reference",
+        redactedHint: "sk-...1234"
+      });
+      providers.upsertConnection({
+        provider: "openai",
+        displayName: "OpenAI",
+        status: "CONNECTED",
+        secretRefId: openAiSecretRefId,
+        metadata: {}
+      });
+
+      expect(providers.getFirstConnectedSecretReference()?.provider).toBe("openai");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("stores profile application credential references without exposing the encrypted secret on the profile", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const providers = new ProviderRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "Ada Lovelace", email: "ada@example.com" });
+      const secretRefId = providers.createEncryptedSecretReference({
+        provider: "local",
+        keyName: "application_password",
+        encryptedReference: "encrypted-application-password",
+        redactedHint: "St...12"
+      });
+
+      const updated = profileRepository.configureApplicationCredentials({
+        profileId: profile.id,
+        applicationEmail: "ada@gmail.com",
+        passwordSecretRefId: secretRefId,
+        otpHandlingEnabled: false
+      });
+
+      expect(updated.applicationEmail).toBe("ada@gmail.com");
+      expect(updated.applicationPasswordConfigured).toBe(true);
+      expect(JSON.stringify(updated)).not.toContain("encrypted-application-password");
+      expect(profileRepository.getApplicationCredentialReference(profile.id)?.encryptedReference).toBe("encrypted-application-password");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("appends audit logs without requiring secret payloads", () => {
     const { db } = createDb();
     try {

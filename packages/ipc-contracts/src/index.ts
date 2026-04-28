@@ -3,6 +3,7 @@ import {
   ApplicationAnswerSchema,
   ApplicationRunSchema,
   ApplicationStepSchema,
+  ApplicationPasswordSchema,
   ApprovalTypeSchema,
   BrowserArtifactSchema,
   CanonicalProfileSchema,
@@ -11,12 +12,12 @@ import {
   IdSchema,
   JobTargetSchema,
   JsonObjectSchema,
+  LlmProviderTypeSchema,
   PaginationSchema,
   ParsedDocumentMergeSummarySchema,
   ParsedDocumentSchema,
   ProfileSchema,
   ProviderConnectionSchema,
-  ProviderTypeSchema,
   QueueItemSchema,
   ReviewRequestSchema,
   RunEventSchema,
@@ -58,6 +59,7 @@ export const IpcChannels = {
   profileGet: "profile:get",
   profileGetCanonical: "profile:get-canonical",
   profileCreateStarter: "profile:create-starter",
+  profileConfigureApplicationCredentials: "profile:configure-application-credentials",
   profileUpdate: "profile:update",
   filesPick: "files:pick",
   filesListUploads: "files:list-uploads",
@@ -108,7 +110,7 @@ export const IpcContracts = {
   providersSaveApiKey: contract(
     IpcChannels.providersSaveApiKey,
     z.object({
-      provider: ProviderTypeSchema,
+      provider: LlmProviderTypeSchema,
       displayName: z.string().trim().min(1),
       apiKey: z.string().min(1).max(8192),
       metadata: JsonObjectSchema.optional()
@@ -162,7 +164,20 @@ export const IpcContracts = {
     z.object({
       legalName: z.string().trim().min(1),
       email: z.string().email().nullable().optional(),
-      location: z.string().trim().min(1).nullable().optional()
+      location: z.string().trim().min(1).nullable().optional(),
+      applicationEmail: z.string().email(),
+      applicationPassword: ApplicationPasswordSchema,
+      gmailOtpEnabled: z.boolean().default(false)
+    }).strict(),
+    ProfileSchema
+  ),
+  profileConfigureApplicationCredentials: contract(
+    IpcChannels.profileConfigureApplicationCredentials,
+    z.object({
+      profileId: IdSchema,
+      applicationEmail: z.string().email(),
+      applicationPassword: ApplicationPasswordSchema,
+      gmailOtpEnabled: z.boolean().default(false)
     }).strict(),
     ProfileSchema
   ),

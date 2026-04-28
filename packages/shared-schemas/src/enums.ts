@@ -3,7 +3,7 @@ import { z } from "zod";
 export const ThemePreferenceSchema = z.enum(["dark", "light", "system"]);
 export const ActiveThemeSchema = z.enum(["dark", "light"]);
 
-export const ProviderTypeSchema = z.enum([
+export const LlmProviderTypeSchema = z.enum([
   "openai",
   "anthropic",
   "gemini",
@@ -14,6 +14,9 @@ export const ProviderTypeSchema = z.enum([
   "azure_openai",
   "aws_bedrock"
 ]);
+
+export const ProviderTypeSchema = z.enum([...LlmProviderTypeSchema.options, "gmail"]);
+export const SecretProviderTypeSchema = z.enum([...ProviderTypeSchema.options, "local"]);
 
 export const SourceFormatSchema = z.enum(["PDF", "DOCX", "TEX", "TXT", "MD"]);
 export const UploadedFileStatusSchema = z.enum([
@@ -84,6 +87,9 @@ export const RunEventTypeSchema = z.enum([
   "FIELD_VALUE_APPLIED",
   "FILE_UPLOADED",
   "SCREENSHOT_CAPTURED",
+  "OTP_RETRIEVAL_STARTED",
+  "OTP_RETRIEVAL_COMPLETED",
+  "OTP_RETRIEVAL_FAILED",
   "USER_REVIEW_REQUIRED",
   "PAUSED",
   "RESUMED",

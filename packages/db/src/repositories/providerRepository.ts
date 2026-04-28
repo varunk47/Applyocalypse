@@ -1,14 +1,16 @@
 import type { Database } from "better-sqlite3";
 import { randomUUID } from "node:crypto";
-import { ProviderConnectionSchema, ProviderTypeSchema } from "@applyocalypse/shared-schemas";
+import { LlmProviderTypeSchema, ProviderConnectionSchema, ProviderTypeSchema, SecretProviderTypeSchema } from "@applyocalypse/shared-schemas";
 import type { z } from "zod";
 import { parseJsonColumn, stringifyJsonColumn } from "../json";
 
 export type ProviderConnection = z.infer<typeof ProviderConnectionSchema>;
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
+export type LlmProviderType = z.infer<typeof LlmProviderTypeSchema>;
+export type SecretProviderType = z.infer<typeof SecretProviderTypeSchema>;
 
-export type ProviderSecretReference = {
-  provider: ProviderType;
+export type ProviderSecretReference<Provider extends ProviderType = ProviderType> = {
+  provider: Provider;
   connectionId: string;
   secretRefId: string;
   encryptedReference: string;
@@ -48,7 +50,7 @@ export class ProviderRepository {
     return rows.map(mapProviderConnectionRow);
   }
 
-  getFirstConnectedSecretReference(): ProviderSecretReference | null {
+  getFirstConnectedSecretReference(): ProviderSecretReference<LlmProviderType> | null {
     const row = this.db
       .prepare(
         `
@@ -62,6 +64,7 @@ export class ProviderRepository {
         JOIN encrypted_secrets ON encrypted_secrets.id = provider_connections.secret_ref_id
         WHERE provider_connections.deleted_at IS NULL
           AND provider_connections.status = 'CONNECTED'
+          AND provider_connections.provider IN ('openai','anthropic','gemini','xai','groq','nvidia_nim','openrouter','azure_openai','aws_bedrock')
           AND encrypted_secrets.deleted_at IS NULL
         ORDER BY provider_connections.updated_at DESC
         LIMIT 1
@@ -82,7 +85,7 @@ export class ProviderRepository {
     }
 
     return {
-      provider: ProviderTypeSchema.parse(row.provider),
+      provider: LlmProviderTypeSchema.parse(row.provider),
       connectionId: row.connection_id,
       secretRefId: row.secret_ref_id,
       encryptedReference: row.encrypted_reference,
@@ -90,8 +93,48 @@ export class ProviderRepository {
     };
   }
 
+  getConnectedSecretReferenceById(connectionId: string): ProviderSecretReference | null {
+    const row = this.db
+      .prepare(
+        `
+        SELECT
+          provider_connections.id AS connection_id,
+          provider_connections.provider AS provider,
+          provider_connections.secret_ref_id AS secret_ref_id,
+          provider_connections.metadata_json AS metadata_json,
+          encrypted_secrets.reference AS encrypted_reference
+        FROM provider_connections
+        JOIN encrypted_secrets ON encrypted_secrets.id = provider_connections.secret_ref_id
+        WHERE provider_connections.id = @connectionId
+          AND provider_connections.deleted_at IS NULL
+          AND provider_connections.status = 'CONNECTED'
+          AND encrypted_secrets.deleted_at IS NULL
+        LIMIT 1
+      `
+      )
+      .get({ connectionId }) as
+      | {
+          connection_id: string;
+          provider: string;
+          secret_ref_id: string;
+          encrypted_reference: string;
+          metadata_json: string;
+        }
+      | undefined;
+
+    return row
+      ? {
+          provider: ProviderTypeSchema.parse(row.provider),
+          connectionId: row.connection_id,
+          secretRefId: row.secret_ref_id,
+          encryptedReference: row.encrypted_reference,
+          metadata: parseJsonColumn(row.metadata_json, {})
+        }
+      : null;
+  }
+
   createEncryptedSecretReference(input: {
-    provider: ProviderType;
+    provider: SecretProviderType;
     keyName: string;
     encryptedReference: string;
     redactedHint: string;
@@ -112,7 +155,7 @@ export class ProviderRepository {
       )
       .run({
         id,
-        provider: input.provider,
+        provider: SecretProviderTypeSchema.parse(input.provider),
         keyName: input.keyName,
         storageBackend: input.storageBackend ?? "electron_safe_storage",
         reference: input.encryptedReference,
@@ -165,6 +208,34 @@ export class ProviderRepository {
       });
 
     const row = this.db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(id) as ProviderConnectionRow;
+    return mapProviderConnectionRow(row);
+  }
+
+  disconnectProvider(provider: ProviderType, metadata: Record<string, unknown> = {}): ProviderConnection | null {
+    const existing = this.db
+      .prepare("SELECT * FROM provider_connections WHERE provider = ? AND deleted_at IS NULL ORDER BY created_at ASC LIMIT 1")
+      .get(ProviderTypeSchema.parse(provider)) as ProviderConnectionRow | undefined;
+    if (!existing) {
+      return null;
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `
+        UPDATE provider_connections
+        SET status = 'DISCONNECTED',
+            secret_ref_id = NULL,
+            metadata_json = @metadataJson,
+            updated_at = @updatedAt
+        WHERE id = @id
+      `
+      )
+      .run({
+        id: existing.id,
+        metadataJson: stringifyJsonColumn({ ...parseJsonColumn(existing.metadata_json, {}), ...metadata }),
+        updatedAt: now
+      });
+    const row = this.db.prepare("SELECT * FROM provider_connections WHERE id = ?").get(existing.id) as ProviderConnectionRow;
     return mapProviderConnectionRow(row);
   }
 }

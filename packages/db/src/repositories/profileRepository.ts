@@ -35,6 +35,10 @@ type ProfileRow = {
   display_name: string;
   legal_name: string;
   email: string | null;
+  application_email: string | null;
+  application_password_secret_ref_id: string | null;
+  otp_provider_connection_id: string | null;
+  otp_handling_enabled: number;
   phone: string | null;
   location: string | null;
   links_json: string;
@@ -51,6 +55,10 @@ const mapProfileRow = (row: ProfileRow): Profile =>
     displayName: row.display_name,
     legalName: row.legal_name,
     email: row.email,
+    applicationEmail: row.application_email,
+    applicationPasswordConfigured: Boolean(row.application_password_secret_ref_id),
+    otpProviderConnectionId: row.otp_provider_connection_id,
+    otpHandlingEnabled: row.otp_handling_enabled === 1,
     phone: row.phone,
     location: row.location,
     links: parseJsonColumn(row.links_json, []),
@@ -85,6 +93,10 @@ export class ProfileRepository {
       displayName: input.legalName,
       legalName: input.legalName,
       email: input.email ?? null,
+      applicationEmail: input.email ?? null,
+      applicationPasswordConfigured: false,
+      otpProviderConnectionId: null,
+      otpHandlingEnabled: false,
       phone: null,
       location: input.location ?? null,
       links: [],
@@ -107,11 +119,13 @@ export class ProfileRepository {
         `
         INSERT INTO profiles (
           id, display_name, legal_name, email, phone, location, links_json,
+          application_email, otp_provider_connection_id, otp_handling_enabled,
           job_defaults_json, work_authorization_json, equal_employment_defaults_json,
           created_at, updated_at
         )
         VALUES (
           @id, @displayName, @legalName, @email, @phone, @location, @linksJson,
+          @applicationEmail, @otpProviderConnectionId, @otpHandlingEnabled,
           @jobDefaultsJson, @workAuthorizationJson, @equalEmploymentDefaultsJson,
           @createdAt, @updatedAt
         )
@@ -119,6 +133,9 @@ export class ProfileRepository {
           display_name = excluded.display_name,
           legal_name = excluded.legal_name,
           email = excluded.email,
+          application_email = excluded.application_email,
+          otp_provider_connection_id = excluded.otp_provider_connection_id,
+          otp_handling_enabled = excluded.otp_handling_enabled,
           phone = excluded.phone,
           location = excluded.location,
           links_json = excluded.links_json,
@@ -133,6 +150,9 @@ export class ProfileRepository {
         displayName: parsed.displayName,
         legalName: parsed.legalName,
         email: parsed.email,
+        applicationEmail: parsed.applicationEmail,
+        otpProviderConnectionId: parsed.otpProviderConnectionId,
+        otpHandlingEnabled: parsed.otpHandlingEnabled ? 1 : 0,
         phone: parsed.phone,
         location: parsed.location,
         linksJson: stringifyJsonColumn(parsed.links),
@@ -143,7 +163,92 @@ export class ProfileRepository {
         updatedAt: now
       });
 
-    return ProfileSchema.parse({ ...parsed, createdAt, updatedAt: now });
+    return this.getById(parsed.id) ?? ProfileSchema.parse({ ...parsed, createdAt, updatedAt: now });
+  }
+
+  configureApplicationCredentials(input: {
+    profileId: string;
+    applicationEmail: string;
+    passwordSecretRefId: string;
+    otpProviderConnectionId?: string | null;
+    otpHandlingEnabled?: boolean;
+  }): Profile {
+    const now = new Date().toISOString();
+    this.db
+      .prepare(
+        `
+        UPDATE profiles
+        SET application_email = @applicationEmail,
+            application_password_secret_ref_id = @passwordSecretRefId,
+            otp_provider_connection_id = @otpProviderConnectionId,
+            otp_handling_enabled = @otpHandlingEnabled,
+            updated_at = @updatedAt
+        WHERE id = @profileId
+          AND deleted_at IS NULL
+      `
+      )
+      .run({
+        profileId: input.profileId,
+        applicationEmail: input.applicationEmail,
+        passwordSecretRefId: input.passwordSecretRefId,
+        otpProviderConnectionId: input.otpProviderConnectionId ?? null,
+        otpHandlingEnabled: input.otpHandlingEnabled ? 1 : 0,
+        updatedAt: now
+      });
+
+    const profile = this.getById(input.profileId);
+    if (!profile) {
+      throw new Error(`Profile not found: ${input.profileId}`);
+    }
+    return profile;
+  }
+
+  getApplicationCredentialReference(profileId: string):
+    | {
+        applicationEmail: string | null;
+        passwordSecretRefId: string | null;
+        encryptedReference: string | null;
+        otpHandlingEnabled: boolean;
+        otpProviderConnectionId: string | null;
+      }
+    | null {
+    const row = this.db
+      .prepare(
+        `
+        SELECT
+          profiles.application_email AS application_email,
+          profiles.application_password_secret_ref_id AS password_secret_ref_id,
+          profiles.otp_handling_enabled AS otp_handling_enabled,
+          profiles.otp_provider_connection_id AS otp_provider_connection_id,
+          encrypted_secrets.reference AS encrypted_reference
+        FROM profiles
+        LEFT JOIN encrypted_secrets
+          ON encrypted_secrets.id = profiles.application_password_secret_ref_id
+         AND encrypted_secrets.deleted_at IS NULL
+        WHERE profiles.id = @profileId
+          AND profiles.deleted_at IS NULL
+        LIMIT 1
+      `
+      )
+      .get({ profileId }) as
+      | {
+          application_email: string | null;
+          password_secret_ref_id: string | null;
+          encrypted_reference: string | null;
+          otp_handling_enabled: number;
+          otp_provider_connection_id: string | null;
+        }
+      | undefined;
+
+    return row
+      ? {
+          applicationEmail: row.application_email,
+          passwordSecretRefId: row.password_secret_ref_id,
+          encryptedReference: row.encrypted_reference,
+          otpHandlingEnabled: row.otp_handling_enabled === 1,
+          otpProviderConnectionId: row.otp_provider_connection_id
+        }
+      : null;
   }
 
   getCanonicalProfile(profileId: string): CanonicalProfile | null {

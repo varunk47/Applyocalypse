@@ -13,6 +13,15 @@ export const JsonArraySchema = z.array(z.unknown());
 
 export const LocalPathSchema = z.string().trim().min(1).max(4096);
 
+export const ApplicationPasswordSchema = z
+  .string()
+  .min(12, "Password must be at least 12 characters")
+  .max(256, "Password is too long")
+  .regex(/[a-z]/, "Password must include a lowercase letter")
+  .regex(/[A-Z]/, "Password must include an uppercase letter")
+  .regex(/[0-9]/, "Password must include a number")
+  .regex(/[^A-Za-z0-9]/, "Password must include a symbol");
+
 export const PaginationSchema = z.object({
   limit: z.number().int().min(1).max(250).default(50),
   offset: z.number().int().min(0).default(0)

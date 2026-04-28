@@ -113,7 +113,10 @@ export class LocalQueueScheduler {
       const runWorkDir = join(app.getPath("userData"), "runs", runId);
       mkdirSync(runWorkDir, { recursive: true });
       const jobTarget = new JobRepository(this.db).getTargetById(item.jobTargetId);
-      const canonicalProfile = new ProfileRepository(this.db).getCanonicalProfile(item.profileId);
+      const profileRepository = new ProfileRepository(this.db);
+      const providerRepository = new ProviderRepository(this.db);
+      const secureSecretStore = new SecureSecretStore();
+      const canonicalProfile = profileRepository.getCanonicalProfile(item.profileId);
       const profileJsonFile = canonicalProfile ? join(runWorkDir, "canonical-profile.json") : undefined;
       if (profileJsonFile && canonicalProfile) {
         writeFileSync(profileJsonFile, JSON.stringify(canonicalProfile, null, 2), "utf8");
@@ -140,40 +143,67 @@ export class LocalQueueScheduler {
         "utf8"
       );
       const outputDir = new SettingsRepository(this.db).get("files.outputDir", app.getPath("downloads"));
-      const providerSecret = new ProviderRepository(this.db).getFirstConnectedSecretReference();
+      const providerSecret = providerRepository.getFirstConnectedSecretReference();
       let providerEnv: Record<string, string> | undefined;
       try {
         providerEnv = providerSecret
           ? buildProviderRuntimeEnv({
               provider: providerSecret.provider,
-              apiKey: new SecureSecretStore().decryptSecret(providerSecret.encryptedReference),
+              apiKey: secureSecretStore.decryptSecret(providerSecret.encryptedReference),
               metadata: providerSecret.metadata
             })
           : undefined;
+
+        const credentials = profileRepository.getApplicationCredentialReference(item.profileId);
+        if (credentials?.applicationEmail && credentials.encryptedReference) {
+          const applicationPassword = secureSecretStore.decryptSecret(credentials.encryptedReference);
+          providerEnv = {
+            ...(providerEnv ?? {}),
+            APPLYO_APPLICATION_EMAIL: credentials.applicationEmail,
+            APPLYO_APPLICATION_PASSWORD: applicationPassword
+          };
+
+          if (credentials.otpHandlingEnabled) {
+            const otpSecret =
+              credentials.otpProviderConnectionId !== null
+                ? providerRepository.getConnectedSecretReferenceById(credentials.otpProviderConnectionId)
+                : null;
+            const otpPassword =
+              otpSecret?.provider === "gmail"
+                ? secureSecretStore.decryptSecret(otpSecret.encryptedReference)
+                : applicationPassword;
+            providerEnv = {
+              ...providerEnv,
+              APPLYO_GMAIL_OTP_ENABLED: "1",
+              APPLYO_GMAIL_OTP_EMAIL: credentials.applicationEmail,
+              APPLYO_GMAIL_OTP_PASSWORD: otpPassword
+            };
+          }
+        }
       } catch (error) {
-        const message = error instanceof Error ? error.message : "Provider secret could not be loaded";
+        const message = error instanceof Error ? error.message : "Sensitive local credential could not be loaded";
         runRepository.addRunEvent({
           eventType: "USER_REVIEW_REQUIRED",
           runId,
           stepId: null,
           timestamp: new Date().toISOString(),
           severity: "ERROR",
-          message: "Provider connection needs attention before this run can continue",
-          machineState: { reason: "PROVIDER_SECRET_UNAVAILABLE" },
+          message: "A saved local credential needs attention before this run can continue",
+          machineState: { reason: "LOCAL_CREDENTIAL_UNAVAILABLE" },
           uiState: { requiresUserReview: true },
           payload: { provider: providerSecret?.provider, error: message }
         });
         runRepository.createReviewRequest({
           applicationRunId: runId,
           reviewType: "DOCUMENT",
-          prompt: "Reconnect or update the selected AI provider key before continuing this application run.",
+          prompt: "Reconnect or update the saved provider/profile credential before continuing this application run.",
           payload: { provider: providerSecret?.provider ?? null }
         });
         runRepository.updateRunStatus({
           runId,
           status: "WAITING_FOR_USER_EDIT",
-          failureCode: "PROVIDER_SECRET_UNAVAILABLE",
-          failureMessage: "Provider secret could not be decrypted from secure local storage."
+          failureCode: "LOCAL_CREDENTIAL_UNAVAILABLE",
+          failureMessage: "Saved local credential could not be decrypted from secure local storage."
         });
         this.db
           .prepare("UPDATE queue_items SET status = 'WAITING_FOR_USER_EDIT', updated_at = @updatedAt WHERE id = @queueItemId")
