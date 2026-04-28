@@ -2,7 +2,8 @@ node_modules/
 dist/
 out/
 apps/desktop/out/
-release/
+apps/desktop/release/
+/release/
 .local/
 .pytest_cache/
 __pycache__/
