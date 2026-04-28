@@ -1,0 +1,38 @@
+{
+  "name": "applyocalypse",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local-first desktop copilot for human-controlled job applications.",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.0.0",
+    "pnpm": ">=10.0.0"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @applyocalypse/desktop dev",
+    "build": "pnpm -r build",
+    "python:build": "node scripts/build/build-python-worker.mjs",
+    "desktop:package": "pnpm python:build && pnpm --filter @applyocalypse/desktop build && node scripts/build/package-desktop.mjs",
+    "typecheck": "pnpm -r --stream typecheck",
+    "test": "vitest run",
+    "test:python": "node scripts/test/python-tests.mjs",
+    "test:desktop-smoke": "node scripts/test/desktop-boot-smoke.mjs",
+    "test:desktop-user-flow": "node scripts/test/desktop-user-flow-smoke.mjs",
+    "test:desktop-e2e": "node scripts/test/desktop-full-e2e-smoke.mjs",
+    "test:worker-smoke": "node scripts/test/packaged-worker-smoke.mjs",
+    "python:audit": "node scripts/test/python-audit.mjs",
+    "cert:portals": "node scripts/certification/live-portal-certification.mjs",
+    "cert:providers": "node scripts/certification/byok-provider-matrix.mjs",
+    "release:preflight": "node scripts/release/preflight.mjs",
+    "verify": "pnpm typecheck && pnpm test && pnpm test:python && pnpm python:audit && pnpm audit --audit-level high",
+    "verify:packaged": "pnpm desktop:package && pnpm test:worker-smoke && pnpm test:desktop-smoke && pnpm test:desktop-user-flow && pnpm test:desktop-e2e",
+    "lint": "pnpm -r lint",
+    "db:migrate": "pnpm --filter @applyocalypse/db migrate"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.3",
+    "tsx": "^4.19.4",
+    "typescript": "^5.8.3",
+    "vitest": "^3.1.3"
+  }
+}

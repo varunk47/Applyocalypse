@@ -1,0 +1,16 @@
+node_modules/
+dist/
+out/
+apps/desktop/out/
+release/
+.local/
+.pytest_cache/
+__pycache__/
+*.pyc
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+services/automation-python/dist/
+services/automation-python/build/
+services/automation-python/.venv-build/
+services/automation-python/*.spec

@@ -1,0 +1,45 @@
+{
+  "name": "@applyocalypse/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Applyocalypse local-first desktop application.",
+  "author": "Applyocalypse",
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "package": "node ../../scripts/build/package-desktop.mjs",
+    "package:raw": "electron-builder --config electron-builder/electron-builder.yml",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --passWithNoTests",
+    "lint": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@applyocalypse/config": "workspace:*",
+    "@applyocalypse/db": "workspace:*",
+    "@applyocalypse/document-tools": "workspace:*",
+    "@applyocalypse/ipc-contracts": "workspace:*",
+    "@applyocalypse/logging": "workspace:*",
+    "@applyocalypse/shared-schemas": "workspace:*",
+    "@applyocalypse/shared-types": "workspace:*",
+    "@applyocalypse/validator": "workspace:*",
+    "better-sqlite3": "^12.9.0",
+    "bindings": "^1.5.0",
+    "file-uri-to-path": "1.0.0",
+    "gsap": "^3.12.7",
+    "lucide-solid": "^0.503.0",
+    "prebuild-install": "^7.1.3",
+    "solid-js": "^1.9.5",
+    "zod": "^3.24.4"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
+    "electron": "^39.8.9",
+    "electron-builder": "^26.0.12",
+    "electron-vite": "^3.1.0",
+    "vite": "^6.3.2",
+    "vite-plugin-solid": "^2.11.6",
+    "vitest": "^3.1.3"
+  }
+}

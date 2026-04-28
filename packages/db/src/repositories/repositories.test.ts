@@ -1,0 +1,475 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
+import {
+  JobRepository,
+  ProfileRepository,
+  ProviderRepository,
+  QueueRepository,
+  RunRepository,
+  SettingsRepository,
+  UploadRepository,
+  ParsedDocumentRepository,
+  AuditRepository,
+  closeApplyocalypseDatabase,
+  openApplyocalypseDatabase,
+  runMigrations,
+  type ApplyocalypseDatabase
+} from "../index";
+
+const tempDirs: string[] = [];
+
+const createDb = (): { db: ApplyocalypseDatabase; dir: string } => {
+  const dir = mkdtempSync(join(tmpdir(), "applyocalypse-db-"));
+  tempDirs.push(dir);
+  const db = openApplyocalypseDatabase(join(dir, "test.sqlite"));
+  runMigrations(db, resolve(process.cwd(), "packages/db/migrations"));
+  return { db, dir };
+};
+
+afterEach(() => {
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+describe("db repositories", () => {
+  it("persists theme settings", () => {
+    const { db } = createDb();
+    try {
+      const settings = new SettingsRepository(db);
+      settings.setThemePreference("dark");
+      expect(settings.getThemePreference()).toBe("dark");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("creates a profile and queues job targets transactionally", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const jobRepository = new JobRepository(db);
+      const queueRepository = new QueueRepository(db);
+
+      const profile = profileRepository.createStarterProfile({
+        legalName: "Grace Hopper",
+        email: "grace@example.com",
+        location: "Arlington, VA"
+      });
+
+      const enqueued = jobRepository.enqueueTargets({
+        profileId: profile.id,
+        items: [{ sourceKind: "URL", sourceValue: "https://example.com/jobs/1", autoSubmitEnabled: true }]
+      });
+
+      expect(enqueued.jobTargets).toHaveLength(1);
+      expect(enqueued.queueItems[0]?.autoSubmitEnabled).toBe(true);
+      expect(queueRepository.count()).toBe(1);
+      const claimed = queueRepository.claimNext("worker-a", 30_000, 2);
+      expect(claimed?.status).toBe("CLAIMED");
+      expect(claimed?.autoSubmitEnabled).toBe(true);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("counts review-gated claimed queue items against the local concurrency cap", () => {
+    const { db } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Sally Ride" });
+      const { queueItems } = new JobRepository(db).enqueueTargets({
+        profileId: profile.id,
+        items: [
+          { sourceKind: "TEXT", sourceValue: "Role requiring Python" },
+          { sourceKind: "TEXT", sourceValue: "Role requiring TypeScript" }
+        ]
+      });
+      const futureLease = new Date(Date.now() + 600_000).toISOString();
+      db.prepare(
+        `
+        UPDATE queue_items
+        SET status = 'READY_TO_SUBMIT',
+            claimed_by = 'worker-a',
+            heartbeat_at = @futureLease,
+            lease_expires_at = @futureLease
+        WHERE id = @queueItemId
+      `
+      ).run({ futureLease, queueItemId: queueItems[0]!.id });
+
+      expect(new QueueRepository(db).claimNext("worker-a", 30_000, 1)).toBeNull();
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("fails pending queue items that exhausted their retry budget before claiming more work", () => {
+    const { db } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Mae Jemison" });
+      const { queueItems } = new JobRepository(db).enqueueTargets({
+        profileId: profile.id,
+        items: [{ sourceKind: "TEXT", sourceValue: "Role requiring Python" }]
+      });
+      db.prepare("UPDATE queue_items SET attempts = max_attempts WHERE id = ?").run(queueItems[0]!.id);
+
+      expect(new QueueRepository(db).claimNext("worker-a", 30_000, 2)).toBeNull();
+      expect(new QueueRepository(db).getById(queueItems[0]!.id).status).toBe("FAILED");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("registers upload metadata without storing file bytes", () => {
+    const { db, dir } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Katherine Johnson" });
+      const resumePath = join(dir, "resume.tex");
+      writeFileSync(resumePath, "\\section{Experience}", "utf8");
+
+      const uploaded = new UploadRepository(db).registerLocalFile({
+        profileId: profile.id,
+        localPath: resumePath,
+        fileKind: "RESUME"
+      });
+
+      expect(uploaded.sourceFormat).toBe("TEX");
+      expect(uploaded.sizeBytes).toBeGreaterThan(0);
+      expect(uploaded.sha256).toMatch(/^[a-f0-9]{64}$/);
+      expect(Object.keys(uploaded)).not.toContain("bytes");
+      expect(new UploadRepository(db).list(profile.id)[0]?.id).toBe(uploaded.id);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("persists parsed document output and conservatively merges high-confidence profile facts", () => {
+    const { db, dir } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "Ada Lovelace" });
+      const resumePath = join(dir, "resume.tex");
+      writeFileSync(resumePath, "\\section{Skills}\nPython, TypeScript, SQLite", "utf8");
+      const uploaded = new UploadRepository(db).registerLocalFile({
+        profileId: profile.id,
+        localPath: resumePath,
+        fileKind: "RESUME"
+      });
+
+      const merge = new ParsedDocumentRepository(db).createAndMerge({
+        uploadedFileId: uploaded.id,
+        parserName: "applyocalypse-local-parser",
+        parserVersion: "0.3.0",
+        confidence: 0.84,
+        canonical: {
+          documentKind: "RESUME",
+          sourceFormat: "TEX",
+          identity: {
+            legalName: "Ada Lovelace",
+            email: "ada@example.com",
+            phone: null,
+            location: null,
+            links: []
+          },
+          sections: [
+            {
+              sectionId: "section:skills:0",
+              label: "Skills",
+              normalizedLabel: "skills",
+              startLine: 0,
+              endLine: 1,
+              confidence: 0.86,
+              items: ["Python, TypeScript, SQLite"]
+            }
+          ],
+          skillGroups: [{ label: "Skills", skills: ["Python", "TypeScript", "SQLite"], confidence: 0.82 }],
+          education: [
+            {
+              institution: "University of London",
+              degree: "Mathematics",
+              field: "Analytical Engines",
+              startDate: null,
+              endDate: null,
+              details: ["Coursework in symbolic computation"],
+              confidence: 0.82
+            }
+          ],
+          experience: [
+            {
+              company: "Babbage Lab",
+              title: "Computing Collaborator",
+              location: "London",
+              startDate: "1842",
+              endDate: "1843",
+              bullets: ["Translated and annotated algorithms for mechanical computation"],
+              tools: ["Algorithms", "Mathematics"],
+              confidence: 0.86
+            }
+          ],
+          projects: [
+            {
+              name: "Analytical Engine Notes",
+              role: "Author",
+              summary: "Documented program logic for mechanical computation",
+              bullets: ["Outlined a repeatable method for Bernoulli number calculation"],
+              tools: ["Algorithms"],
+              links: [],
+              confidence: 0.88
+            }
+          ],
+          certifications: [
+            {
+              name: "Mathematical Correspondence",
+              issuer: "Royal Society",
+              issuedAt: "1843",
+              expiresAt: null,
+              credentialUrl: null,
+              confidence: 0.79
+            }
+          ],
+          rawTextPreview: "Skills\nPython, TypeScript, SQLite"
+        },
+        styleMap: {},
+        anchorMap: { regions: [] },
+        warnings: []
+      });
+
+      const canonical = profileRepository.getCanonicalProfile(profile.id);
+
+      expect(merge.updatedProfile?.email).toBe("ada@example.com");
+      expect(merge.applied).toContain("profile.email");
+      expect(merge.applied).toContain("experience:Babbage Lab:Computing Collaborator");
+      expect(merge.applied).toContain("project:Analytical Engine Notes");
+      expect(canonical?.skillGroups[0]?.skills).toEqual(["Python", "TypeScript", "SQLite"]);
+      expect(canonical?.experience[0]?.company).toBe("Babbage Lab");
+      expect(canonical?.projects[0]?.name).toBe("Analytical Engine Notes");
+      expect(canonical?.education[0]?.institution).toBe("University of London");
+      expect(canonical?.certifications[0]?.issuer).toBe("Royal Society");
+      expect(new ParsedDocumentRepository(db).list({ profileId: profile.id })).toHaveLength(1);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("stores provider metadata without exposing secret material in connections", () => {
+    const { db } = createDb();
+    try {
+      const providers = new ProviderRepository(db);
+      const secretRefId = providers.createEncryptedSecretReference({
+        provider: "openai",
+        keyName: "api_key",
+        encryptedReference: "encrypted-reference",
+        redactedHint: "sk-...1234"
+      });
+
+      const connection = providers.upsertConnection({
+        provider: "openai",
+        displayName: "OpenAI",
+        status: "CONNECTED",
+        secretRefId,
+        metadata: { defaultModel: "gpt-4.1" }
+      });
+
+      expect(connection.secretRefId).toBe(secretRefId);
+      expect(connection.metadata.defaultModel).toBe("gpt-4.1");
+      expect(JSON.stringify(connection)).not.toContain("encrypted-reference");
+      expect(providers.getFirstConnectedSecretReference()?.encryptedReference).toBe("encrypted-reference");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("appends audit logs without requiring secret payloads", () => {
+    const { db } = createDb();
+    try {
+      const auditId = new AuditRepository(db).append({
+        action: "provider.api_key_saved",
+        entityType: "provider_connection",
+        entityId: "provider-1",
+        metadata: { provider: "openai", secretRefId: "secret-1" }
+      });
+      const row = db.prepare("SELECT * FROM audit_logs WHERE id = ?").get(auditId) as { action: string; metadata_json: string };
+
+      expect(row.action).toBe("provider.api_key_saved");
+      expect(row.metadata_json).not.toContain("sk-");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("persists run control data, answers, approvals, and events", () => {
+    const { db } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Margaret Hamilton" });
+      const { queueItems, jobTargets } = new JobRepository(db).enqueueTargets({
+        profileId: profile.id,
+        items: [{ sourceKind: "TEXT", sourceValue: "Principal engineer role requiring TypeScript" }]
+      });
+      const runs = new RunRepository(db);
+      const run = runs.createApplicationRun({
+        queueItemId: queueItems[0]!.id,
+        profileId: profile.id,
+        jobTargetId: jobTargets[0]!.id,
+        autoSubmitEnabled: false
+      });
+      const step = runs.addStep({
+        applicationRunId: run.id,
+        stepOrder: 0,
+        stepType: "FIELD_REVIEW",
+        expectedState: { gate: "before_fill" }
+      });
+      const answer = runs.upsertAnswer({
+        applicationRunId: run.id,
+        stepId: step.id,
+        fieldLabel: "Work authorization",
+        fieldType: "radio",
+        proposedValue: null,
+        userValue: "Needs user confirmation",
+        source: "USER_EDIT",
+        confidence: 1,
+        status: "EDITED"
+      });
+      const review = runs.createReviewRequest({
+        applicationRunId: run.id,
+        stepId: step.id,
+        reviewType: "FINAL_SUBMIT",
+        prompt: "Approve final submission?"
+      });
+      const approval = runs.recordApprovalDecision({
+        applicationRunId: run.id,
+        approvalType: "FINAL_SUBMIT",
+        status: "APPROVED"
+      });
+      runs.addRunEvent({
+        eventType: "USER_REVIEW_REQUIRED",
+        runId: run.id,
+        stepId: step.id,
+        timestamp: new Date().toISOString(),
+        severity: "WARN",
+        message: "Final submit approval required",
+        machineState: {},
+        uiState: { modal: "approval" },
+        payload: {}
+      });
+
+      expect(answer.status).toBe("EDITED");
+      expect(answer.applyMetadata).toEqual({});
+      expect(approval.status).toBe("APPROVED");
+      expect(approval.reviewRequestId).toBe(review.id);
+      expect(runs.listReviewRequests(run.id)[0]!.status).toBe("APPROVED");
+      expect(runs.listRunEvents(run.id)).toHaveLength(1);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("approves and rejects pending answers as explicit review decisions", () => {
+    const { db } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Grace Hopper" });
+      const { queueItems, jobTargets } = new JobRepository(db).enqueueTargets({
+        profileId: profile.id,
+        items: [{ sourceKind: "URL", sourceValue: "https://example.com/job" }]
+      });
+      const runs = new RunRepository(db);
+      const run = runs.createApplicationRun({
+        queueItemId: queueItems[0]!.id,
+        profileId: profile.id,
+        jobTargetId: jobTargets[0]!.id
+      });
+      runs.upsertAnswer({
+        applicationRunId: run.id,
+        fieldLabel: "Email address",
+        fieldType: "email",
+        proposedValue: "grace@example.com",
+        source: "PROFILE",
+        confidence: 0.98,
+        status: "PROPOSED"
+      });
+      runs.upsertAnswer({
+        applicationRunId: run.id,
+        fieldLabel: "Work authorization",
+        fieldType: "radio",
+        proposedValue: "Yes",
+        userValue: "Yes",
+        source: "USER_EDIT",
+        confidence: 1,
+        status: "EDITED"
+      });
+
+      expect(runs.approvePendingAnswers(run.id)).toBe(2);
+      expect(runs.listAnswers(run.id).map((item) => item.status)).toEqual(["APPROVED", "APPROVED"]);
+      expect(runs.rejectPendingAnswers(run.id)).toBe(2);
+      expect(runs.listAnswers(run.id).map((item) => item.status)).toEqual(["REJECTED", "REJECTED"]);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("recovers stale active runs by pausing them for user inspection", () => {
+    const { db } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Dorothy Vaughan" });
+      const { queueItems, jobTargets } = new JobRepository(db).enqueueTargets({
+        profileId: profile.id,
+        items: [{ sourceKind: "URL", sourceValue: "https://example.com/job" }]
+      });
+      const run = new RunRepository(db).createApplicationRun({
+        queueItemId: queueItems[0]!.id,
+        profileId: profile.id,
+        jobTargetId: jobTargets[0]!.id
+      });
+      db.prepare("UPDATE application_runs SET status = 'RUNNING_AUTOMATION', lease_expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(run.id);
+      db.prepare(
+        "UPDATE queue_items SET status = 'RUNNING_AUTOMATION', claimed_by = 'worker-a', lease_expires_at = '2020-01-01T00:00:00.000Z', heartbeat_at = '2020-01-01T00:00:00.000Z' WHERE id = ?"
+      ).run(queueItems[0]!.id);
+
+      const recovered = new RunRepository(db).recoverStaleRuns("2026-01-01T00:00:00.000Z");
+      const updated = new RunRepository(db).getApplicationRun(run.id);
+      const queueItem = new QueueRepository(db).getById(queueItems[0]!.id);
+
+      expect(recovered).toBe(1);
+      expect(updated.status).toBe("PAUSED");
+      expect(updated.failureCode).toBe("STALE_WORKER_RECOVERED");
+      expect(queueItem.status).toBe("PAUSED");
+      expect(queueItem.claimedBy).toBeNull();
+      expect(queueItem.leaseExpiresAt).toBeNull();
+      expect(queueItem.heartbeatAt).toBeNull();
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("recovers stale review-gated runs whose workers disappeared during app restart", () => {
+    const { db } = createDb();
+    try {
+      const profile = new ProfileRepository(db).createStarterProfile({ legalName: "Annie Easley" });
+      const { queueItems, jobTargets } = new JobRepository(db).enqueueTargets({
+        profileId: profile.id,
+        items: [{ sourceKind: "URL", sourceValue: "https://example.com/job" }]
+      });
+      const run = new RunRepository(db).createApplicationRun({
+        queueItemId: queueItems[0]!.id,
+        profileId: profile.id,
+        jobTargetId: jobTargets[0]!.id
+      });
+      db.prepare("UPDATE application_runs SET status = 'READY_TO_SUBMIT', lease_expires_at = '2020-01-01T00:00:00.000Z' WHERE id = ?").run(run.id);
+      db.prepare(
+        "UPDATE queue_items SET status = 'READY_TO_SUBMIT', claimed_by = 'worker-a', lease_expires_at = '2020-01-01T00:00:00.000Z', heartbeat_at = '2020-01-01T00:00:00.000Z' WHERE id = ?"
+      ).run(queueItems[0]!.id);
+
+      const recovered = new RunRepository(db).recoverStaleRuns("2026-01-01T00:00:00.000Z");
+      const updated = new RunRepository(db).getApplicationRun(run.id);
+      const queueItem = new QueueRepository(db).getById(queueItems[0]!.id);
+
+      expect(recovered).toBe(1);
+      expect(updated.status).toBe("PAUSED");
+      expect(updated.failureCode).toBe("STALE_WORKER_RECOVERED");
+      expect(queueItem.status).toBe("PAUSED");
+      expect(queueItem.claimedBy).toBeNull();
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+});

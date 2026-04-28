@@ -1,0 +1,8 @@
+litellm>=1.67.0
+nodriver>=0.39
+pdf2docx>=0.5.8
+python-docx>=1.1.2
+TexSoup>=0.3.1
+pytest>=8.3.5
+pyinstaller>=6.13.0
+tzdata>=2025.2

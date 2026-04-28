@@ -1,0 +1,22 @@
+appId: com.applyocalypse.desktop
+productName: Applyocalypse
+directories:
+  output: release
+asar: true
+files:
+  - out/**
+  - package.json
+extraResources:
+  - from: ../../services/automation-python/dist
+    to: automation-python
+    filter:
+      - "**/*"
+win:
+  target:
+    - target: dir
+      arch:
+        - x64
+  signAndEditExecutable: false
+  verifyUpdateCodeSignature: false
+afterPack: ../../scripts/build/after-pack.cjs
+afterSign: ../../scripts/build/after-sign.cjs
