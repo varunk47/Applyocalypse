@@ -1373,6 +1373,22 @@ async def run_url_observation_flow(
         ui_state={"requires_user_review": True},
         payload={"detected_field_count": len(fields)},
     ).emit()
+    if os.getenv("APPLYO_WORKER_WAIT_FOR_REVIEW") == "1":
+        control = wait_for_review_resume(work_dir, run_id=run_id, current_step="field_review", context="initial browser field review")
+        if control.command == "CANCEL":
+            emit_worker_cancelled(run_id, control, message="Worker cancelled by local user during initial browser field review")
+            await adapter.close()
+            return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
+        WorkerEvent(
+            event_type=EventType.RESUMED,
+            run_id=run_id,
+            step_id=control.step_id,
+            severity=Severity.INFO,
+            message="Initial browser field review resolved; continuing document generation",
+            machine_state={"reason": control.reason or "local_user_resolved_field_review"},
+            ui_state={"current_step": "document_generation"},
+            payload={"detected_field_count": len(fields)},
+        ).emit()
     await adapter.close()
     return UrlObservationResult(should_stop=False, job_text_file=job_text_file, scraped_url=scraped_url)
 

@@ -117,6 +117,8 @@ const runControlMessage = (result: unknown, fallback: string): string => {
   return fallback;
 };
 
+const sleep = (milliseconds: number): Promise<void> => new Promise((resolve) => window.setTimeout(resolve, milliseconds));
+
 export const AppStateProvider = (props: ParentProps) => {
   let runEventUnsubscribe: (() => void) | null = null;
 
@@ -449,6 +451,21 @@ export const AppStateProvider = (props: ParentProps) => {
     setState("runsTotal", runs.total);
   };
 
+  const waitForRunForQueueItems = async (queueItemIds: string[]): Promise<ApplicationRun | null> => {
+    const expectedQueueItems = new Set(queueItemIds);
+    for (let attempt = 0; attempt < 16; attempt += 1) {
+      const runs = await window.applyocalypse.runs.list(50, 0);
+      setState("applicationRuns", runs.items);
+      setState("runsTotal", runs.total);
+      const run = runs.items.find((candidate) => expectedQueueItems.has(candidate.queueItemId));
+      if (run) {
+        return run;
+      }
+      await sleep(250);
+    }
+    return null;
+  };
+
   const enqueueJobText = async (value: string, options: { autoSubmitEnabled?: boolean } = {}): Promise<void> => {
     const profileId = state.profile?.id;
     if (!profileId) {
@@ -468,8 +485,14 @@ export const AppStateProvider = (props: ParentProps) => {
 
     setState("isLoading", true);
     try {
-      await window.applyocalypse.jobs.enqueue(profileId, items);
-      await Promise.all([refreshQueue(), refreshRuns()]);
+      const enqueued = await window.applyocalypse.jobs.enqueue(profileId, items);
+      await refreshQueue();
+      const firstRun = await waitForRunForQueueItems(enqueued.queueItems.map((item) => item.id));
+      if (firstRun) {
+        await loadRunDetail(firstRun.id);
+      } else {
+        await refreshRuns();
+      }
       setState("error", null);
     } catch (error) {
       setState("error", error instanceof Error ? error.message : "Unable to enqueue jobs");

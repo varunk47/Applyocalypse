@@ -24,6 +24,7 @@ from applyocalypse_automation.runner import (
     required_document_missing_payload,
     wait_for_document_approval,
     wait_for_review_resume,
+    run_url_observation_flow,
     run_browser_apply_after_review,
     select_generated_file_for_upload,
     submission_confirmation_detected,
@@ -79,6 +80,111 @@ def test_read_worker_control_accepts_safe_skip_command(tmp_path):
     assert control is not None
     assert control.command == "SKIP_STEP"
     assert control.step_id == "step-2"
+
+
+def test_url_observation_keeps_browser_open_until_field_review_resume(tmp_path, monkeypatch, capsys):
+    class FakeAdapter:
+        name = "playwright"
+
+        def __init__(self):
+            self.closed = False
+            self.close_count = 0
+
+        async def launch(self, *, run_id, user_data_dir):
+            return type("Result", (), {"ok": True, "payload": {"run_id": run_id, "user_data_dir": str(user_data_dir)}})()
+
+        async def open_url(self, url):
+            return type("Result", (), {"ok": True, "payload": {"url": url}})()
+
+        async def capture_dom_snapshot(self, output_path):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(json.dumps({"url": "https://boards.greenhouse.io/northstar-labs/jobs/1"}), encoding="utf-8")
+            return type("Result", (), {"ok": True, "payload": {"mime_type": "application/json", "metadata": {"node_count": 1}}})()
+
+        async def extract_visible_text(self):
+            text = "Apply form for a platform role requiring Python, TypeScript, SQLite, and browser automation."
+            return type(
+                "Result",
+                (),
+                {
+                    "ok": True,
+                    "payload": {
+                        "text": text,
+                        "url": "https://boards.greenhouse.io/northstar-labs/jobs/1",
+                        "title": "Platform Engineer",
+                        "text_length": len(text),
+                    },
+                },
+            )()
+
+        async def screenshot(self, output_path):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"fake-png")
+            return type("Result", (), {"ok": True, "payload": {"mime_type": "image/png", "width": 900, "height": 700}})()
+
+        async def detect_blockers(self):
+            return []
+
+        async def click_by_text(self, labels):
+            return type("Result", (), {"ok": True, "payload": {"clicked_label": labels[0] if labels else "Apply"}})()
+
+        async def detect_fields(self):
+            return [
+                BrowserField(
+                    field_id="field-email",
+                    label="Email address",
+                    field_type="email",
+                    selector="#email",
+                    required=True,
+                    confidence=0.95,
+                )
+            ]
+
+        async def close(self):
+            self.closed = True
+            self.close_count += 1
+            return type("Result", (), {"ok": True, "payload": {}})()
+
+    fake_adapter = FakeAdapter()
+    monkeypatch.setattr(runner_module, "create_browser_adapter", lambda adapter_name: fake_adapter)
+    monkeypatch.setenv("APPLYO_WORKER_WAIT_FOR_REVIEW", "1")
+
+    result_holder = {}
+
+    def run_observation() -> None:
+        result_holder["result"] = asyncio.run(
+            run_url_observation_flow(
+                run_id="run-url-observation",
+                job_url="https://boards.greenhouse.io/northstar-labs/jobs/1",
+                work_dir=tmp_path,
+                canonical_profile={"profile": {"email": "ada@example.com"}},
+                adapter_name="playwright",
+            )
+        )
+
+    observation_thread = threading.Thread(target=run_observation)
+    observation_thread.start()
+    time.sleep(0.2)
+
+    assert fake_adapter.closed is False
+    assert observation_thread.is_alive()
+
+    (tmp_path / "control.json").write_text(
+        json.dumps({"command": "RESUME", "reason": "local_user_reviewed_initial_fields"}),
+        encoding="utf-8",
+    )
+    observation_thread.join(timeout=3)
+
+    assert observation_thread.is_alive() is False
+    assert fake_adapter.closed is True
+    assert fake_adapter.close_count == 1
+    result = result_holder["result"]
+    assert result.should_stop is False
+    assert result.job_text_file is not None
+
+    event_types = [json.loads(line)["event_type"] for line in capsys.readouterr().out.splitlines()]
+    assert "PAUSED" in event_types
+    assert "RESUMED" in event_types
 
 
 def test_read_worker_control_rejects_unknown_command(tmp_path):
