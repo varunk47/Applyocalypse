@@ -45,6 +45,72 @@ export const App = () => {
         yoyo: true,
         ease: "sine.inOut"
       });
+
+      const interactiveSelector = "button:not(:disabled), .artifact-row";
+      const onPointerOver = (event: PointerEvent) => {
+        const target = (event.target as Element | null)?.closest<HTMLElement>(interactiveSelector);
+        if (!target || !rootRef?.contains(target) || target.contains(event.relatedTarget as Node | null)) {
+          return;
+        }
+        gsap.to(target, {
+          y: -1,
+          scale: 1.01,
+          duration: 0.22,
+          ease: "power3.out",
+          overwrite: "auto"
+        });
+      };
+      const onPointerOut = (event: PointerEvent) => {
+        const target = (event.target as Element | null)?.closest<HTMLElement>(interactiveSelector);
+        if (!target || !rootRef?.contains(target) || target.contains(event.relatedTarget as Node | null)) {
+          return;
+        }
+        gsap.to(target, {
+          y: 0,
+          scale: 1,
+          duration: 0.28,
+          ease: "power3.out",
+          overwrite: "auto"
+        });
+      };
+      const onPointerDown = (event: PointerEvent) => {
+        const target = (event.target as Element | null)?.closest<HTMLElement>(interactiveSelector);
+        if (!target || !rootRef?.contains(target)) {
+          return;
+        }
+        gsap.to(target, {
+          y: 1,
+          scale: 0.985,
+          duration: 0.08,
+          ease: "power2.out",
+          overwrite: "auto"
+        });
+      };
+      const onPointerUp = (event: PointerEvent) => {
+        const target = (event.target as Element | null)?.closest<HTMLElement>(interactiveSelector);
+        if (!target || !rootRef?.contains(target)) {
+          return;
+        }
+        gsap.to(target, {
+          y: -1,
+          scale: 1.01,
+          duration: 0.18,
+          ease: "power3.out",
+          overwrite: "auto"
+        });
+      };
+
+      rootRef?.addEventListener("pointerover", onPointerOver);
+      rootRef?.addEventListener("pointerout", onPointerOut);
+      rootRef?.addEventListener("pointerdown", onPointerDown);
+      rootRef?.addEventListener("pointerup", onPointerUp);
+
+      return () => {
+        rootRef?.removeEventListener("pointerover", onPointerOver);
+        rootRef?.removeEventListener("pointerout", onPointerOut);
+        rootRef?.removeEventListener("pointerdown", onPointerDown);
+        rootRef?.removeEventListener("pointerup", onPointerUp);
+      };
     }, rootRef);
 
     onCleanup(() => context.revert());

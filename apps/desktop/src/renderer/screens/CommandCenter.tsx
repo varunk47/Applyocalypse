@@ -1,5 +1,6 @@
-import { For, Show, createEffect, createMemo } from "solid-js";
+import { For, Show, createEffect, createMemo, createSignal, onCleanup } from "solid-js";
 import { createStore } from "solid-js/store";
+import { gsap } from "gsap";
 import {
   AlertTriangle,
   CheckCircle2,
@@ -26,7 +27,18 @@ import { buildEditableMasterDiagnostics } from "../features/documents/documentDi
 import { buildCoverLetterRequirementSummary } from "../features/run-console/materialRequirementsView";
 import { buildPortalWorkflowSummary, formatWorkflowKind } from "../features/run-console/portalWorkflowView";
 
-const navItems = ["Intake", "Profile", "Queue", "Run Console", "Documents", "History", "Settings"];
+const navItems = [
+  { id: "overview", label: "Overview", helper: "Control plane" },
+  { id: "intake", label: "Intake", helper: "Add jobs" },
+  { id: "profile", label: "Profile", helper: "Identity" },
+  { id: "queue", label: "Queue", helper: "Worklist" },
+  { id: "run-console", label: "Run Console", helper: "Live run" },
+  { id: "documents", label: "Documents", helper: "Sources" },
+  { id: "history", label: "History", helper: "Audit trail" },
+  { id: "settings", label: "Settings", helper: "Providers" }
+] as const;
+
+type SurfaceId = (typeof navItems)[number]["id"];
 
 const providerOptions = [
   { value: "openai", label: "OpenAI" },
@@ -148,9 +160,45 @@ export const CommandCenter = () => {
     autoSubmitEnabled: false,
     rejectReason: "Final submit rejected by local user."
   });
+  const [activeSurface, setActiveSurface] = createSignal<SurfaceId>("overview");
+  let workspaceRef: HTMLElement | undefined;
   let hydratedProfileId = "";
+  const activeNavItem = createMemo(() => navItems.find((item) => item.id === activeSurface()) ?? navItems[0]);
+  const surfaceStatus = createMemo(() => {
+    if (activeSurface() === "run-console" && state.runDetail) {
+      return state.runDetail.run.status;
+    }
+    if (state.isLoading) {
+      return "Syncing";
+    }
+    return state.error ? "Needs attention" : "Ready";
+  });
   const portalWorkflow = createMemo(() => buildPortalWorkflowSummary(state.runDetail?.events ?? state.events));
   const coverLetterRequirement = createMemo(() => buildCoverLetterRequirementSummary(state.runDetail?.events ?? state.events));
+
+  createEffect(() => {
+    activeSurface();
+    const frame = window.requestAnimationFrame(() => {
+      if (!workspaceRef) {
+        return;
+      }
+      const activePanels = workspaceRef.querySelectorAll("[data-view-panel].surface-panel-active");
+      gsap.killTweensOf(activePanels);
+      gsap.fromTo(
+        activePanels,
+        { opacity: 0, y: 14, scale: 0.992 },
+        {
+          opacity: 1,
+          y: 0,
+          scale: 1,
+          duration: 0.5,
+          stagger: 0.045,
+          ease: "power3.out"
+        }
+      );
+    });
+    onCleanup(() => window.cancelAnimationFrame(frame));
+  });
 
   createEffect(() => {
     const profile = state.profile;
@@ -318,14 +366,25 @@ export const CommandCenter = () => {
   return (
     <>
       <aside class="nav-rail" aria-label="Applyocalypse navigation">
-        <div class="brand-mark" data-gsap="nav-item">
+        <button class="brand-mark" data-gsap="nav-item" data-motion type="button" onClick={() => setActiveSurface("overview")} aria-label="Open overview">
           <span class="brand-core">A</span>
-        </div>
+        </button>
         <nav class="nav-list">
           <For each={navItems}>
             {(item) => (
-              <button class="nav-item" data-gsap="nav-item" type="button">
-                <span>{item}</span>
+              <button
+                class="nav-item"
+                classList={{ active: activeSurface() === item.id }}
+                data-gsap="nav-item"
+                data-motion
+                type="button"
+                aria-current={activeSurface() === item.id ? "page" : undefined}
+                onClick={() => setActiveSurface(item.id)}
+              >
+                <span>
+                  <strong>{item.label}</strong>
+                  <small>{item.helper}</small>
+                </span>
                 <ChevronRight size={14} aria-hidden="true" />
               </button>
             )}
@@ -333,8 +392,53 @@ export const CommandCenter = () => {
         </nav>
       </aside>
 
-      <main class="command-grid">
-        <section class="hero-panel" data-gsap="panel">
+      <main class="command-workspace" ref={workspaceRef}>
+        <header class="workspace-topbar" data-gsap="panel">
+          <div class="workspace-title">
+            <div class="eyebrow">Applyocalypse desktop</div>
+            <h1>{activeNavItem().label}</h1>
+          </div>
+          <div class="topbar-cluster">
+            <div class="run-status">
+              <span class="pulse-dot" />
+              {surfaceStatus()}
+            </div>
+            <div class="theme-switch" aria-label="Theme mode">
+              <button
+                classList={{ active: state.theme.preference === "dark" }}
+                data-motion
+                type="button"
+                onClick={() => void setThemePreference("dark")}
+              >
+                Dark
+              </button>
+              <button
+                classList={{ active: state.theme.preference === "light" }}
+                data-motion
+                type="button"
+                onClick={() => void setThemePreference("light")}
+              >
+                Light
+              </button>
+              <button
+                classList={{ active: state.theme.preference === "system" }}
+                data-motion
+                type="button"
+                onClick={() => void setThemePreference("system")}
+              >
+                System
+              </button>
+            </div>
+          </div>
+        </header>
+
+        <div class="surface-grid">
+        <section
+          class="hero-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "overview" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="eyebrow">Local-first application control</div>
           <h1>Applyocalypse</h1>
           <p>
@@ -352,7 +456,13 @@ export const CommandCenter = () => {
           </div>
         </section>
 
-        <section class="theme-panel" data-gsap="panel" aria-label="Theme mode">
+        <section
+          class="theme-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "settings" }}
+          data-gsap="panel"
+          data-view-panel
+          aria-label="Theme mode"
+        >
           <div>
             <div class="panel-kicker">Native theme</div>
             <h2>Window and renderer stay synced.</h2>
@@ -371,7 +481,12 @@ export const CommandCenter = () => {
           <p class="fine-print">Active: {state.theme.activeTheme}</p>
         </section>
 
-        <section class="run-console" data-gsap="panel">
+        <section
+          class="run-console surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "run-console" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="section-header">
             <div>
               <div class="panel-kicker">Complete Control</div>
@@ -658,7 +773,12 @@ export const CommandCenter = () => {
           </div>
         </section>
 
-        <section class="intake-panel" data-gsap="panel">
+        <section
+          class="intake-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "intake" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="section-header">
             <div>
               <div class="panel-kicker">Job intake</div>
@@ -693,7 +813,12 @@ export const CommandCenter = () => {
           <p class="fine-print">Queue items start as PENDING. Electron Main claims work with leases and heartbeats.</p>
         </section>
 
-        <section class="queue-panel" data-gsap="panel">
+        <section
+          class="queue-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "queue" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="section-header">
             <div>
               <div class="panel-kicker">Queue</div>
@@ -746,7 +871,12 @@ export const CommandCenter = () => {
           </Show>
         </section>
 
-        <section class="diagnostics-panel" data-gsap="panel">
+        <section
+          class="diagnostics-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "overview" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="section-header">
             <div>
               <div class="panel-kicker">Diagnostics</div>
@@ -767,7 +897,67 @@ export const CommandCenter = () => {
           </Show>
         </section>
 
-        <section class="provider-panel" data-gsap="panel">
+        <section
+          class="history-panel diagnostics-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "history" }}
+          data-gsap="panel"
+          data-view-panel
+        >
+          <div class="section-header">
+            <div>
+              <div class="panel-kicker">History</div>
+              <h2>Run history and audit trail</h2>
+            </div>
+            <span class="metric">{state.runsTotal}</span>
+          </div>
+          <Show
+            when={state.applicationRuns.length > 0 || state.events.length > 0}
+            fallback={
+              <div class="empty-state">
+                <FileText size={22} aria-hidden="true" />
+                <strong>No run history yet</strong>
+                <span>Completed, paused, blocked, and failed runs will appear here after the first queue item starts.</span>
+              </div>
+            }
+          >
+            <div class="queue-list">
+              <For each={state.applicationRuns}>
+                {(run) => (
+                  <button
+                    class="queue-row"
+                    classList={{ active: state.activeRunId === run.id }}
+                    type="button"
+                    onClick={() => {
+                      setActiveSurface("run-console");
+                      void loadRunDetail(run.id);
+                    }}
+                  >
+                    <span>{run.status}</span>
+                    <strong>{run.id.slice(0, 8)}</strong>
+                  </button>
+                )}
+              </For>
+            </div>
+            <div class="event-stream">
+              <div class="panel-kicker">Recent events</div>
+              <For each={state.events.slice(0, 12)}>
+                {(event) => (
+                  <div class="event-line">
+                    <span>{event.severity}</span>
+                    <p>{event.message}</p>
+                  </div>
+                )}
+              </For>
+            </div>
+          </Show>
+        </section>
+
+        <section
+          class="provider-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "settings" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="section-header">
             <div>
               <div class="panel-kicker">Provider connections</div>
@@ -865,7 +1055,12 @@ export const CommandCenter = () => {
           </div>
         </section>
 
-        <section class="uploads-panel" data-gsap="panel">
+        <section
+          class="uploads-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "documents" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <div class="section-header">
             <div>
               <div class="panel-kicker">Source materials</div>
@@ -976,7 +1171,12 @@ export const CommandCenter = () => {
           </Show>
         </section>
 
-        <section class="settings-panel" data-gsap="panel">
+        <section
+          class="settings-panel surface-panel"
+          classList={{ "surface-panel-active": activeSurface() === "profile" }}
+          data-gsap="panel"
+          data-view-panel
+        >
           <Settings size={20} aria-hidden="true" />
           <div>
             <div class="panel-kicker">Profile workspace</div>
@@ -1212,6 +1412,7 @@ export const CommandCenter = () => {
             </Show>
           </div>
         </section>
+        </div>
       </main>
     </>
   );

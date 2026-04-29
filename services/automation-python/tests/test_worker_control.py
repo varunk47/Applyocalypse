@@ -412,12 +412,12 @@ def test_final_submit_helpers_are_strictly_separated_from_portal_entry_actions()
 
 
 def test_document_review_gate_ignores_answer_approval_until_documents_are_approved(tmp_path, capsys):
+    (tmp_path / "control.json").write_text(
+        json.dumps({"command": "RESUME", "reason": "local_user_approved_answer_edit", "payload": {"approvalType": "ANSWER_EDIT"}}),
+        encoding="utf-8",
+    )
+
     def write_controls() -> None:
-        time.sleep(0.05)
-        (tmp_path / "control.json").write_text(
-            json.dumps({"command": "RESUME", "reason": "local_user_approved_answer_edit", "payload": {"approvalType": "ANSWER_EDIT"}}),
-            encoding="utf-8",
-        )
         time.sleep(0.05)
         (tmp_path / "control.json").write_text(
             json.dumps({"command": "RESUME", "reason": "local_user_approved_document_approval", "payload": {"approvalType": "DOCUMENT_APPROVAL"}}),
