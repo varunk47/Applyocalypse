@@ -160,6 +160,43 @@ def test_pipeline_parse_source_cli_extracts_sections_and_skills(tmp_path: Path) 
     assert payload["canonical"]["skillGroups"][0]["skills"] == ["Python", "TypeScript", "SQLite"]
 
 
+def test_pipeline_parse_source_cli_extracts_docx_resume(tmp_path: Path) -> None:
+    from docx import Document
+
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("Ada Lovelace")
+    document.add_paragraph("ada@example.com")
+    document.add_paragraph("Skills")
+    document.add_paragraph("Python, TypeScript, SQLite")
+    document.add_paragraph("Experience")
+    document.add_paragraph("Built deterministic document tooling", style="List Bullet")
+    document.save(source)
+
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "applyocalypse_automation.runner",
+            "pipeline",
+            "parse-source",
+            "--source",
+            str(source),
+            "--document-kind",
+            "RESUME",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(completed.stdout)
+    assert payload["parser_name"] == "applyocalypse-local-parser"
+    assert payload["canonical"]["identity"]["email"] == "ada@example.com"
+    assert payload["canonical"]["skillGroups"][0]["skills"] == ["Python", "TypeScript", "SQLite"]
+    assert payload["style_map"]["paragraphs"]
+
+
 def test_worker_run_analyzes_local_job_text(tmp_path: Path) -> None:
     job_text = tmp_path / "job.txt"
     work_dir = tmp_path / "run"

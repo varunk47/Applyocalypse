@@ -1,6 +1,4 @@
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { mkdir } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -8,7 +6,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "../..");
 const serviceDir = join(rootDir, "services", "automation-python");
 const venvDir = join(serviceDir, ".venv-build");
-const hostPython = process.env.APPLYO_PYTHON ?? (process.platform === "win32" ? "python.exe" : "python3");
 const venvPython =
   process.platform === "win32"
     ? join(venvDir, "Scripts", "python.exe")
@@ -38,23 +35,7 @@ const run = async (command, args, options = {}) => {
   });
 };
 
-const ensurePythonEnvironment = async () => {
-  if (!existsSync(venvPython)) {
-    await mkdir(venvDir, { recursive: true });
-    await run(hostPython, ["-m", "venv", venvDir], { cwd: rootDir });
-    await run(venvPython, [
-      "-m",
-      "pip",
-      "install",
-      "--disable-pip-version-check",
-      "--quiet",
-      "-r",
-      join(serviceDir, "requirements.txt")
-    ]);
-  }
-};
-
-ensurePythonEnvironment()
+run(process.execPath, ["scripts/dev/ensure-python-env.mjs"], { cwd: rootDir })
   .then(() =>
     run(venvPython, ["-m", "pytest", "tests"], {
       env: {

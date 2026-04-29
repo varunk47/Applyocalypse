@@ -25,6 +25,12 @@ export const resolveBundledPythonWorkerExecutable = (): string => {
   return join(process.resourcesPath, "automation-python", executableName);
 };
 
+export const resolveManagedDevPythonExecutable = (): string | null => {
+  const executableName = process.platform === "win32" ? "python.exe" : "python";
+  const executable = resolve(app.getAppPath(), "../..", "services", "automation-python", ".venv-build", process.platform === "win32" ? "Scripts" : "bin", executableName);
+  return existsSync(executable) ? executable : null;
+};
+
 export const resolvePythonWorkerLaunch = (): PythonWorkerLaunch => {
   const cwd = resolvePythonWorkerCwd();
 
@@ -48,8 +54,25 @@ export const resolvePythonWorkerLaunch = (): PythonWorkerLaunch => {
     };
   }
 
+  if (process.env.APPLYO_PYTHON) {
+    return {
+      executable: process.env.APPLYO_PYTHON,
+      baseArgs: ["-m", "applyocalypse_automation.runner"],
+      cwd
+    };
+  }
+
+  const managedDevPython = resolveManagedDevPythonExecutable();
+  if (managedDevPython) {
+    return {
+      executable: managedDevPython,
+      baseArgs: ["-m", "applyocalypse_automation.runner"],
+      cwd
+    };
+  }
+
   return {
-    executable: process.env.APPLYO_PYTHON ?? "python",
+    executable: "python",
     baseArgs: ["-m", "applyocalypse_automation.runner"],
     cwd
   };

@@ -9,9 +9,10 @@
     "pnpm": ">=10.0.0"
   },
   "scripts": {
-    "dev": "pnpm native:rebuild:electron && pnpm --filter @applyocalypse/desktop dev",
+    "dev": "pnpm python:ensure && pnpm native:rebuild:electron && pnpm --filter @applyocalypse/desktop dev",
     "build": "pnpm -r build",
     "python:build": "node scripts/build/build-python-worker.mjs",
+    "python:ensure": "node scripts/dev/ensure-python-env.mjs",
     "desktop:package": "pnpm python:build && pnpm --filter @applyocalypse/desktop build && node scripts/build/package-desktop.mjs",
     "typecheck": "pnpm -r --stream typecheck",
     "test": "pnpm native:rebuild:node && vitest run",
