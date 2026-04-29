@@ -11,6 +11,10 @@ extraResources:
     to: automation-python
     filter:
       - "**/*"
+  - from: ../../packages/db/migrations
+    to: migrations
+    filter:
+      - "**/*.sql"
 win:
   target:
     - target: dir

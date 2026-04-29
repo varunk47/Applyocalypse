@@ -10,16 +10,59 @@ export type MigrationResult = {
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
 
-const candidateMigrationDirs = [
-  resolve(currentDir, "../migrations"),
-  resolve(currentDir, "../../migrations"),
-  resolve(process.cwd(), "packages/db/migrations")
-];
+type ElectronProcess = NodeJS.Process & {
+  resourcesPath?: string;
+};
+
+const isMigrationDir = (path: string): boolean => {
+  try {
+    return existsSync(path) && readdirSync(path).some((file) => file.endsWith(".sql"));
+  } catch {
+    return false;
+  }
+};
+
+const collectUpwardMigrationDirs = (startDir: string): string[] => {
+  const dirs: string[] = [];
+  let cursor = resolve(startDir);
+
+  while (true) {
+    dirs.push(join(cursor, "packages", "db", "migrations"));
+    dirs.push(join(cursor, "migrations"));
+
+    const parent = dirname(cursor);
+    if (parent === cursor) {
+      break;
+    }
+    cursor = parent;
+  }
+
+  return dirs;
+};
+
+const candidateMigrationDirs = (): string[] => {
+  const resourcesPath = (process as ElectronProcess).resourcesPath;
+  const explicitDirs = [
+    resolve(currentDir, "../migrations"),
+    resolve(currentDir, "../../migrations"),
+    resolve(process.cwd(), "packages/db/migrations"),
+    resourcesPath ? resolve(resourcesPath, "migrations") : undefined
+  ].filter((path): path is string => Boolean(path));
+
+  return Array.from(
+    new Set([
+      ...explicitDirs,
+      ...collectUpwardMigrationDirs(currentDir),
+      ...collectUpwardMigrationDirs(process.cwd())
+    ])
+  );
+};
 
 export const resolveMigrationDir = (): string => {
-  const migrationDir = candidateMigrationDirs.find((path) => existsSync(path));
+  const checkedDirs = candidateMigrationDirs();
+  const migrationDir = checkedDirs.find((path) => isMigrationDir(path));
   if (!migrationDir) {
-    throw new Error(`No migration directory found. Checked: ${candidateMigrationDirs.join(", ")}`);
+    throw new Error(`No migration directory found. Checked: ${checkedDirs.join(", ")}`);
   }
   return migrationDir;
 };

@@ -14,4 +14,10 @@ exports.default = async function afterPack(context) {
   if (!existsSync(manifestPath)) {
     throw new Error(`Applyocalypse worker manifest is missing from packaged resources: ${manifestPath}`);
   }
+
+  const migrationsDir = join(context.appOutDir, "resources", "migrations");
+  const initialMigrationPath = join(migrationsDir, "0001_initial.sql");
+  if (!existsSync(initialMigrationPath)) {
+    throw new Error(`Applyocalypse SQLite migrations are missing from packaged resources: ${migrationsDir}`);
+  }
 };
