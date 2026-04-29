@@ -34,6 +34,7 @@
     "zod": "^3.24.4"
   },
   "devDependencies": {
+    "@electron/rebuild": "^4.0.4",
     "@types/better-sqlite3": "^7.6.13",
     "electron": "^39.8.9",
     "electron-builder": "^26.0.12",
