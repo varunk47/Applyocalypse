@@ -34,6 +34,8 @@ type ProfileRow = {
   id: string;
   display_name: string;
   legal_name: string;
+  first_name: string | null;
+  last_name: string | null;
   email: string | null;
   application_email: string | null;
   application_password_secret_ref_id: string | null;
@@ -41,6 +43,9 @@ type ProfileRow = {
   otp_handling_enabled: number;
   phone: string | null;
   location: string | null;
+  address_json: string | null;
+  linkedin_url: string | null;
+  github_url: string | null;
   links_json: string;
   job_defaults_json: string;
   work_authorization_json: string;
@@ -54,6 +59,8 @@ const mapProfileRow = (row: ProfileRow): Profile =>
     id: row.id,
     displayName: row.display_name,
     legalName: row.legal_name,
+    firstName: row.first_name ?? null,
+    lastName: row.last_name ?? null,
     email: row.email,
     applicationEmail: row.application_email,
     applicationPasswordConfigured: Boolean(row.application_password_secret_ref_id),
@@ -61,6 +68,9 @@ const mapProfileRow = (row: ProfileRow): Profile =>
     otpHandlingEnabled: row.otp_handling_enabled === 1,
     phone: row.phone,
     location: row.location,
+    address: parseJsonColumn(row.address_json ?? "{}", {}),
+    linkedinUrl: row.linkedin_url ?? null,
+    githubUrl: row.github_url ?? null,
     links: parseJsonColumn(row.links_json, []),
     jobDefaults: parseJsonColumn(row.job_defaults_json, {}),
     workAuthorization: parseJsonColumn(row.work_authorization_json, {}),
@@ -118,13 +128,15 @@ export class ProfileRepository {
       .prepare(
         `
         INSERT INTO profiles (
-          id, display_name, legal_name, email, phone, location, links_json,
+          id, display_name, legal_name, first_name, last_name, email, phone, location,
+          address_json, linkedin_url, github_url, links_json,
           application_email, otp_provider_connection_id, otp_handling_enabled,
           job_defaults_json, work_authorization_json, equal_employment_defaults_json,
           created_at, updated_at
         )
         VALUES (
-          @id, @displayName, @legalName, @email, @phone, @location, @linksJson,
+          @id, @displayName, @legalName, @firstName, @lastName, @email, @phone, @location,
+          @addressJson, @linkedinUrl, @githubUrl, @linksJson,
           @applicationEmail, @otpProviderConnectionId, @otpHandlingEnabled,
           @jobDefaultsJson, @workAuthorizationJson, @equalEmploymentDefaultsJson,
           @createdAt, @updatedAt
@@ -132,12 +144,17 @@ export class ProfileRepository {
         ON CONFLICT(id) DO UPDATE SET
           display_name = excluded.display_name,
           legal_name = excluded.legal_name,
+          first_name = excluded.first_name,
+          last_name = excluded.last_name,
           email = excluded.email,
           application_email = excluded.application_email,
           otp_provider_connection_id = excluded.otp_provider_connection_id,
           otp_handling_enabled = excluded.otp_handling_enabled,
           phone = excluded.phone,
           location = excluded.location,
+          address_json = excluded.address_json,
+          linkedin_url = excluded.linkedin_url,
+          github_url = excluded.github_url,
           links_json = excluded.links_json,
           job_defaults_json = excluded.job_defaults_json,
           work_authorization_json = excluded.work_authorization_json,
@@ -149,12 +166,17 @@ export class ProfileRepository {
         id: parsed.id,
         displayName: parsed.displayName,
         legalName: parsed.legalName,
+        firstName: parsed.firstName ?? null,
+        lastName: parsed.lastName ?? null,
         email: parsed.email,
         applicationEmail: parsed.applicationEmail,
         otpProviderConnectionId: parsed.otpProviderConnectionId,
         otpHandlingEnabled: parsed.otpHandlingEnabled ? 1 : 0,
         phone: parsed.phone,
         location: parsed.location,
+        addressJson: stringifyJsonColumn(parsed.address),
+        linkedinUrl: parsed.linkedinUrl ?? null,
+        githubUrl: parsed.githubUrl ?? null,
         linksJson: stringifyJsonColumn(parsed.links),
         jobDefaultsJson: stringifyJsonColumn(parsed.jobDefaults),
         workAuthorizationJson: stringifyJsonColumn(parsed.workAuthorization),
@@ -206,7 +228,7 @@ export class ProfileRepository {
   replaceStructuredSections(
     profileId: string,
     payload: {
-      education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>;
+      education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; gpa?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>;
       experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>;
       projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>;
       skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>;
@@ -219,9 +241,9 @@ export class ProfileRepository {
       this.db.prepare("UPDATE project_entries SET deleted_at = ? WHERE profile_id = ? AND deleted_at IS NULL").run(now, profileId);
       this.db.prepare("UPDATE skill_groups SET deleted_at = ? WHERE profile_id = ? AND deleted_at IS NULL").run(now, profileId);
 
-      const insEdu = this.db.prepare("INSERT INTO education_entries (id, profile_id, institution, degree, field, start_date, end_date, details_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 1.0, ?, ?)");
+      const insEdu = this.db.prepare("INSERT INTO education_entries (id, profile_id, institution, degree, field, gpa, start_date, end_date, details_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 1.0, ?, ?)");
       for (const e of payload.education) {
-        insEdu.run(e.id ?? randomUUID(), profileId, e.institution, e.degree ?? null, e.field ?? null, e.startDate ?? null, e.endDate ?? null, now, now);
+        insEdu.run(e.id ?? randomUUID(), profileId, e.institution, e.degree ?? null, e.field ?? null, e.gpa ?? null, e.startDate ?? null, e.endDate ?? null, now, now);
       }
 
       const insExp = this.db.prepare("INSERT INTO experience_entries (id, profile_id, company, title, location, start_date, end_date, bullets_json, tools_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 1.0, ?, ?)");
@@ -302,6 +324,7 @@ export class ProfileRepository {
       institution: string;
       degree: string | null;
       field: string | null;
+      gpa: string | null;
       start_date: string | null;
       end_date: string | null;
       details_json: string;
@@ -313,6 +336,7 @@ export class ProfileRepository {
         institution: row.institution,
         degree: row.degree,
         field: row.field,
+        gpa: row.gpa ?? null,
         startDate: row.start_date,
         endDate: row.end_date,
         details: parseJsonColumn(row.details_json, []),

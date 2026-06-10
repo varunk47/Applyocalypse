@@ -580,6 +580,36 @@ describe("db repositories", () => {
     }
   });
 
+  it("persists gpa on education entries through replaceStructuredSections", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "Test GPA" });
+
+      profileRepository.replaceStructuredSections(profile.id, {
+        education: [{ institution: "Stanford", degree: "BS", field: "CS", gpa: "3.9/4.0", startDate: "2018-09", endDate: "2022-05" }],
+        experience: [],
+        projects: [],
+        skillGroups: []
+      });
+
+      const canonical = profileRepository.getCanonicalProfile(profile.id);
+      expect(canonical!.education[0]?.gpa).toBe("3.9/4.0");
+
+      profileRepository.replaceStructuredSections(profile.id, {
+        education: [{ institution: "Stanford", degree: "BS", field: "CS", startDate: "2018-09", endDate: "2022-05" }],
+        experience: [],
+        projects: [],
+        skillGroups: []
+      });
+
+      const updated = profileRepository.getCanonicalProfile(profile.id);
+      expect(updated!.education[0]?.gpa).toBeNull();
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("persists workAuthorization through createStarter + upsert", () => {
     const { db } = createDb();
     try {

@@ -29,7 +29,7 @@ import {
 } from "@applyocalypse/shared-schemas";
 
 const StructuredEntryIdField = { id: IdSchema.nullable().optional() };
-const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional() });
+const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), gpa: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional() });
 const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]) });
 const StructuredProjectInputSchema = z.object({ ...StructuredEntryIdField, name: z.string().min(1), summary: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]) });
 const StructuredSkillGroupInputSchema = z.object({ ...StructuredEntryIdField, label: z.string().min(1), skills: z.array(z.string()).default([]) });

@@ -1,6 +1,7 @@
 import type { z } from "zod";
 import type {
   ActiveThemeSchema,
+  AddressSchema,
   ApplicationAnswerSchema,
   ApplicationRunSchema,
   ApplicationStepSchema,
@@ -29,6 +30,8 @@ import type {
   UploadedFileSchema
 } from "@applyocalypse/shared-schemas";
 
+export * from "./dateUtils";
+
 export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
 export type ActiveTheme = z.infer<typeof ActiveThemeSchema>;
 export type ThemeState = z.infer<typeof ThemeStateSchema>;
@@ -56,3 +59,4 @@ export type RunEvent = z.infer<typeof RunEventSchema>;
 export type PythonWorkerEvent = z.infer<typeof PythonWorkerEventSchema>;
 export type SafeRendererRunEvent = z.infer<typeof SafeRendererRunEventSchema>;
 export type ProjectEntry = z.infer<typeof ProjectEntrySchema>;
+export type Address = z.infer<typeof AddressSchema>;

@@ -32,7 +32,7 @@ type ProfileStoreValue = {
   }) => Promise<void>
   saveStructuredSections: (input: {
     profileId: string
-    education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>
+    education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; gpa?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>
     experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>
     projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>
     skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>
@@ -138,7 +138,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
 
   const saveStructuredSections = async (input: {
     profileId: string
-    education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>
+    education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; gpa?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>
     experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>
     projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>
     skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>

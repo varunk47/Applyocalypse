@@ -40,10 +40,22 @@ export const ProviderConnectionSchema = z.object({
   updatedAt: IsoDateTimeSchema
 });
 
+export const AddressSchema = z.object({
+  country: z.string().nullable().default(null),
+  city: z.string().nullable().default(null),
+  state: z.string().nullable().default(null),
+  addressLine1: z.string().nullable().default(null),
+  addressLine2: z.string().nullable().default(null),
+  postalCode: z.string().nullable().default(null),
+  county: z.string().nullable().default(null)
+});
+
 export const ProfileSchema = z.object({
   id: IdSchema,
   displayName: z.string().min(1),
   legalName: z.string().min(1),
+  firstName: z.string().nullable().default(null),
+  lastName: z.string().nullable().default(null),
   email: z.string().email().nullable(),
   applicationEmail: z.string().email().nullable().default(null),
   applicationPasswordConfigured: z.boolean().default(false),
@@ -51,6 +63,9 @@ export const ProfileSchema = z.object({
   otpHandlingEnabled: z.boolean().default(false),
   phone: z.string().nullable(),
   location: z.string().nullable(),
+  address: AddressSchema.default({}),
+  linkedinUrl: z.string().url().nullable().default(null),
+  githubUrl: z.string().url().nullable().default(null),
   links: z.array(z.object({ label: z.string(), url: z.string().url() })).default([]),
   jobDefaults: JsonObjectSchema.default({}),
   workAuthorization: JsonObjectSchema.default({}),
@@ -65,6 +80,7 @@ export const EducationEntrySchema = z.object({
   institution: z.string().min(1),
   degree: z.string().nullable(),
   field: z.string().nullable(),
+  gpa: z.string().nullable().default(null),
   startDate: z.string().nullable(),
   endDate: z.string().nullable(),
   details: z.array(z.string()).default([]),
