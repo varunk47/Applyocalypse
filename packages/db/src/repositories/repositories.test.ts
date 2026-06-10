@@ -541,4 +541,21 @@ describe("db repositories", () => {
       closeApplyocalypseDatabase(db);
     }
   });
+
+  it("persists workAuthorization through createStarter + upsert", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "Test User" });
+      const workAuth = { summary: "F-1 OPT, no sponsorship needed", sponsorshipRequired: false };
+      const updated = profileRepository.upsert({ ...profile, workAuthorization: workAuth });
+      const canonical = profileRepository.getCanonicalProfile(updated.id);
+
+      expect(canonical).not.toBeNull();
+      expect((canonical!.profile.workAuthorization as typeof workAuth).summary).toBe(workAuth.summary);
+      expect((canonical!.profile.workAuthorization as typeof workAuth).sponsorshipRequired).toBe(false);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
 });

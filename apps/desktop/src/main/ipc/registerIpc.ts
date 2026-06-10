@@ -274,11 +274,14 @@ export const registerIpcHandlers = ({
     return resolvedProfileId ? profileRepository.getCanonicalProfile(resolvedProfileId) : null;
   });
   handleContract(IpcContracts.profileCreateStarter, (input) => {
-    const profile = profileRepository.createStarterProfile({
+    let profile = profileRepository.createStarterProfile({
       legalName: input.legalName,
       email: input.email ?? null,
       location: input.location ?? null
     });
+    if (input.workAuthorization) {
+      profile = profileRepository.upsert({ ...profile, workAuthorization: input.workAuthorization });
+    }
     return configureApplicationCredentials({
       profileId: profile.id,
       applicationEmail: input.applicationEmail,

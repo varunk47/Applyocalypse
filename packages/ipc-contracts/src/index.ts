@@ -167,7 +167,12 @@ export const IpcContracts = {
       location: z.string().trim().min(1).nullable().optional(),
       applicationEmail: z.string().email(),
       applicationPassword: ApplicationPasswordSchema,
-      gmailOtpEnabled: z.boolean().default(false)
+      gmailOtpEnabled: z.boolean().default(false),
+      workAuthorization: z.object({
+        summary: z.string(),
+        sponsorshipRequired: z.boolean(),
+        status: z.string().optional()
+      }).optional()
     }).strict(),
     ProfileSchema
   ),
