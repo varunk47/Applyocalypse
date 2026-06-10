@@ -5,6 +5,7 @@ from pathlib import Path
 from docx import Document
 
 from applyocalypse_automation.documents.anchor_repair import repair_editable_master_anchors
+from applyocalypse_automation.documents.artifact_generation import find_anchored_resume_candidate
 from applyocalypse_automation.documents.docx_mutation import DocxParagraphMutation, extract_docx_text, mutate_docx_paragraphs, mutate_docx_placeholders
 from applyocalypse_automation.documents.file_generation import (
     GeneratedNameInput,
@@ -307,3 +308,85 @@ def test_extract_docx_text_includes_paragraphs_and_table_cells(tmp_path: Path) -
     assert "Python" in text
     assert "TypeScript" in text
     assert b"PK\x03\x04" not in text.encode("utf-8")
+
+
+def test_find_anchored_resume_candidate_returns_anchored_file(tmp_path: Path) -> None:
+    master_path = tmp_path / "MyResume.docx"
+    anchored_path = tmp_path / "MyResume Applyocalypse Anchored.docx"
+
+    profile = {
+        "uploadedFiles": [
+            {
+                "id": "master-1",
+                "fileKind": "RESUME",
+                "sourceFormat": "DOCX",
+                "status": "VERIFIED_EDITABLE_MASTER",
+                "originalName": "MyResume.docx",
+                "localPath": str(master_path),
+            },
+            {
+                "id": "anchored-1",
+                "fileKind": "RESUME",
+                "sourceFormat": "DOCX",
+                "status": "UPLOADED",
+                "originalName": "MyResume Applyocalypse Anchored.docx",
+                "localPath": str(anchored_path),
+            },
+        ]
+    }
+
+    result = find_anchored_resume_candidate(profile, master_path)
+
+    assert result is not None
+    assert result["id"] == "anchored-1"
+
+
+def test_find_anchored_resume_candidate_ignores_rejected(tmp_path: Path) -> None:
+    master_path = tmp_path / "MyResume.docx"
+    anchored_path = tmp_path / "MyResume Applyocalypse Anchored.docx"
+
+    profile = {
+        "uploadedFiles": [
+            {
+                "id": "master-1",
+                "fileKind": "RESUME",
+                "sourceFormat": "DOCX",
+                "status": "VERIFIED_EDITABLE_MASTER",
+                "originalName": "MyResume.docx",
+                "localPath": str(master_path),
+            },
+            {
+                "id": "anchored-rejected",
+                "fileKind": "RESUME",
+                "sourceFormat": "DOCX",
+                "status": "REJECTED",
+                "originalName": "MyResume Applyocalypse Anchored.docx",
+                "localPath": str(anchored_path),
+            },
+        ]
+    }
+
+    result = find_anchored_resume_candidate(profile, master_path)
+
+    assert result is None
+
+
+def test_find_anchored_resume_candidate_returns_none_when_no_match(tmp_path: Path) -> None:
+    master_path = tmp_path / "MyResume.docx"
+
+    profile = {
+        "uploadedFiles": [
+            {
+                "id": "master-1",
+                "fileKind": "RESUME",
+                "sourceFormat": "DOCX",
+                "status": "VERIFIED_EDITABLE_MASTER",
+                "originalName": "MyResume.docx",
+                "localPath": str(master_path),
+            },
+        ]
+    }
+
+    result = find_anchored_resume_candidate(profile, master_path)
+
+    assert result is None

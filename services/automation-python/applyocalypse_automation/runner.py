@@ -23,6 +23,7 @@ from .documents.artifact_generation import (
     build_cover_letter_text,
     build_placeholder_replacements,
     build_resume_markdown,
+    find_anchored_resume_candidate,
     find_verified_resume_master,
     metadata_for_existing_file,
     split_legal_name,
@@ -2137,7 +2138,7 @@ def main() -> None:
                 _, replaced_placeholders = mutate_docx_placeholders(master_path, output_path, replacements)
 
                 # Deep-tailor experience and project bullets via LLM if available
-                llm_model = os.getenv("LITELLM_MODEL")
+                llm_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
                 if llm_model and job_text:
                     try:
                         resume_text_for_tailor = extract_docx_text(output_path) if output_path.exists() else ""
@@ -2162,6 +2163,14 @@ def main() -> None:
                         if bullet_map:
                             _, bullet_replaced = mutate_docx_bullet_anchors(output_path, output_path, bullet_map)
                             replaced_placeholders = list(set(replaced_placeholders) | set(bullet_replaced))
+
+                # Fall back to the auto-repaired anchored candidate if the master had no placeholders
+                if not replaced_placeholders:
+                    anchored = find_anchored_resume_candidate(canonical_profile, master_path)
+                    if anchored:
+                        _, replaced_placeholders = mutate_docx_placeholders(
+                            Path(str(anchored["localPath"])), output_path, replacements
+                        )
 
                 if replaced_placeholders:
                     artifact = metadata_for_existing_file(path=output_path, file_kind="RESUME", format_name="DOCX", review_only=False)

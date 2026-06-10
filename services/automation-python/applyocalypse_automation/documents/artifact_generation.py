@@ -110,6 +110,35 @@ def _planned_bullets(entry: dict[str, Any], kind: str, tailoring_plan: dict[str,
     return original[:limit]
 
 
+def find_anchored_resume_candidate(canonical_profile: dict[str, Any], master_path: Path) -> dict[str, Any] | None:
+    """Return an auto-repaired anchored RESUME file derived from master_path, if one exists.
+
+    The anchor-repair pipeline names repaired files with 'Anchored' in originalName.
+    """
+    uploaded_files = canonical_profile.get("uploadedFiles")
+    if not isinstance(uploaded_files, list):
+        return None
+    master_local = str(master_path)
+    master_id: str | None = None
+    for f in uploaded_files:
+        if isinstance(f, dict) and f.get("localPath") == master_local:
+            master_id = f.get("id")
+            break
+    for f in uploaded_files:
+        if not isinstance(f, dict):
+            continue
+        if (
+            f.get("fileKind") == "RESUME"
+            and f.get("sourceFormat") == "DOCX"
+            and f.get("status") not in {"REJECTED", "DELETED"}
+            and f.get("id") != master_id
+            and "Anchored" in str(f.get("originalName", ""))
+            and f.get("localPath")
+        ):
+            return f
+    return None
+
+
 def find_verified_resume_master(canonical_profile: dict[str, Any]) -> dict[str, Any] | None:
     uploaded_files = canonical_profile.get("uploadedFiles")
     if not isinstance(uploaded_files, list):

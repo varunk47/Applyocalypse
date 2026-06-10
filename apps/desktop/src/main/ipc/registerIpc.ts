@@ -230,7 +230,7 @@ export const registerIpcHandlers = ({
   handleContract(IpcContracts.documentsIngestResumeSource, ({ profileId, localPath }) =>
     documentIngestionService.ingestResumeSource({ profileId, localPath: requirePickedPath(localPath) })
   );
-  handleContract(IpcContracts.documentsConfirmEditableMaster, ({ uploadedFileId }) => {
+  handleContract(IpcContracts.documentsConfirmEditableMaster, async ({ uploadedFileId }) => {
     const uploadedFile = uploadRepository.getById(uploadedFileId);
     if (uploadedFile.fileKind !== "RESUME" || uploadedFile.sourceFormat !== "DOCX") {
       throw new Error("Only DOCX resume candidates can be confirmed as editable masters");
@@ -245,6 +245,11 @@ export const registerIpcHandlers = ({
       entityId: confirmed.id,
       metadata: { sourceFormat: confirmed.sourceFormat }
     });
+    try {
+      await documentIngestionService.repairEditableMasterAnchors({ uploadedFileId: confirmed.id });
+    } catch {
+      // Non-fatal: repair may fail if the file is already anchored or cannot be processed
+    }
     return confirmed;
   });
   handleContract(IpcContracts.documentsRepairEditableMasterAnchors, async ({ uploadedFileId }) => {

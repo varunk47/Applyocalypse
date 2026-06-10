@@ -1,4 +1,4 @@
-import { Show, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Show, createSignal, onCleanup, onMount } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import { createStore } from 'solid-js/store'
 import { ChevronRight, ShieldCheck, Upload } from 'lucide-solid'
@@ -6,6 +6,7 @@ import { useProfileStore } from '../contexts/ProfileStore'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import { gsap } from '../animations/gsap'
 import { enterStepFromRight, exitStepToLeft } from '../animations/screenTransition'
+import { PROVIDER_OPTIONS } from '../utils/providerOptions'
 
 type OnboardingStep = 'welcome' | 'upload' | 'parse-review' | 'work-auth' | 'credentials' | 'provider' | 'done'
 
@@ -278,12 +279,14 @@ export default function OnboardingScreen() {
             </p>
             <label>
               <span>Provider</span>
-              <select value={form.provider} onChange={(e) => setForm('provider', e.currentTarget.value)}>
-                <option value="openai">OpenAI</option>
-                <option value="anthropic">Anthropic</option>
-                <option value="gemini">Gemini</option>
-                <option value="groq">Groq</option>
-                <option value="openrouter">OpenRouter</option>
+              <select value={form.provider} onChange={(e) => {
+                const p = e.currentTarget.value
+                setForm('provider', p)
+                setForm('providerDisplayName', PROVIDER_OPTIONS.find((o) => o.value === p)?.label ?? p)
+              }}>
+                <For each={PROVIDER_OPTIONS}>
+                  {(p) => <option value={p.value}>{p.label}</option>}
+                </For>
               </select>
             </label>
             <label>
