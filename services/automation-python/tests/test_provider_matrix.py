@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from applyocalypse_automation.llm.provider_matrix import PROVIDER_MATRIX, provider_entry, provider_readiness, run_provider_matrix
 
 
@@ -10,6 +12,7 @@ def test_provider_matrix_covers_required_byok_providers() -> None:
         "openai",
         "anthropic",
         "gemini",
+        "zai",
         "xai",
         "groq",
         "nvidia_nim",
@@ -34,3 +37,58 @@ def test_provider_matrix_offline_mode_is_machine_readable() -> None:
     assert payload["live"] is False
     assert len(payload["providers"]) == len(PROVIDER_MATRIX)
     assert all(provider["status"] == "BLOCKED" for provider in payload["providers"])
+
+
+def test_jd_analysis_uses_fast_model_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    """LITELLM_MODEL_FAST takes precedence over LITELLM_MODEL for JD analysis."""
+    import os
+
+    monkeypatch.setenv("LITELLM_MODEL", "openai/default-model")
+    monkeypatch.setenv("LITELLM_MODEL_FAST", "groq/openai/gpt-oss-120b")
+
+    # Import after monkeypatching so os.getenv reads the patched env
+    import importlib
+    import applyocalypse_automation.jd_analysis as jd_mod
+    importlib.reload(jd_mod)
+
+    model_used: list[str] = []
+
+    class CaptureLlm:
+        def __init__(self, *, model: str) -> None:
+            model_used.append(model)
+
+        async def complete_json(self, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("short-circuit")
+
+    original = jd_mod.LiteLlmClient
+    monkeypatch.setattr(jd_mod, "LiteLlmClient", CaptureLlm)
+    asyncio.run(jd_mod.analyze_with_optional_llm("Python developer role"))
+    monkeypatch.setattr(jd_mod, "LiteLlmClient", original)
+
+    assert model_used and model_used[0] == "groq/openai/gpt-oss-120b"
+
+
+def test_jd_analysis_falls_back_to_litellm_model_when_fast_unset(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Falls back to LITELLM_MODEL when LITELLM_MODEL_FAST is not set."""
+    import os
+
+    monkeypatch.delenv("LITELLM_MODEL_FAST", raising=False)
+    monkeypatch.setenv("LITELLM_MODEL", "openai/gpt-5.5")
+
+    import importlib
+    import applyocalypse_automation.jd_analysis as jd_mod
+    importlib.reload(jd_mod)
+
+    model_used: list[str] = []
+
+    class CaptureLlm:
+        def __init__(self, *, model: str) -> None:
+            model_used.append(model)
+
+        async def complete_json(self, **_kwargs: object) -> dict[str, object]:
+            raise RuntimeError("short-circuit")
+
+    monkeypatch.setattr(jd_mod, "LiteLlmClient", CaptureLlm)
+    asyncio.run(jd_mod.analyze_with_optional_llm("Python developer role"))
+
+    assert model_used and model_used[0] == "openai/gpt-5.5"

@@ -7,6 +7,7 @@ export const LlmProviderTypeSchema = z.enum([
   "openai",
   "anthropic",
   "gemini",
+  "zai",
   "xai",
   "groq",
   "nvidia_nim",

@@ -4,6 +4,7 @@ const PROVIDER_API_KEY_ENV: Record<LlmProviderType, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   gemini: "GEMINI_API_KEY",
+  zai: "ZAI_API_KEY",
   xai: "XAI_API_KEY",
   groq: "GROQ_API_KEY",
   nvidia_nim: "NVIDIA_NIM_API_KEY",
@@ -31,6 +32,16 @@ export const buildProviderRuntimeEnv = (input: {
   const defaultModel = metadataString(input.metadata, "defaultModel");
   if (defaultModel) {
     env.LITELLM_MODEL = defaultModel;
+  }
+
+  const strongModel = metadataString(input.metadata, "strongModel");
+  if (strongModel) {
+    env.LITELLM_MODEL_STRONG = strongModel;
+  }
+
+  const fastModel = metadataString(input.metadata, "fastModel");
+  if (fastModel) {
+    env.LITELLM_MODEL_FAST = fastModel;
   }
 
   const apiBase = metadataString(input.metadata, "apiBase");

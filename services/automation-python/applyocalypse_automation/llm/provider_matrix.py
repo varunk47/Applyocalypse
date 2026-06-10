@@ -24,15 +24,16 @@ class ProviderMatrixEntry:
 
 
 PROVIDER_MATRIX: tuple[ProviderMatrixEntry, ...] = (
-    ProviderMatrixEntry("openai", "OPENAI_API_KEY", "openai/gpt-4.1-mini"),
-    ProviderMatrixEntry("anthropic", "ANTHROPIC_API_KEY", "anthropic/claude-3-5-haiku-latest"),
-    ProviderMatrixEntry("gemini", "GEMINI_API_KEY", "gemini/gemini-1.5-flash"),
-    ProviderMatrixEntry("xai", "XAI_API_KEY", "xai/grok-2-latest"),
-    ProviderMatrixEntry("groq", "GROQ_API_KEY", "groq/llama-3.1-8b-instant"),
-    ProviderMatrixEntry("nvidia_nim", "NVIDIA_NIM_API_KEY", "nvidia_nim/meta/llama-3.1-8b-instruct"),
-    ProviderMatrixEntry("openrouter", "OPENROUTER_API_KEY", "openrouter/openai/gpt-4o-mini"),
-    ProviderMatrixEntry("azure_openai", "AZURE_API_KEY", "azure/gpt-4.1-mini", ("AZURE_API_VERSION", "LITELLM_API_BASE")),
-    ProviderMatrixEntry("aws_bedrock", "AWS_SECRET_ACCESS_KEY", "bedrock/anthropic.claude-3-haiku-20240307-v1:0", ("AWS_ACCESS_KEY_ID", "AWS_REGION")),
+    ProviderMatrixEntry("openai",      "OPENAI_API_KEY",     "openai/gpt-5.5"),
+    ProviderMatrixEntry("anthropic",   "ANTHROPIC_API_KEY",  "anthropic/claude-sonnet-4-6"),
+    ProviderMatrixEntry("gemini",      "GEMINI_API_KEY",     "gemini/gemini-3.1-pro-preview"),
+    ProviderMatrixEntry("zai",         "ZAI_API_KEY",        "zai/glm-5"),
+    ProviderMatrixEntry("xai",         "XAI_API_KEY",        "xai/grok-4.3"),
+    ProviderMatrixEntry("groq",        "GROQ_API_KEY",       "groq/openai/gpt-oss-120b"),
+    ProviderMatrixEntry("nvidia_nim",  "NVIDIA_NIM_API_KEY", "nvidia_nim/meta/llama-3.1-8b-instruct"),
+    ProviderMatrixEntry("openrouter",  "OPENROUTER_API_KEY", "openrouter/openai/gpt-5.4-mini"),
+    ProviderMatrixEntry("azure_openai", "AZURE_API_KEY",     "azure/gpt-5.5",  ("AZURE_API_VERSION", "LITELLM_API_BASE")),
+    ProviderMatrixEntry("aws_bedrock", "AWS_SECRET_ACCESS_KEY", "bedrock/anthropic.claude-sonnet-4-6", ("AWS_ACCESS_KEY_ID", "AWS_REGION")),
 )
 
 

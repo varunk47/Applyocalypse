@@ -7,6 +7,7 @@ describe("provider runtime env", () => {
       ["openai", "OPENAI_API_KEY"],
       ["anthropic", "ANTHROPIC_API_KEY"],
       ["gemini", "GEMINI_API_KEY"],
+      ["zai", "ZAI_API_KEY"],
       ["xai", "XAI_API_KEY"],
       ["groq", "GROQ_API_KEY"],
       ["nvidia_nim", "NVIDIA_NIM_API_KEY"],
@@ -38,6 +39,45 @@ describe("provider runtime env", () => {
     expect(env.OPENAI_API_KEY).toBe("sk-test");
     expect(env.LITELLM_PROVIDER).toBe("openai");
     expect(env.LITELLM_MODEL).toBe("gpt-4.1");
+  });
+
+  it("sets LITELLM_MODEL_STRONG and LITELLM_MODEL_FAST when strongModel and fastModel are in metadata", () => {
+    const env = buildProviderRuntimeEnv({
+      provider: "openai",
+      apiKey: "sk-test",
+      metadata: {
+        defaultModel: "openai/gpt-5.5",
+        strongModel: "openai/gpt-5.5",
+        fastModel: "groq/openai/gpt-oss-120b"
+      }
+    });
+
+    expect(env.LITELLM_MODEL).toBe("openai/gpt-5.5");
+    expect(env.LITELLM_MODEL_STRONG).toBe("openai/gpt-5.5");
+    expect(env.LITELLM_MODEL_FAST).toBe("groq/openai/gpt-oss-120b");
+  });
+
+  it("omits LITELLM_MODEL_STRONG and LITELLM_MODEL_FAST when not in metadata", () => {
+    const env = buildProviderRuntimeEnv({
+      provider: "openai",
+      apiKey: "sk-test",
+      metadata: { defaultModel: "openai/gpt-5.5" }
+    });
+
+    expect(env.LITELLM_MODEL_STRONG).toBeUndefined();
+    expect(env.LITELLM_MODEL_FAST).toBeUndefined();
+  });
+
+  it("maps ZAI provider key to ZAI_API_KEY", () => {
+    const env = buildProviderRuntimeEnv({
+      provider: "zai",
+      apiKey: "zai-secret",
+      metadata: { defaultModel: "zai/glm-5" }
+    });
+
+    expect(env.ZAI_API_KEY).toBe("zai-secret");
+    expect(env.LITELLM_PROVIDER).toBe("zai");
+    expect(env.LITELLM_MODEL).toBe("zai/glm-5");
   });
 
   it("maps Azure OpenAI provider metadata without exposing it to the renderer at runtime", () => {
