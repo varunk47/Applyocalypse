@@ -542,6 +542,44 @@ describe("db repositories", () => {
     }
   });
 
+  it("replaceStructuredSections round-trips education, experience, projects, and skillGroups", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "Round Trip" });
+
+      profileRepository.replaceStructuredSections(profile.id, {
+        education: [{ institution: "MIT", degree: "BS", field: "CS", startDate: "2018-09", endDate: "2022-05" }],
+        experience: [{ company: "Acme", title: "Engineer", bullets: ["Built things"] }],
+        projects: [{ name: "MyProject", summary: "A project", bullets: ["Feature A"], tools: ["TypeScript"] }],
+        skillGroups: [{ label: "Languages", skills: ["TypeScript", "Python"] }]
+      });
+
+      const canonical = profileRepository.getCanonicalProfile(profile.id);
+      expect(canonical).not.toBeNull();
+      expect(canonical!.education[0]?.institution).toBe("MIT");
+      expect(canonical!.experience[0]?.company).toBe("Acme");
+      expect(canonical!.experience[0]?.bullets).toEqual(["Built things"]);
+      expect(canonical!.projects[0]?.name).toBe("MyProject");
+      expect(canonical!.skillGroups[0]?.skills).toEqual(["TypeScript", "Python"]);
+
+      // Replace again — old entries must be gone
+      profileRepository.replaceStructuredSections(profile.id, {
+        education: [],
+        experience: [{ company: "NewCo", title: "Senior Engineer" }],
+        projects: [],
+        skillGroups: []
+      });
+
+      const updated = profileRepository.getCanonicalProfile(profile.id);
+      expect(updated!.education).toHaveLength(0);
+      expect(updated!.experience).toHaveLength(1);
+      expect(updated!.experience[0]?.company).toBe("NewCo");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("persists workAuthorization through createStarter + upsert", () => {
     const { db } = createDb();
     try {

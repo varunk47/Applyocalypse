@@ -28,6 +28,12 @@ import {
   UploadedFileSchema
 } from "@applyocalypse/shared-schemas";
 
+const StructuredEntryIdField = { id: IdSchema.nullable().optional() };
+const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional() });
+const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]) });
+const StructuredProjectInputSchema = z.object({ ...StructuredEntryIdField, name: z.string().min(1), summary: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]) });
+const StructuredSkillGroupInputSchema = z.object({ ...StructuredEntryIdField, label: z.string().min(1), skills: z.array(z.string()).default([]) });
+
 export type IpcContract<Request extends z.ZodTypeAny, Response extends z.ZodTypeAny> = {
   channel: string;
   request: Request;
@@ -61,6 +67,7 @@ export const IpcChannels = {
   profileCreateStarter: "profile:create-starter",
   profileConfigureApplicationCredentials: "profile:configure-application-credentials",
   profileUpdate: "profile:update",
+  profileUpdateStructured: "profile:update-structured",
   filesPick: "files:pick",
   filesListUploads: "files:list-uploads",
   filesRegisterUpload: "files:register-upload",
@@ -187,6 +194,17 @@ export const IpcContracts = {
     ProfileSchema
   ),
   profileUpdate: contract(IpcChannels.profileUpdate, z.object({ profile: ProfileSchema }).strict(), ProfileSchema),
+  profileUpdateStructured: contract(
+    IpcChannels.profileUpdateStructured,
+    z.object({
+      profileId: IdSchema,
+      education: z.array(StructuredEducationInputSchema),
+      experience: z.array(StructuredExperienceInputSchema),
+      projects: z.array(StructuredProjectInputSchema),
+      skillGroups: z.array(StructuredSkillGroupInputSchema)
+    }).strict(),
+    CanonicalProfileSchema.nullable()
+  ),
   filesPick: contract(
     IpcChannels.filesPick,
     z.object({ purpose: z.enum(["resume", "cover_letter", "supporting_details", "other"]) }).strict(),

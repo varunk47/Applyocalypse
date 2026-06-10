@@ -100,7 +100,14 @@ const api = {
       applicationPassword: string;
       gmailOtpEnabled?: boolean;
     }) => invoke<typeof input, Profile>(IpcContracts.profileConfigureApplicationCredentials.channel, input),
-    update: (profile: Profile) => invoke<{ profile: Profile }, Profile>(IpcContracts.profileUpdate.channel, { profile })
+    update: (profile: Profile) => invoke<{ profile: Profile }, Profile>(IpcContracts.profileUpdate.channel, { profile }),
+    updateStructured: (input: {
+      profileId: string;
+      education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>;
+      experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>;
+      projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>;
+      skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>;
+    }) => invoke<typeof input, CanonicalProfile | null>(IpcContracts.profileUpdateStructured.channel, input)
   },
   files: {
     pick: (purpose: "resume" | "cover_letter" | "supporting_details" | "other") =>
@@ -179,6 +186,21 @@ const api = {
     openDownloads: () => invoke(IpcContracts.foldersOpenDownloads.channel, {}),
     chooseOutputDir: () =>
       invoke<Record<string, never>, { canceled: boolean; localPath: string | null }>(IpcContracts.foldersChooseOutputDir.channel, {})
+  },
+  navigation: {
+    subscribe: (listener: (msg: { type: "navigate" | "focus-intake" | "close-modal"; route?: string }) => void): (() => void) => {
+      const onNavigate = (_e: Electron.IpcRendererEvent, route: string) => listener({ type: "navigate", route });
+      const onFocusIntake = () => listener({ type: "focus-intake" });
+      const onCloseModal = () => listener({ type: "close-modal" });
+      ipcRenderer.on("navigate", onNavigate);
+      ipcRenderer.on("focus-intake", onFocusIntake);
+      ipcRenderer.on("close-modal", onCloseModal);
+      return () => {
+        ipcRenderer.off("navigate", onNavigate);
+        ipcRenderer.off("focus-intake", onFocusIntake);
+        ipcRenderer.off("close-modal", onCloseModal);
+      };
+    }
   }
 };
 

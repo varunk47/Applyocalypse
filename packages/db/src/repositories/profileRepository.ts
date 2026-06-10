@@ -203,6 +203,45 @@ export class ProfileRepository {
     return profile;
   }
 
+  replaceStructuredSections(
+    profileId: string,
+    payload: {
+      education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>;
+      experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>;
+      projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>;
+      skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>;
+    }
+  ): CanonicalProfile | null {
+    const now = new Date().toISOString();
+    this.db.transaction(() => {
+      this.db.prepare("UPDATE education_entries SET deleted_at = ? WHERE profile_id = ? AND deleted_at IS NULL").run(now, profileId);
+      this.db.prepare("UPDATE experience_entries SET deleted_at = ? WHERE profile_id = ? AND deleted_at IS NULL").run(now, profileId);
+      this.db.prepare("UPDATE project_entries SET deleted_at = ? WHERE profile_id = ? AND deleted_at IS NULL").run(now, profileId);
+      this.db.prepare("UPDATE skill_groups SET deleted_at = ? WHERE profile_id = ? AND deleted_at IS NULL").run(now, profileId);
+
+      const insEdu = this.db.prepare("INSERT INTO education_entries (id, profile_id, institution, degree, field, start_date, end_date, details_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, '[]', 1.0, ?, ?)");
+      for (const e of payload.education) {
+        insEdu.run(e.id ?? randomUUID(), profileId, e.institution, e.degree ?? null, e.field ?? null, e.startDate ?? null, e.endDate ?? null, now, now);
+      }
+
+      const insExp = this.db.prepare("INSERT INTO experience_entries (id, profile_id, company, title, location, start_date, end_date, bullets_json, tools_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '[]', 1.0, ?, ?)");
+      for (const e of payload.experience) {
+        insExp.run(e.id ?? randomUUID(), profileId, e.company, e.title, e.location ?? null, e.startDate ?? null, e.endDate ?? null, JSON.stringify(e.bullets ?? []), now, now);
+      }
+
+      const insProj = this.db.prepare("INSERT INTO project_entries (id, profile_id, name, role, summary, bullets_json, tools_json, links_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, NULL, ?, ?, ?, '[]', 1.0, ?, ?)");
+      for (const p of payload.projects) {
+        insProj.run(p.id ?? randomUUID(), profileId, p.name, p.summary ?? null, JSON.stringify(p.bullets ?? []), JSON.stringify(p.tools ?? []), now, now);
+      }
+
+      const insSkill = this.db.prepare("INSERT INTO skill_groups (id, profile_id, label, skills_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, 1.0, ?, ?)");
+      for (const g of payload.skillGroups) {
+        insSkill.run(g.id ?? randomUUID(), profileId, g.label, JSON.stringify(g.skills ?? []), now, now);
+      }
+    })();
+    return this.getCanonicalProfile(profileId);
+  }
+
   getApplicationCredentialReference(profileId: string):
     | {
         applicationEmail: string | null;

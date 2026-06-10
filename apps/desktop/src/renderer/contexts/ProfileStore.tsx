@@ -30,6 +30,13 @@ type ProfileStoreValue = {
     applicationPassword: string
     gmailOtpEnabled?: boolean
   }) => Promise<void>
+  saveStructuredSections: (input: {
+    profileId: string
+    education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>
+    experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>
+    projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>
+    skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>
+  }) => Promise<void>
   saveProfile: (profile: Profile) => Promise<void>
   pickAndRegisterResume: () => Promise<void>
   pickAndRegisterSupportingDetails: () => Promise<void>
@@ -124,6 +131,28 @@ export const ProfileStoreProvider = (props: ParentProps) => {
       setState('error', null)
     } catch (error) {
       setState('error', error instanceof Error ? error.message : 'Unable to save application credentials')
+    } finally {
+      setState('isLoading', false)
+    }
+  }
+
+  const saveStructuredSections = async (input: {
+    profileId: string
+    education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined }>
+    experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[] }>
+    projects: Array<{ id?: string | null | undefined; name: string; summary?: string | null | undefined; bullets?: string[]; tools?: string[] }>
+    skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>
+  }): Promise<void> => {
+    setState('isLoading', true)
+    try {
+      const canonical = await window.applyocalypse.profile.updateStructured(input)
+      if (canonical) setState('canonicalProfile', canonical)
+      setState('error', null)
+      toast.success('Sections saved')
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unable to save sections'
+      setState('error', msg)
+      toast.error(msg)
     } finally {
       setState('isLoading', false)
     }
@@ -267,6 +296,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
         state,
         createStarterProfile,
         configureApplicationCredentials,
+        saveStructuredSections,
         saveProfile,
         pickAndRegisterResume,
         pickAndRegisterSupportingDetails,

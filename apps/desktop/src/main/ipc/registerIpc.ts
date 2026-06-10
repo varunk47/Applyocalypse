@@ -298,6 +298,16 @@ export const registerIpcHandlers = ({
     })
   );
   handleContract(IpcContracts.profileUpdate, ({ profile }) => profileRepository.upsert(profile));
+  handleContract(IpcContracts.profileUpdateStructured, ({ profileId, education, experience, projects, skillGroups }) => {
+    const result = profileRepository.replaceStructuredSections(profileId, { education, experience, projects, skillGroups });
+    auditRepository.append({
+      action: "profile.structured_sections_replaced",
+      entityType: "profile",
+      entityId: profileId,
+      metadata: { educationCount: education.length, experienceCount: experience.length, projectCount: projects.length, skillGroupCount: skillGroups.length }
+    });
+    return result;
+  });
 
   handleContract(IpcContracts.filesPick, async ({ purpose }) => {
     const filters =
