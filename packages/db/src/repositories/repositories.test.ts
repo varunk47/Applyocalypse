@@ -17,6 +17,7 @@ import {
   runMigrations,
   type ApplyocalypseDatabase
 } from "../index";
+import { EqualEmploymentDefaultsSchema, EQUAL_EMPLOYMENT_SEED_DEFAULTS } from "@applyocalypse/shared-schemas";
 
 const tempDirs: string[] = [];
 
@@ -605,6 +606,38 @@ describe("db repositories", () => {
 
       const updated = profileRepository.getCanonicalProfile(profile.id);
       expect(updated!.education[0]?.gpa).toBeNull();
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("EqualEmploymentDefaultsSchema parses seed defaults and rejects invalid values", () => {
+    const parsed = EqualEmploymentDefaultsSchema.parse(EQUAL_EMPLOYMENT_SEED_DEFAULTS);
+    expect(parsed.authorizedToWorkUS).toBe("Yes");
+    expect(parsed.requiresSponsorship).toBe("Yes");
+    expect(parsed.disability).toBe("No");
+    expect(parsed.gender).toBe("Male");
+    expect(parsed.race).toBe("Asian");
+    expect(parsed.sexualOrientation).toEqual(["Heterosexual"]);
+    expect(parsed.previouslyEmployedDefault).toBe("No");
+    expect(parsed.criminalRecordDefault).toBe("No");
+
+    expect(() => EqualEmploymentDefaultsSchema.parse({ authorizedToWorkUS: "Maybe" })).toThrow();
+  });
+
+  it("persists equalEmploymentDefaults through profileRepository.upsert round-trip", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "EEO Test" });
+      const updated = profileRepository.upsert({ ...profile, equalEmploymentDefaults: EQUAL_EMPLOYMENT_SEED_DEFAULTS });
+      const canonical = profileRepository.getCanonicalProfile(updated.id);
+
+      const eeo = canonical!.profile.equalEmploymentDefaults as typeof EQUAL_EMPLOYMENT_SEED_DEFAULTS;
+      expect(eeo.authorizedToWorkUS).toBe("Yes");
+      expect(eeo.disability).toBe("No");
+      expect(eeo.sponsorshipDetailText).toContain("F-1 OPT");
+      expect(eeo.sexualOrientation).toEqual(["Heterosexual"]);
     } finally {
       closeApplyocalypseDatabase(db);
     }

@@ -50,6 +50,36 @@ export const AddressSchema = z.object({
   county: z.string().nullable().default(null)
 });
 
+export const EqualEmploymentDefaultsSchema = z.object({
+  authorizedToWorkUS: z.enum(["Yes", "No"]).nullable().default(null),
+  requiresSponsorship: z.enum(["Yes", "No"]).nullable().default(null),
+  sponsorshipDetailText: z.string().nullable().default(null),
+  disability: z.enum(["Yes", "No", "Prefer not to say"]).nullable().default(null),
+  gender: z.string().nullable().default(null),
+  lgbtq: z.enum(["Yes", "No", "Prefer not to say"]).nullable().default(null),
+  veteran: z.enum(["Yes", "No", "Prefer not to say"]).nullable().default(null),
+  race: z.string().nullable().default(null),
+  hispanicOrLatino: z.enum(["Yes", "No"]).nullable().default(null),
+  sexualOrientation: z.array(z.string()).nullable().default(null),
+  previouslyEmployedDefault: z.literal("No").default("No"),
+  criminalRecordDefault: z.literal("No").default("No")
+});
+
+export const EQUAL_EMPLOYMENT_SEED_DEFAULTS: z.infer<typeof EqualEmploymentDefaultsSchema> = {
+  authorizedToWorkUS: "Yes",
+  requiresSponsorship: "Yes",
+  sponsorshipDetailText: "I'm authorized to work full-time for 36 months on F-1 OPT, no sponsorship required immediately.",
+  disability: "No",
+  gender: "Male",
+  lgbtq: "No",
+  veteran: "No",
+  race: "Asian",
+  hispanicOrLatino: "No",
+  sexualOrientation: ["Heterosexual"],
+  previouslyEmployedDefault: "No",
+  criminalRecordDefault: "No"
+};
+
 export const ProfileSchema = z.object({
   id: IdSchema,
   displayName: z.string().min(1),
@@ -69,7 +99,7 @@ export const ProfileSchema = z.object({
   links: z.array(z.object({ label: z.string(), url: z.string().url() })).default([]),
   jobDefaults: JsonObjectSchema.default({}),
   workAuthorization: JsonObjectSchema.default({}),
-  equalEmploymentDefaults: JsonObjectSchema.default({}),
+  equalEmploymentDefaults: EqualEmploymentDefaultsSchema.default({}),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema
 });
