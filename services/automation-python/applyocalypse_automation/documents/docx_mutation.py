@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from dataclasses import dataclass, field
 from pathlib import Path
 from collections.abc import Iterable
@@ -42,6 +43,16 @@ def iter_document_paragraphs(document: Any) -> list[Any]:
     for table in document.tables:
         paragraphs.extend(iter_table_paragraphs(table))
     return paragraphs
+
+
+def extract_docx_text(path: Path) -> str:
+    """Return plain text from all paragraphs and table cells in a DOCX file."""
+    try:
+        from docx import Document  # noqa: PLC0415
+    except ImportError as exc:
+        raise RuntimeError("python-docx is required for DOCX text extraction") from exc
+    document = Document(str(path))
+    return "\n".join(p.text for p in iter_document_paragraphs(document) if p.text.strip())
 
 
 def replace_paragraph_text_preserving_runs(paragraph: Any, replacement_text: str) -> None:
@@ -124,6 +135,87 @@ def mutate_docx_placeholders(source_docx: Path, output_docx: Path, replacements:
     output_docx.parent.mkdir(parents=True, exist_ok=True)
     document.save(str(output_docx))
     return output_docx, sorted(set(replaced))
+
+
+def _expand_anchor_to_bullets(document: Any, anchor_text: str, bullets: list[str]) -> bool:
+    """Find the paragraph containing anchor_text and replace it with one paragraph per bullet.
+
+    New paragraphs copy the original paragraph's XML (style, list numbering, indentation)
+    so bullet formatting is preserved exactly. Returns True if the anchor was found.
+    """
+    try:
+        from docx.oxml.ns import qn  # type: ignore
+        from docx.oxml import OxmlElement  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("python-docx is required for bullet expansion") from exc
+
+    if not bullets:
+        return False
+
+    anchor_para = None
+    for para in iter_document_paragraphs(document):
+        if anchor_text in para.text:
+            anchor_para = para
+            break
+
+    if anchor_para is None:
+        return False
+
+    p_elem = anchor_para._p  # noqa: SLF001
+    parent = p_elem.getparent()
+    insert_idx = list(parent).index(p_elem)
+
+    orig_runs = p_elem.findall(qn("w:r"))
+    orig_rPr = orig_runs[0].find(qn("w:rPr")) if orig_runs else None
+
+    for offset, bullet_text in enumerate(bullets):
+        new_p = copy.deepcopy(p_elem)
+        for r in new_p.findall(qn("w:r")):
+            new_p.remove(r)
+        r_elem = OxmlElement("w:r")
+        if orig_rPr is not None:
+            r_elem.append(copy.deepcopy(orig_rPr))
+        t_elem = OxmlElement("w:t")
+        t_elem.text = bullet_text
+        if bullet_text.startswith(" ") or bullet_text.endswith(" "):
+            t_elem.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
+        r_elem.append(t_elem)
+        new_p.append(r_elem)
+        parent.insert(insert_idx + offset, new_p)
+
+    parent.remove(p_elem)
+    return True
+
+
+def mutate_docx_bullet_anchors(
+    source_docx: Path,
+    output_docx: Path,
+    bullet_replacements: dict[str, list[str]],
+) -> tuple[Path, list[str]]:
+    """Replace bullet anchor placeholders with expanded multi-paragraph bullet lists.
+
+    Each anchor paragraph (e.g. '{{APPLYO_EXP_0_BULLETS}}') is expanded into one
+    paragraph per bullet string, preserving the original paragraph style and list formatting.
+    """
+    if source_docx.suffix.lower() != ".docx":
+        raise ValueError("source_docx must be a DOCX file")
+    if not source_docx.exists():
+        raise FileNotFoundError(source_docx)
+
+    try:
+        from docx import Document  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("python-docx is required for DOCX mutation") from exc
+
+    document = Document(str(source_docx))
+    replaced: list[str] = []
+    for anchor, bullets in bullet_replacements.items():
+        if _expand_anchor_to_bullets(document, anchor, bullets):
+            replaced.append(anchor)
+
+    output_docx.parent.mkdir(parents=True, exist_ok=True)
+    document.save(str(output_docx))
+    return output_docx, replaced
 
 
 def inspect_docx_for_anchors(source_docx: Path) -> DocxMutationPlan:

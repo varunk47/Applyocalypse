@@ -7,8 +7,10 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import sys
 import time
+from urllib.parse import urlparse, unquote
 
 from .answers import ProposedApplicationAnswer, propose_answer_for_detected_field, propose_profile_answers
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
@@ -26,7 +28,9 @@ from .documents.artifact_generation import (
     split_legal_name,
     write_text_artifact,
 )
-from .documents.docx_mutation import mutate_docx_placeholders
+from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
+from .llm.litellm_client import LiteLlmClient
+from .resume_tailoring import tailor_resume_sections
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
@@ -54,7 +58,7 @@ FINAL_SUBMIT_LABELS = (
 
 SAFE_STEP_PROGRESSION_LABELS = COMMON_STEP_PROGRESSION_LABELS
 
-MAX_AUTOMATED_PORTAL_STEPS = 6
+MAX_AUTOMATED_PORTAL_STEPS = 20
 
 SUBMISSION_CONFIRMATION_PATTERNS = (
     "application submitted",
@@ -1108,6 +1112,38 @@ def tex_escape(value: str) -> str:
     return "".join(replacements.get(character, character) for character in value)
 
 
+def _company_from_url(url: str) -> str | None:
+    try:
+        host = urlparse(url).hostname or ""
+        if "myworkdayjobs.com" in host or "workdayjobs.com" in host:
+            return host.split(".")[0].replace("-", " ").title()
+        parts = host.replace("www.", "").split(".")
+        if parts:
+            return parts[0].replace("-", " ").title()
+    except Exception:
+        pass
+    return None
+
+
+def _role_from_url(url: str) -> str | None:
+    try:
+        path = unquote(urlparse(url).path)
+        segments = [s for s in path.split("/") if s]
+        # Workday: /en-US/External_Careers/job/<location>/<title>_<id>
+        if "job" in segments:
+            idx = segments.index("job")
+            if idx + 2 <= len(segments):
+                slug = segments[idx + 2] if idx + 2 < len(segments) else segments[idx + 1]
+                slug = re.sub(r"_[A-Z0-9]{6,}$", "", slug)
+                return re.sub(r"[-_]+", " ", slug).strip().title()
+        if segments:
+            slug = re.sub(r"_[A-Z0-9]{6,}$", "", segments[-1])
+            return re.sub(r"[-_]+", " ", slug).strip().title()
+    except Exception:
+        pass
+    return None
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="applyocalypse-worker")
     parser.add_argument("--run-id", required=True)
@@ -1208,7 +1244,7 @@ async def run_url_observation_flow(
             machine_state={"adapter": adapter.name, "artifact_type": "DOM_SNAPSHOT"},
             ui_state={"current_step": "page_review"},
             payload={
-                "artifact_id": "dom-snapshot",
+                "artifact_id": f"{run_id}:dom-snapshot",
                 "artifact_type": "DOM_SNAPSHOT",
                 "local_path": str(dom_snapshot_path),
                 "mime_type": str(dom_snapshot.payload.get("mime_type", "application/json")),
@@ -2034,8 +2070,9 @@ def main() -> None:
 
         profile = canonical_profile.get("profile") if isinstance(canonical_profile.get("profile"), dict) else {}
         first_name, last_name = split_legal_name(str(profile.get("legalName") or profile.get("displayName") or "Candidate Profile"))
-        company = str(job_metadata.get("company") or "Unknown Company")
-        role = str(job_metadata.get("role") or "Unknown Role")
+        _url = str(job_metadata.get("url") or job_text_source_url or "")
+        company = str(job_metadata.get("company") or _company_from_url(_url) or "Unknown Company")
+        role = str(job_metadata.get("role") or _role_from_url(_url) or "Unknown Role")
         resume_content = build_resume_markdown(canonical_profile=canonical_profile, tailoring_plan=tailoring_plan)
         resume_report = TextArtifactValidator().validate(resume_content, artifact_kind="resume")
         validation_report_path = work_dir / "resume-validation-report.json"
@@ -2098,6 +2135,34 @@ def main() -> None:
                     ),
                 )
                 _, replaced_placeholders = mutate_docx_placeholders(master_path, output_path, replacements)
+
+                # Deep-tailor experience and project bullets via LLM if available
+                llm_model = os.getenv("LITELLM_MODEL")
+                if llm_model and job_text:
+                    try:
+                        resume_text_for_tailor = extract_docx_text(output_path) if output_path.exists() else ""
+                    except Exception:
+                        resume_text_for_tailor = ""
+                    if not resume_text_for_tailor:
+                        resume_text_for_tailor = build_resume_markdown(canonical_profile=canonical_profile, tailoring_plan=tailoring_plan)
+                    tailored = asyncio.run(tailor_resume_sections(
+                        job_description=job_text,
+                        resume_text=resume_text_for_tailor,
+                        llm_client=LiteLlmClient(model=llm_model),
+                    ))
+                    if tailored:
+                        bullet_map: dict[str, list[str]] = {}
+                        for i in range(4):
+                            bullets = tailored.exp_bullets(i)
+                            if bullets:
+                                bullet_map[f"{{{{APPLYO_EXP_{i}_BULLETS}}}}"] = bullets
+                        proj_bullets = tailored.all_project_bullets()
+                        if proj_bullets:
+                            bullet_map["{{APPLYO_PROJECTS_BULLETS}}"] = proj_bullets
+                        if bullet_map:
+                            _, bullet_replaced = mutate_docx_bullet_anchors(output_path, output_path, bullet_map)
+                            replaced_placeholders = list(set(replaced_placeholders) | set(bullet_replaced))
+
                 if replaced_placeholders:
                     artifact = metadata_for_existing_file(path=output_path, file_kind="RESUME", format_name="DOCX", review_only=False)
                     WorkerEvent(

@@ -5,7 +5,7 @@ from pathlib import Path
 from docx import Document
 
 from applyocalypse_automation.documents.anchor_repair import repair_editable_master_anchors
-from applyocalypse_automation.documents.docx_mutation import DocxParagraphMutation, mutate_docx_paragraphs, mutate_docx_placeholders
+from applyocalypse_automation.documents.docx_mutation import DocxParagraphMutation, extract_docx_text, mutate_docx_paragraphs, mutate_docx_placeholders
 from applyocalypse_automation.documents.file_generation import (
     GeneratedNameInput,
     build_generated_filename,
@@ -290,3 +290,20 @@ def test_generated_filename_and_collision_policy(tmp_path: Path) -> None:
 
     assert filename == "Ada Lovelace Analytical Engines Staff Engineer Resume.pdf"
     assert second.name == "Ada Lovelace Analytical Engines Staff Engineer Resume (2).pdf"
+
+
+def test_extract_docx_text_includes_paragraphs_and_table_cells(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    doc = Document()
+    doc.add_paragraph("Software Engineer with Python experience")
+    table = doc.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = "Python"
+    table.cell(0, 1).text = "TypeScript"
+    doc.save(source)
+
+    text = extract_docx_text(source)
+
+    assert "Software Engineer with Python experience" in text
+    assert "Python" in text
+    assert "TypeScript" in text
+    assert b"PK\x03\x04" not in text.encode("utf-8")
