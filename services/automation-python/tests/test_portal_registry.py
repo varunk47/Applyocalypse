@@ -75,7 +75,7 @@ def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
     assert workflow.portal_id == "lever"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
     assert workflow.default_adapter == "playwright"
-    assert adapter_candidates_for_workflow(workflow) == ("playwright", "nodriver")
+    assert adapter_candidates_for_workflow(workflow) == ("playwright", "nodriver", "seleniumbase")
     assert "Apply for this job" in workflow.entry_action_labels
     assert workflow.requires_manual_review_before_fill is True
     payload = workflow.to_event_payload()
@@ -90,7 +90,7 @@ def test_workflow_for_high_stealth_board_keeps_nodriver_and_login_watch() -> Non
     assert workflow.workflow_kind == "JOB_BOARD_REDIRECT_OR_STEALTH"
     assert workflow.default_adapter == "nodriver"
     assert workflow.requires_high_stealth is True
-    assert adapter_candidates_for_workflow(workflow, "playwright") == ("nodriver",)
+    assert adapter_candidates_for_workflow(workflow, "playwright") == ("nodriver", "seleniumbase")
     assert workflow.requires_login_watch is True
     payload = workflow.to_event_payload()
     assert "Confirm trusted application surface" in payload["expected_steps"]

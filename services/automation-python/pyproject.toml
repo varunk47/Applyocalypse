@@ -8,17 +8,23 @@ version = "0.1.0"
 description = "Applyocalypse local Python worker for browser automation, document processing, and LLM-backed analysis."
 requires-python = ">=3.12"
 dependencies = [
-  "litellm>=1.67.0",
-  "nodriver>=0.39",
+  "litellm>=1.72.0",
+  "nodriver>=0.44",
   "pdf2docx>=0.5.8",
   "python-docx>=1.1.2",
-  "TexSoup>=0.3.1"
+  "TexSoup>=0.3.1",
+  "tzdata>=2025.2"
 ]
+
+[tool.applyocalypse.system_deps]
+# tectonic>=0.15.0 is a standalone LaTeX binary — must be bundled separately
+# in the PyInstaller build via --add-binary in scripts/build/build-python-worker.mjs
 
 [project.optional-dependencies]
 dev = [
   "pytest>=8.3.5",
-  "pyinstaller>=6.13.0"
+  "pyinstaller>=6.15.0",
+  "ruff>=0.8.0"
 ]
 
 [project.scripts]
@@ -27,4 +33,6 @@ applyocalypse-worker = "applyocalypse_automation.runner:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-addopts = "-q"
+# -p no:seleniumbase disables the seleniumbase pytest plugin that registers a
+# conflicting --browser CLI argument we don't need in unit tests.
+addopts = "-q -p no:seleniumbase"
