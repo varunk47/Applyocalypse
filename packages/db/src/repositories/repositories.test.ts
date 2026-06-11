@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  ChatRepository,
   JobRepository,
   ProfileRepository,
   ProviderRepository,
@@ -655,6 +656,62 @@ describe("db repositories", () => {
       expect(canonical).not.toBeNull();
       expect((canonical!.profile.workAuthorization as typeof workAuth).summary).toBe(workAuth.summary);
       expect((canonical!.profile.workAuthorization as typeof workAuth).sponsorshipRequired).toBe(false);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("chat: appendMessage persists and list returns messages in order", () => {
+    const { db } = createDb();
+    try {
+      const chat = new ChatRepository(db);
+
+      const msg1 = chat.appendMessage({ role: "USER", kind: "TEXT", content: "Hello" });
+      const msg2 = chat.appendMessage({ role: "SYSTEM", kind: "TEXT", content: "Acknowledged" });
+      const msg3 = chat.appendMessage({
+        role: "SYSTEM",
+        kind: "JOB_CARD",
+        content: "",
+        metadata: { sourceKind: "URL", sourceValue: "https://example.com/job" }
+      });
+
+      expect(msg1.id).toBeTruthy();
+      expect(msg1.role).toBe("USER");
+      expect(msg1.kind).toBe("TEXT");
+      expect(msg1.content).toBe("Hello");
+      expect(msg1.batchId).toBeNull();
+      expect(msg1.runId).toBeNull();
+      expect(msg1.metadata).toEqual({});
+
+      expect(msg3.kind).toBe("JOB_CARD");
+      expect(msg3.metadata).toEqual({ sourceKind: "URL", sourceValue: "https://example.com/job" });
+
+      const { items, total } = chat.list();
+      expect(total).toBe(3);
+      expect(items).toHaveLength(3);
+      expect(items[0]!.content).toBe("Hello");
+      expect(items[1]!.content).toBe("Acknowledged");
+      expect(items[2]!.kind).toBe("JOB_CARD");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("chat: list respects limit and offset", () => {
+    const { db } = createDb();
+    try {
+      const chat = new ChatRepository(db);
+      for (let i = 0; i < 5; i++) {
+        chat.appendMessage({ role: "USER", kind: "TEXT", content: `msg-${i}` });
+      }
+
+      const page1 = chat.list(2, 0);
+      expect(page1.items).toHaveLength(2);
+      expect(page1.total).toBe(5);
+      expect(page1.items[0]!.content).toBe("msg-0");
+
+      const page2 = chat.list(2, 2);
+      expect(page2.items[0]!.content).toBe("msg-2");
     } finally {
       closeApplyocalypseDatabase(db);
     }

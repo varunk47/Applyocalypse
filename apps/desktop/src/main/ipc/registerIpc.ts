@@ -2,6 +2,7 @@ import { BrowserWindow, app, dialog, ipcMain, shell } from "electron";
 import { statSync } from "node:fs";
 import { isAbsolute, normalize, resolve } from "node:path";
 import {
+  ChatRepository,
   JobRepository,
   ProfileRepository,
   ProviderRepository,
@@ -62,6 +63,7 @@ export const registerIpcHandlers = ({
   getMainWindow,
   initialApprovedPaths = []
 }: RegisterIpcHandlersInput): void => {
+  const chatRepository = new ChatRepository(db);
   const profileRepository = new ProfileRepository(db);
   const jobRepository = new JobRepository(db);
   const uploadRepository = new UploadRepository(db);
@@ -666,4 +668,17 @@ export const registerIpcHandlers = ({
       localPath: result.canceled ? null : result.filePaths[0] ?? null
     };
   });
+
+  handleContract(IpcContracts.chatAppendMessage, (input) =>
+    chatRepository.appendMessage({
+      batchId: input.batchId ?? null,
+      runId: input.runId ?? null,
+      jobId: input.jobId ?? null,
+      role: input.role,
+      kind: input.kind,
+      content: input.content,
+      metadata: input.metadata ?? {}
+    })
+  );
+  handleContract(IpcContracts.chatList, ({ limit, offset }) => chatRepository.list(limit, offset));
 };

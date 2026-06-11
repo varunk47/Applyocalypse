@@ -10,6 +10,7 @@ import type {
   BrowserArtifactSchema,
   CanonicalProfileSchema,
   CertificationEntrySchema,
+  ChatMessageSchema,
   EducationEntrySchema,
   ExperienceEntrySchema,
   GeneratedFileSchema,
@@ -62,4 +63,5 @@ export type SafeRendererRunEvent = z.infer<typeof SafeRendererRunEventSchema>;
 export type ProjectEntry = z.infer<typeof ProjectEntrySchema>;
 export type Address = z.infer<typeof AddressSchema>;
 export type EqualEmploymentDefaults = z.infer<typeof EqualEmploymentDefaultsSchema>;
+export type ChatMessage = z.infer<typeof ChatMessageSchema>;
 export { EQUAL_EMPLOYMENT_SEED_DEFAULTS } from "@applyocalypse/shared-schemas";

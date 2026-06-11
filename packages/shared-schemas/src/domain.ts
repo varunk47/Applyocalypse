@@ -433,3 +433,15 @@ export const RunEventSchema = z.object({
   uiState: JsonObjectSchema.default({}),
   payload: JsonObjectSchema.default({})
 });
+
+export const ChatMessageSchema = z.object({
+  id: IdSchema,
+  batchId: IdSchema.nullable(),
+  runId: IdSchema.nullable(),
+  jobId: IdSchema.nullable(),
+  role: z.enum(["USER", "SYSTEM"]),
+  kind: z.enum(["TEXT", "JOB_CARD", "BATCH_HEADER"]),
+  content: z.string(),
+  metadata: JsonObjectSchema,
+  createdAt: z.string()
+});

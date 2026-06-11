@@ -7,6 +7,7 @@ import {
   ApprovalTypeSchema,
   BrowserArtifactSchema,
   CanonicalProfileSchema,
+  ChatMessageSchema,
   EmptyRequestSchema,
   GeneratedFileSchema,
   IdSchema,
@@ -92,7 +93,9 @@ export const IpcChannels = {
   logsEvent: "logs:event",
   screenshotsList: "screenshots:list",
   foldersOpenDownloads: "folders:open-downloads",
-  foldersChooseOutputDir: "folders:choose-output-dir"
+  foldersChooseOutputDir: "folders:choose-output-dir",
+  chatAppendMessage: "chat:append-message",
+  chatList: "chat:list"
 } as const;
 
 export const IpcContracts = {
@@ -314,6 +317,24 @@ export const IpcContracts = {
     IpcChannels.foldersChooseOutputDir,
     EmptyRequestSchema,
     z.object({ canceled: z.boolean(), localPath: z.string().nullable() })
+  ),
+  chatAppendMessage: contract(
+    IpcChannels.chatAppendMessage,
+    z.object({
+      batchId: IdSchema.nullable().optional(),
+      runId: IdSchema.nullable().optional(),
+      jobId: IdSchema.nullable().optional(),
+      role: z.enum(["USER", "SYSTEM"]),
+      kind: z.enum(["TEXT", "JOB_CARD", "BATCH_HEADER"]),
+      content: z.string().default(""),
+      metadata: JsonObjectSchema.optional()
+    }).strict(),
+    ChatMessageSchema
+  ),
+  chatList: contract(
+    IpcChannels.chatList,
+    PaginationSchema,
+    z.object({ items: z.array(ChatMessageSchema), total: z.number().int().nonnegative() })
   )
 } as const;
 

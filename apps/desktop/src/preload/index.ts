@@ -7,6 +7,7 @@ import type {
   Approval,
   BrowserArtifact,
   CanonicalProfile,
+  ChatMessage,
   GeneratedFile,
   JobTarget,
   ParsedDocument,
@@ -186,6 +187,22 @@ const api = {
     openDownloads: () => invoke(IpcContracts.foldersOpenDownloads.channel, {}),
     chooseOutputDir: () =>
       invoke<Record<string, never>, { canceled: boolean; localPath: string | null }>(IpcContracts.foldersChooseOutputDir.channel, {})
+  },
+  chat: {
+    appendMessage: (input: {
+      batchId?: string | null;
+      runId?: string | null;
+      jobId?: string | null;
+      role: "USER" | "SYSTEM";
+      kind: "TEXT" | "JOB_CARD" | "BATCH_HEADER";
+      content: string;
+      metadata?: Record<string, unknown>;
+    }) => invoke<typeof input, ChatMessage>(IpcContracts.chatAppendMessage.channel, input),
+    list: (limit = 200, offset = 0) =>
+      invoke<{ limit: number; offset: number }, { items: ChatMessage[]; total: number }>(
+        IpcContracts.chatList.channel,
+        { limit, offset }
+      )
   },
   navigation: {
     subscribe: (listener: (msg: { type: "navigate" | "focus-intake" | "close-modal"; route?: string }) => void): (() => void) => {
