@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { copyFileSync, mkdirSync, statSync } from "node:fs";
 import { basename, extname, join } from "node:path";
 import { app } from "electron";
-import { ParsedDocumentRepository, type ParsedDocumentMergeSummary, type UploadRepository, type UploadedFile } from "@applyocalypse/db";
+import { ParsedDocumentRepository, type ApplyocalypseDatabase, type ParsedDocumentMergeSummary, type UploadRepository, type UploadedFile } from "@applyocalypse/db";
 import { ParsedDocumentCanonicalSchema, ParsedDocumentMergeSummarySchema } from "@applyocalypse/shared-schemas";
 import { resolvePythonWorkerLaunch } from "./pythonWorkerPaths";
 
@@ -186,6 +186,31 @@ const runAnchorRepair = async (sourcePath: string, outputPath: string): Promise<
       }
     });
   });
+};
+
+export const getLatestCoverLetterText = (db: ApplyocalypseDatabase, profileId: string): string | null => {
+  type Row = { canonical_json: string };
+  const row = db
+    .prepare(
+      `
+      SELECT pd.canonical_json
+      FROM parsed_documents pd
+      INNER JOIN uploaded_files uf ON uf.id = pd.uploaded_file_id
+      WHERE uf.profile_id = ?
+        AND uf.file_kind = 'COVER_LETTER'
+        AND uf.deleted_at IS NULL
+      ORDER BY pd.created_at DESC
+      LIMIT 1
+      `
+    )
+    .get(profileId) as Row | undefined;
+  if (!row) return null;
+  try {
+    const canonical = JSON.parse(row.canonical_json) as { rawTextPreview?: string };
+    return canonical.rawTextPreview || null;
+  } catch {
+    return null;
+  }
 };
 
 export class DocumentIngestionService {

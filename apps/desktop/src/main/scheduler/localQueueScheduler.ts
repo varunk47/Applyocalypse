@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { app } from "electron";
+import { getLatestCoverLetterText } from "../services/documentIngestionService";
 import {
   JobRepository,
   ProfileRepository,
@@ -125,6 +126,11 @@ export class LocalQueueScheduler {
       if (jobTextFile) {
         writeFileSync(jobTextFile, jobTarget.sourceValue, "utf8");
       }
+      const coverLetterText = getLatestCoverLetterText(this.db, item.profileId);
+      const coverLetterSampleFile = coverLetterText ? join(runWorkDir, "cover-letter-sample.txt") : undefined;
+      if (coverLetterSampleFile && coverLetterText) {
+        writeFileSync(coverLetterSampleFile, coverLetterText, "utf8");
+      }
       const jobMetadataFile = join(runWorkDir, "job-target.json");
       writeFileSync(
         jobMetadataFile,
@@ -216,6 +222,7 @@ export class LocalQueueScheduler {
         ...(jobTextFile ? { jobTextFile } : {}),
         jobMetadataFile,
         ...(profileJsonFile ? { profileJsonFile } : {}),
+        ...(coverLetterSampleFile ? { coverLetterSampleFile } : {}),
         outputDir,
         ...(providerEnv ? { providerEnv } : {}),
         workDir: runWorkDir

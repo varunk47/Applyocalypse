@@ -448,7 +448,7 @@ def _canonical_from_sections(*, source_format: str, document_kind: str, text: st
         "experience": experience,
         "projects": projects,
         "certifications": certifications,
-        "rawTextPreview": text[:2000],
+        "rawTextPreview": text if document_kind == "COVER_LETTER" else text[:2000],
     }
 
 

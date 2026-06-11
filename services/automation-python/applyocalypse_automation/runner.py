@@ -1152,6 +1152,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--job-text-file")
     parser.add_argument("--job-metadata-file")
     parser.add_argument("--profile-json-file")
+    parser.add_argument("--cover-letter-sample-file")
     parser.add_argument("--output-dir")
     parser.add_argument("--work-dir", required=True)
     return parser
@@ -1911,6 +1912,9 @@ def main() -> None:
     canonical_profile: dict[str, object] = {}
     if args.profile_json_file:
         canonical_profile = json.loads(Path(args.profile_json_file).read_text(encoding="utf-8"))
+    cover_letter_sample_text: str | None = None
+    if args.cover_letter_sample_file:
+        cover_letter_sample_text = Path(args.cover_letter_sample_file).read_text(encoding="utf-8") or None
     job_metadata: dict[str, object] = {}
     if args.job_metadata_file:
         job_metadata = json.loads(Path(args.job_metadata_file).read_text(encoding="utf-8"))
@@ -1923,7 +1927,7 @@ def main() -> None:
         message="Python worker started",
         machine_state={"work_dir": str(work_dir)},
         ui_state={"current_step": "preparing"},
-        payload={"job_url": args.job_url},
+        payload={"job_url": args.job_url, "cover_letter_sample_available": cover_letter_sample_text is not None},
     ).emit()
 
     job_text = ""

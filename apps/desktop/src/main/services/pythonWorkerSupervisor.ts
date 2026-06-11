@@ -15,6 +15,7 @@ export type StartWorkerInput = {
   jobTextFile?: string;
   jobMetadataFile?: string;
   profileJsonFile?: string;
+  coverLetterSampleFile?: string;
   outputDir?: string;
   providerEnv?: Record<string, string>;
   workDir: string;
@@ -53,6 +54,7 @@ export class PythonWorkerSupervisor {
       ...(input.jobTextFile ? ["--job-text-file", input.jobTextFile] : []),
       ...(input.jobMetadataFile ? ["--job-metadata-file", input.jobMetadataFile] : []),
       ...(input.profileJsonFile ? ["--profile-json-file", input.profileJsonFile] : []),
+      ...(input.coverLetterSampleFile ? ["--cover-letter-sample-file", input.coverLetterSampleFile] : []),
       ...(input.outputDir ? ["--output-dir", input.outputDir] : [])
     ];
 
@@ -70,6 +72,7 @@ export class PythonWorkerSupervisor {
 
     const stdout = createInterface({ input: child.stdout });
     stdout.on("line", (line) => {
+      if (!line.trim().startsWith("{")) return;
       try {
         ingestPythonEventLine({ db: this.db, windows: this.windows, rawLine: line, safeArtifactRoots: this.safeArtifactRoots() });
       } catch (error) {
