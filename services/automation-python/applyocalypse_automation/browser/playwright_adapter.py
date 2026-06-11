@@ -64,6 +64,13 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             await self._page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         except Exception as exc:
             return BrowserStepResult(False, "page navigation failed", {"url": url, "error": str(exc)})
+        try:
+            await self._page.wait_for_function(
+                "() => document.title !== '' || (document.body && document.body.innerText.trim().length > 50)",
+                timeout=20_000,
+            )
+        except Exception:
+            pass
         return BrowserStepResult(True, "page navigated", {"url": url})
 
     async def detect_fields(self) -> list[BrowserField]:

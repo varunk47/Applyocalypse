@@ -12,10 +12,17 @@ REQUIRED_PLACEHOLDERS = (
     "{{APPLYO_FULL_NAME}}",
     "{{APPLYO_RESUME_SUMMARY}}",
     "{{APPLYO_SKILLS}}",
+    "{{APPLYO_EXP_0_BULLETS}}",
+    "{{APPLYO_EXP_1_BULLETS}}",
+    "{{APPLYO_EXP_2_BULLETS}}",
+    "{{APPLYO_EXP_3_BULLETS}}",
+    "{{APPLYO_PROJECTS_BULLETS}}",
 )
 
-SUMMARY_LABELS = {"summary", "profile", "professional summary"}
-SKILLS_LABELS = {"skills", "technical skills", "technologies", "tools", "core skills"}
+SUMMARY_LABELS = {"summary", "profile", "professional summary", "about me", "objective"}
+SKILLS_LABELS = {"skills", "technical skills", "technologies", "tools", "core skills", "competencies"}
+EXPERIENCE_LABELS = {"experience", "work experience", "employment", "professional experience", "career history"}
+PROJECTS_LABELS = {"projects", "personal projects", "key projects", "selected projects", "academic projects"}
 
 
 @dataclass(frozen=True, slots=True)
@@ -70,6 +77,57 @@ def find_body_after_section(paragraphs: list[object], labels: set[str]) -> objec
     return None
 
 
+def find_first_bullet_in_each_experience_block(paragraphs: list[object]) -> list[object]:
+    """Return the first bullet paragraph of each work experience entry.
+
+    Heuristic: find the experience section heading, then detect sub-headings
+    (company/role lines) followed by bullet paragraphs. Returns one bullet per entry.
+    """
+    exp_section_idx = None
+    for index, paragraph in enumerate(paragraphs):
+        if normalize_label(str(getattr(paragraph, "text", ""))) in EXPERIENCE_LABELS:
+            exp_section_idx = index
+            break
+    if exp_section_idx is None:
+        return []
+
+    first_bullets: list[object] = []
+    in_exp_section = False
+    last_sub_heading_idx = None
+
+    for index, paragraph in enumerate(paragraphs):
+        if index <= exp_section_idx:
+            if index == exp_section_idx:
+                in_exp_section = True
+            continue
+        text = str(getattr(paragraph, "text", "")).strip()
+        if not text:
+            continue
+        normalized = normalize_label(text)
+        # Stop when we hit another section heading of similar weight
+        if normalized in SKILLS_LABELS or normalized in SUMMARY_LABELS or normalized in PROJECTS_LABELS:
+            break
+        # Detect sub-headings (company name / role lines): short, not bullet style
+        is_bullet = (
+            getattr(paragraph, "_p", None) is not None
+            and getattr(getattr(paragraph, "_p", None), "pPr", None) is not None
+            and getattr(getattr(paragraph, "_p", None).pPr, "numPr", None) is not None
+        )
+        is_sub_heading = not is_bullet and 1 <= len(text.split()) <= 8
+        if is_sub_heading and in_exp_section:
+            last_sub_heading_idx = index
+            continue
+        if is_bullet and last_sub_heading_idx is not None:
+            first_bullets.append(paragraph)
+            last_sub_heading_idx = None  # consume — only take the first bullet per entry
+
+    return first_bullets
+
+
+def find_first_bullet_in_projects(paragraphs: list[object]) -> object | None:
+    return find_body_after_section(paragraphs, PROJECTS_LABELS)
+
+
 def repair_docx_anchors(source: Path, output: Path) -> AnchorRepairResult:
     try:
         from docx import Document  # type: ignore
@@ -106,6 +164,24 @@ def repair_docx_anchors(source: Path, output: Path) -> AnchorRepairResult:
         else:
             replace_paragraph_text_preserving_runs(paragraph, "{{APPLYO_SKILLS}}")
             added.append("{{APPLYO_SKILLS}}")
+
+    exp_anchors = [f"{{{{APPLYO_EXP_{i}_BULLETS}}}}" for i in range(4)]
+    missing_exp = [a for a in exp_anchors if a not in already_present]
+    if missing_exp:
+        exp_bullets = find_first_bullet_in_each_experience_block(paragraphs)
+        for anchor, paragraph in zip(missing_exp, exp_bullets):
+            replace_paragraph_text_preserving_runs(paragraph, anchor)
+            added.append(anchor)
+        if not exp_bullets:
+            warnings.append("No work experience bullet blocks found for {{APPLYO_EXP_N_BULLETS}} anchors.")
+
+    if "{{APPLYO_PROJECTS_BULLETS}}" not in already_present:
+        paragraph = find_first_bullet_in_projects(paragraphs)
+        if paragraph is None:
+            warnings.append("No projects section found for {{APPLYO_PROJECTS_BULLETS}}.")
+        else:
+            replace_paragraph_text_preserving_runs(paragraph, "{{APPLYO_PROJECTS_BULLETS}}")
+            added.append("{{APPLYO_PROJECTS_BULLETS}}")
 
     output.parent.mkdir(parents=True, exist_ok=True)
     document.save(str(output))

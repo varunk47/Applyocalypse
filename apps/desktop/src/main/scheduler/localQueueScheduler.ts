@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { app } from "electron";
+import { GmailOAuthService } from "../services/gmailOAuthService";
 import { getLatestCoverLetterText } from "../services/documentIngestionService";
 import {
   JobRepository,
@@ -170,20 +171,34 @@ export class LocalQueueScheduler {
           };
 
           if (credentials.otpHandlingEnabled) {
-            const otpSecret =
-              credentials.otpProviderConnectionId !== null
-                ? providerRepository.getConnectedSecretReferenceById(credentials.otpProviderConnectionId)
-                : null;
-            const otpPassword =
-              otpSecret?.provider === "gmail"
-                ? secureSecretStore.decryptSecret(otpSecret.encryptedReference)
-                : applicationPassword;
-            providerEnv = {
-              ...providerEnv,
-              APPLYO_GMAIL_OTP_ENABLED: "1",
-              APPLYO_GMAIL_OTP_EMAIL: credentials.applicationEmail,
-              APPLYO_GMAIL_OTP_PASSWORD: otpPassword
-            };
+            // OAuth token path (preferred over IMAP app password)
+            const gmailSettingsRepository = new SettingsRepository(this.db);
+            const gmailOAuthService = new GmailOAuthService(gmailSettingsRepository);
+            const oauthTokenJson = gmailOAuthService.getDecryptedTokenJson();
+            if (oauthTokenJson) {
+              const tokenFilePath = join(runWorkDir, "gmail-oauth-token.json");
+              writeFileSync(tokenFilePath, oauthTokenJson, { encoding: "utf8", mode: 0o600 });
+              providerEnv = {
+                ...providerEnv,
+                APPLYO_GMAIL_OAUTH_TOKEN_PATH: tokenFilePath
+              };
+            } else {
+              // IMAP app password fallback
+              const otpSecret =
+                credentials.otpProviderConnectionId !== null
+                  ? providerRepository.getConnectedSecretReferenceById(credentials.otpProviderConnectionId)
+                  : null;
+              const otpPassword =
+                otpSecret?.provider === "gmail"
+                  ? secureSecretStore.decryptSecret(otpSecret.encryptedReference)
+                  : applicationPassword;
+              providerEnv = {
+                ...providerEnv,
+                APPLYO_GMAIL_OTP_ENABLED: "1",
+                APPLYO_GMAIL_OTP_EMAIL: credentials.applicationEmail,
+                APPLYO_GMAIL_OTP_PASSWORD: otpPassword
+              };
+            }
           }
         }
       } catch (error) {

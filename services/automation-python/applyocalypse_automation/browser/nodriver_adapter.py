@@ -197,7 +197,9 @@ class NodriverBrowserAdapter(BrowserAdapter):
 
     async def close(self) -> BrowserStepResult:
         if self._browser is not None:
-            await self._browser.stop()
+            result = self._browser.stop()
+            if asyncio.iscoroutine(result):
+                await result
         self._browser = None
         self._page = None
         return BrowserStepResult(True, "browser closed")

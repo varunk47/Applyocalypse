@@ -87,7 +87,8 @@ class WorkerEvent:
         return json.dumps(self.to_dict(), separators=(",", ":"), ensure_ascii=False)
 
     def emit(self) -> None:
-        print(self.to_json_line(), flush=True)
+        sys.stdout.buffer.write((self.to_json_line() + "\n").encode("utf-8"))
+        sys.stdout.buffer.flush()
 
     def _validate(self) -> None:
         if not self.run_id:

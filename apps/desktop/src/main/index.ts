@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, globalShortcut } from "electron";
 import { join } from "node:path";
 import { QueueRepository, SettingsRepository, closeApplyocalypseDatabase } from "@applyocalypse/db";
 import { createAppDatabase } from "./db/createAppDatabase";
@@ -74,6 +74,7 @@ const boot = async (): Promise<void> => {
   });
 
   mainWindow = createMainWindow(themeController.getState());
+  registerKeyboardShortcuts();
   if (process.env.APPLYO_BOOT_SMOKE === "1") {
     mainWindow.webContents.on("preload-error", (_event, preloadPath, error) => {
       console.error(`boot-smoke:preload-error ${preloadPath} ${error.message}`);
@@ -181,7 +182,9 @@ const boot = async (): Promise<void> => {
               const profile = await api.profile.createStarter({
                 legalName: "Grace Hopper",
                 email: "grace.hopper@example.com",
-                location: "Arlington, VA"
+                location: "Arlington, VA",
+                applicationEmail: "grace.hopper@example.com",
+                applicationPassword: "Smoke#Pass123!"
               });
               const canonicalProfile = await api.profile.getCanonical(profile.id);
               const enqueue = await api.jobs.enqueue(profile.id, [
@@ -356,7 +359,9 @@ const buildFullE2ESmokeScript = (input: { phase: string; resumePath: string; det
         const profile = await api.profile.createStarter({
           legalName: "Ada Lovelace",
           email: "ada.lovelace@example.com",
-          location: "Chicago, IL"
+          location: "Chicago, IL",
+          applicationEmail: "ada.lovelace@example.com",
+          applicationPassword: "Smoke#Pass123!"
         });
         const resume = await api.documents.ingestResumeSource({
           profileId: profile.id,
@@ -433,6 +438,28 @@ app.on("activate", () => {
     const themeController = new ThemeController(settingsRepository, getWindows);
     mainWindow = createMainWindow(themeController.getState());
   }
+});
+
+const SCREEN_ROUTES = ['/', '/intake', '/profile', '/queue', '/run', '/documents', '/history', '/settings'];
+
+const registerKeyboardShortcuts = (): void => {
+  SCREEN_ROUTES.forEach((route, index) => {
+    const key = `CmdOrCtrl+${index + 1}`;
+    globalShortcut.register(key, () => {
+      mainWindow?.webContents.send('navigate', route);
+    });
+  });
+  globalShortcut.register('CmdOrCtrl+P', () => {
+    mainWindow?.webContents.send('navigate', '/intake');
+    mainWindow?.webContents.send('focus-intake');
+  });
+  globalShortcut.register('Escape', () => {
+    mainWindow?.webContents.send('close-modal');
+  });
+};
+
+app.on("will-quit", () => {
+  globalShortcut.unregisterAll();
 });
 
 app.on("window-all-closed", () => {

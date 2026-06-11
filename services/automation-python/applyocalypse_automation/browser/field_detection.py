@@ -496,11 +496,15 @@ def build_click_by_text_script(labels: list[str]) -> str:
     if (element instanceof HTMLInputElement) return element.value || element.getAttribute('aria-label') || '';
     return element.innerText || element.textContent || element.getAttribute('aria-label') || '';
   }};
+  const currentOrigin = location.origin;
+  const isExternalLink = (element) =>
+    element instanceof HTMLAnchorElement && element.href && !element.href.startsWith(currentOrigin) && !element.href.startsWith('#') && !element.href.startsWith('javascript');
   const matches = candidates
     .filter(isVisible)
+    .filter((element) => !isExternalLink(element))
     .map((element) => ({{ element, label: labelFor(element).trim(), normalized: normalize(labelFor(element)) }}))
     .filter((entry) => entry.normalized && !isFinalSubmitLike(entry.normalized))
-    .filter((entry) => requested.some((label) => entry.normalized === label || entry.normalized.includes(label) || label.includes(entry.normalized)));
+    .filter((entry) => requested.some((label) => entry.normalized === label || entry.normalized.includes(label)));
   if (matches.length === 0) {{
     return JSON.stringify({{
       ok: false,

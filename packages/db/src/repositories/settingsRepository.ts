@@ -36,8 +36,8 @@ export class SettingsRepository {
   }
 
   getThemePreference(): ThemePreference {
-    const value = this.get("theme.preference", "system");
-    return ThemePreferenceSchema.catch("system").parse(value);
+    const value = this.get("theme.preference", "dark");
+    return ThemePreferenceSchema.catch("dark").parse(value);
   }
 
   setThemePreference(preference: ThemePreference): void {

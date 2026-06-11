@@ -141,7 +141,157 @@ class GmailMcpOtpExtractor:
             return GmailOtpResult(False, None, "Gmail network access failed", metadata={"status": "network_failed"})
 
 
+_GMAIL_OAUTH_SEARCH_QUERY = "newer_than:1h (code OR verification OR OTP)"
+_GMAIL_OAUTH_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+
+
+def _decode_gmail_part(part: dict) -> str:
+    """Decode a Gmail message part body from base64url encoding."""
+    import base64
+    data = part.get("body", {}).get("data", "")
+    if not data:
+        return ""
+    try:
+        return base64.urlsafe_b64decode(data + "==").decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _extract_text_from_message_payload(payload: dict) -> str:
+    """Recursively extract text from Gmail message payload."""
+    mime_type = payload.get("mimeType", "")
+    if mime_type.startswith("text/"):
+        return _decode_gmail_part(payload)
+    parts = payload.get("parts", [])
+    texts: list[str] = []
+    for part in parts:
+        texts.append(_extract_text_from_message_payload(part))
+    return "\n".join(t for t in texts if t)
+
+
+class GmailApiOtpExtractor:
+    """OAuth2-based Gmail OTP extractor using the Gmail REST API.
+
+    Reads an OAuth token from a JSON file written by the Electron main process.
+    The file follows the google.oauth2.credentials format:
+      {"token": ..., "refresh_token": ..., "token_uri": ...,
+       "client_id": ..., "client_secret": ..., "expiry": ...}
+
+    Refreshes the token automatically when expired and writes the updated
+    credentials back to the file so subsequent runs stay valid.
+    """
+
+    def __init__(
+        self,
+        *,
+        token_json_path: str,
+        timeout_seconds: float = 45,
+        poll_seconds: float = 5,
+    ) -> None:
+        self.token_json_path = token_json_path
+        self.timeout_seconds = timeout_seconds
+        self.poll_seconds = poll_seconds
+
+    def wait_for_latest_code(self) -> GmailOtpResult:
+        try:
+            from google.oauth2.credentials import Credentials  # type: ignore
+        except ImportError:
+            return GmailOtpResult(
+                False,
+                None,
+                "google-auth is not installed; OAuth OTP unavailable",
+                metadata={"status": "missing_dependency"},
+            )
+
+        try:
+            creds = Credentials.from_authorized_user_file(self.token_json_path, _GMAIL_OAUTH_SCOPES)
+        except Exception as exc:
+            return GmailOtpResult(
+                False,
+                None,
+                "Failed to load Gmail OAuth token",
+                metadata={"status": "token_load_failed", "error": str(exc)},
+            )
+
+        deadline = time.monotonic() + self.timeout_seconds
+        last_message = "No Gmail OTP message matched yet"
+        while time.monotonic() <= deadline:
+            result = self._poll_once(creds)
+            if result.ok or result.message not in {"No Gmail OTP message matched", "No Gmail OTP message matched yet"}:
+                return result
+            last_message = result.message
+            time.sleep(self.poll_seconds)
+        return GmailOtpResult(False, None, last_message, metadata={"status": "timeout"})
+
+    def _poll_once(self, creds: Any) -> GmailOtpResult:
+        try:
+            from google.auth.transport.requests import Request  # type: ignore
+            from googleapiclient.discovery import build  # type: ignore
+
+            if creds.expired and creds.refresh_token:
+                creds.refresh(Request())
+                try:
+                    with open(self.token_json_path, "w", encoding="utf-8") as fh:
+                        fh.write(creds.to_json())
+                except Exception:
+                    pass
+
+            service = build("gmail", "v1", credentials=creds, cache_discovery=False)
+            result = (
+                service.users()
+                .messages()
+                .list(userId="me", q=_GMAIL_OAUTH_SEARCH_QUERY, maxResults=10)
+                .execute()
+            )
+            messages = result.get("messages", [])
+            for msg_stub in messages:
+                msg = (
+                    service.users()
+                    .messages()
+                    .get(userId="me", id=msg_stub["id"], format="full")
+                    .execute()
+                )
+                payload = msg.get("payload", {})
+                text = _extract_text_from_message_payload(payload)
+                subject = next(
+                    (h["value"] for h in payload.get("headers", []) if h["name"].lower() == "subject"),
+                    "",
+                )
+                code = extract_otp_code(f"{subject}\n{text}")
+                if code:
+                    return GmailOtpResult(
+                        True,
+                        code,
+                        "Gmail OTP code extracted via API",
+                        provider="gmail_oauth",
+                        metadata={
+                            "message_id_sha256": hashlib.sha256(msg_stub["id"].encode()).hexdigest(),
+                            "searched_at": datetime.now(UTC).isoformat(),
+                        },
+                    )
+            return GmailOtpResult(False, None, "No Gmail OTP message matched")
+        except Exception as exc:
+            return GmailOtpResult(
+                False,
+                None,
+                "Gmail API request failed",
+                metadata={"status": "api_error", "error": str(exc)},
+            )
+
+
 def read_gmail_otp_from_env() -> GmailOtpResult:
+    # OAuth path (preferred when token file is available)
+    token_path = os.getenv("APPLYO_GMAIL_OAUTH_TOKEN_PATH", "")
+    if token_path:
+        timeout = float(os.getenv("APPLYO_GMAIL_OTP_TIMEOUT_SECONDS", "45"))
+        poll = float(os.getenv("APPLYO_GMAIL_OTP_POLL_SECONDS", "5"))
+        return GmailApiOtpExtractor(
+            token_json_path=token_path,
+            timeout_seconds=timeout,
+            poll_seconds=poll,
+        ).wait_for_latest_code()
+
+    # IMAP fallback (legacy app password flow)
     if os.getenv("APPLYO_GMAIL_OTP_ENABLED") != "1":
         return GmailOtpResult(False, None, "Gmail OTP extraction is disabled", metadata={"status": "disabled"})
     timeout = float(os.getenv("APPLYO_GMAIL_OTP_TIMEOUT_SECONDS", "45"))
