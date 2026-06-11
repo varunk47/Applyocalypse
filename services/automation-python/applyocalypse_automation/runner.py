@@ -2307,6 +2307,8 @@ def main() -> None:
                 # Deep-tailor experience and project bullets via LLM if available
                 llm_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
                 if llm_model and job_text:
+                    from .documents.font_detection import detect_resume_font_size
+                    detected_font_size = detect_resume_font_size(output_path) if output_path.exists() else 10
                     try:
                         resume_text_for_tailor = extract_docx_text(output_path) if output_path.exists() else ""
                     except Exception:
@@ -2317,6 +2319,7 @@ def main() -> None:
                         job_description=job_text,
                         resume_text=resume_text_for_tailor,
                         llm_client=LiteLlmClient(model=llm_model),
+                        font_size=detected_font_size,
                     ))
                     if tailored:
                         bullet_map: dict[str, list[str]] = {}

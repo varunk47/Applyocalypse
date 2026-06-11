@@ -260,11 +260,27 @@ class TextArtifactValidator:
 
     @staticmethod
     def check_docx_page_count(docx_path: Path) -> list[ValidationIssue]:
-        """Heuristic one-page check using character count per paragraph.
+        """One-page check: uses real PDF page count when a companion PDF exists,
+        otherwise falls back to a heuristic character-count estimate.
 
-        Estimates pages as total non-whitespace characters / 3500.
-        Flags RESUME_LENGTH_WARNING if estimated page count > 1.2.
+        Companion PDF is expected at the same path with a .pdf extension.
+        Flags RESUME_LENGTH_WARNING if page count > 1.
         """
+        from applyocalypse_automation.documents.font_detection import count_pdf_pages
+
+        companion_pdf = docx_path.with_suffix(".pdf")
+        if companion_pdf.exists():
+            pages = count_pdf_pages(companion_pdf)
+            if pages > 1:
+                return [ValidationIssue(
+                    "RESUME_LENGTH_WARNING",
+                    f"Resume is {pages} pages. Trim to one page for best ATS results.",
+                    "warning",
+                )]
+            if pages > 0:
+                return []
+
+        # Heuristic fallback: total non-whitespace chars / 3500
         try:
             from docx import Document  # type: ignore[import]
             doc = Document(str(docx_path))
