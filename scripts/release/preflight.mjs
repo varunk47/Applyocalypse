@@ -17,7 +17,7 @@ const checkGit = () => {
   if (remote.status !== 0 || !remote.stdout.trim()) {
     return { ok: false, blocker: "origin_remote_missing" };
   }
-  const status = spawnSync("git", ["-C", rootDir, "status", "--short"], { encoding: "utf8" });
+  const status = spawnSync("git", ["-C", rootDir, "status", "--short", "--untracked-files=no"], { encoding: "utf8" });
   return {
     ok: true,
     origin: remote.stdout.trim(),
