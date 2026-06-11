@@ -840,6 +840,152 @@ def emit_cover_letter_requirement_from_fields(run_id: str, fields: list[BrowserF
     return requirement
 
 
+async def _lazy_generate_cover_letter_for_portal(
+    *,
+    run_id: str,
+    work_dir: Path,
+    output_dir: Path,
+) -> dict[str, object] | None:
+    """Lazily generate a cover letter DOCX when a portal upload field requires one.
+
+    Only runs when APPLYO_LAZY_COVER_LETTER=1. Reads canonical_profile, job text,
+    sample text, and job metadata from well-known work_dir paths written by the
+    scheduler before the run starts.
+
+    Emits COVER_LETTER_RENDERED and USER_REVIEW_REQUIRED(DOCUMENT) on success.
+    Returns a generated-file metadata dict (same shape as ArtifactMetadata.to_payload)
+    suitable for appending to generated_files, or None on failure.
+    """
+    if os.getenv("APPLYO_LAZY_COVER_LETTER") != "1":
+        return None
+
+    canonical_profile: dict[str, object] = {}
+    profile_path = work_dir / "canonical-profile.json"
+    if profile_path.exists():
+        try:
+            canonical_profile = json.loads(profile_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    job_text = ""
+    for _job_name in ("job-description.txt", "job-description-scraped.txt"):
+        _p = work_dir / _job_name
+        if _p.exists():
+            job_text = _p.read_text(encoding="utf-8")
+            break
+
+    cover_letter_sample: str | None = None
+    sample_path = work_dir / "cover-letter-sample.txt"
+    if sample_path.exists():
+        cover_letter_sample = sample_path.read_text(encoding="utf-8") or None
+
+    job_metadata: dict[str, object] = {}
+    metadata_path = work_dir / "job-target.json"
+    if metadata_path.exists():
+        try:
+            job_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    cover_letter_content: str | None = None
+    cl_generation_mode = "DETERMINISTIC"
+    cl_llm_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
+    if cl_llm_model and job_text:
+        try:
+            generated = await generate_cover_letter(
+                job_description=job_text,
+                canonical_profile=canonical_profile,
+                cover_letter_sample=cover_letter_sample,
+                llm_client=LiteLlmClient(model=cl_llm_model),
+            )
+            if generated:
+                cover_letter_content = generated.text
+                cl_generation_mode = "LLM"
+        except Exception:
+            pass
+
+    if cover_letter_content is None:
+        tailoring_plan: dict[str, object] = {}
+        plan_path = work_dir / "tailoring-plan.json"
+        if plan_path.exists():
+            try:
+                tailoring_plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            except Exception:
+                pass
+        cover_letter_content = build_cover_letter_text(
+            canonical_profile=canonical_profile,
+            job_metadata=job_metadata,
+            tailoring_plan=tailoring_plan,
+        )
+        cl_generation_mode = "DETERMINISTIC"
+
+    if not cover_letter_content:
+        return None
+
+    report = TextArtifactValidator().validate(cover_letter_content, artifact_kind="cover_letter")
+    report_path = work_dir / "cover-letter-lazy-validation-report.json"
+    report_path.write_text(json.dumps(report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
+
+    if not report.passed:
+        WorkerEvent(
+            event_type=EventType.VALIDATION_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.ERROR,
+            message="Lazily generated cover letter failed validation",
+            machine_state={"generation_mode": cl_generation_mode},
+            ui_state={"current_step": "document_review", "requires_user_review": True},
+            payload={"artifact_kind": "cover_letter", "validation_report_path": str(report_path), **report.to_dict()},
+        ).emit()
+        return None
+
+    profile = canonical_profile.get("profile") if isinstance(canonical_profile.get("profile"), dict) else {}
+    first_name, last_name = split_legal_name(str(profile.get("legalName") or profile.get("displayName") or "Candidate Profile"))
+    company = str(job_metadata.get("company") or "")
+    role = str(job_metadata.get("role") or "")
+    cl_filename_input = GeneratedNameInput(
+        first_name=first_name,
+        last_name=last_name,
+        company=company,
+        role=role,
+        kind="Cover Letter",
+        extension="docx",
+    )
+    cl_docx_path = choose_collision_safe_path(output_dir, build_generated_filename(cl_filename_input))
+    build_cover_letter_docx(cover_letter_content, canonical_profile, cl_docx_path)
+
+    cl_artifact = metadata_for_existing_file(
+        path=cl_docx_path,
+        file_kind="COVER_LETTER",
+        format_name="DOCX",
+        review_only=True,
+    )
+
+    WorkerEvent(
+        event_type=EventType.COVER_LETTER_RENDERED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.INFO,
+        message="Cover letter generated lazily for portal upload field",
+        machine_state={"format": "DOCX", "review_only": True, "generation_mode": cl_generation_mode},
+        ui_state={"current_step": "document_review"},
+        payload={**cl_artifact.to_payload(), "validation_report_path": str(report_path)},
+    ).emit()
+
+    WorkerEvent(
+        event_type=EventType.USER_REVIEW_REQUIRED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.WARN,
+        message="Lazily generated cover letter awaits review before upload",
+        machine_state={"artifact_kind": "DOCUMENT", "generation_mode": cl_generation_mode},
+        ui_state={"requires_user_review": True, "current_step": "document_review", "artifact_kind": "DOCUMENT"},
+        payload={"artifact_kind": "DOCUMENT", **cl_artifact.to_payload()},
+    ).emit()
+
+    return cl_artifact.to_payload()
+
+
 def accepted_upload_formats(field: BrowserField) -> list[str]:
     accept = str(field.metadata.get("accept") or "").lower()
     if not accept or accept.strip() in {"*", "*/*"}:
@@ -1565,7 +1711,22 @@ async def run_browser_apply_after_review(
                 await adapter.close()
                 return
             fields = await adapter.detect_fields()
-        emit_cover_letter_requirement_from_fields(run_id, fields, context="approved_field_detection")
+        cl_requirement = emit_cover_letter_requirement_from_fields(run_id, fields, context="approved_field_detection")
+        if (
+            cl_requirement is not None
+            and cl_requirement.get("required")
+            and not any(
+                str(generated_file_value(f, "file_kind") or "").upper() == "COVER_LETTER"
+                for f in (generated_files if isinstance(generated_files, list) else [])
+            )
+        ):
+            lazy_cl = await _lazy_generate_cover_letter_for_portal(
+                run_id=run_id,
+                work_dir=work_dir,
+                output_dir=work_dir,
+            )
+            if lazy_cl is not None:
+                generated_files = [*(generated_files if isinstance(generated_files, list) else []), lazy_cl]
         missing_required_documents: list[dict[str, object]] = []
         missing_required_answers: list[dict[str, object]] = []
         for field in fields:
