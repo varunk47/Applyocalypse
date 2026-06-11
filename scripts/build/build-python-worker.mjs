@@ -62,6 +62,29 @@ const main = async () => {
   await mkdir(join(buildDir, "pyinstaller"), { recursive: true });
   await mkdir(join(buildDir, "specs"), { recursive: true });
 
+  const hiddenImports = [
+    // PDF page counting (Phase 4)
+    "pypdf",
+    "pypdf._reader",
+    "pypdf._page",
+    "pypdf.filters",
+    // SeleniumBase UC Mode adapter (Phase 6.1)
+    "seleniumbase",
+    "seleniumbase.core.browser_launcher",
+    "seleniumbase.core.download_helper",
+    // Google API client — Gmail OAuth OTP (Phase 6.3)
+    "googleapiclient",
+    "googleapiclient.discovery",
+    "googleapiclient.http",
+    "google.auth",
+    "google.auth.transport.requests",
+    "google.oauth2.credentials",
+    "google_auth_oauthlib",
+    "google_auth_oauthlib.flow"
+  ];
+
+  const hiddenImportArgs = hiddenImports.flatMap((m) => ["--hidden-import", m]);
+
   await run(venvPython, [
     "-m",
     "PyInstaller",
@@ -78,6 +101,7 @@ const main = async () => {
     join(buildDir, "pyinstaller"),
     "--specpath",
     join(buildDir, "specs"),
+    ...hiddenImportArgs,
     join(serviceDir, "applyocalypse_worker_entry.py")
   ]);
 

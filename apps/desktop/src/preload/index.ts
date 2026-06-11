@@ -204,6 +204,33 @@ const api = {
         { limit, offset }
       )
   },
+  gmail: {
+    startOAuth: (input: { clientId: string; clientSecret: string }) =>
+      invoke<{ clientId: string; clientSecret: string }, { ok: boolean; message: string; email: string | null }>(
+        IpcContracts.gmailStartOAuth.channel,
+        input
+      ),
+    getOAuthStatus: () =>
+      invoke<Record<string, never>, { connected: boolean; email: string | null }>(
+        IpcContracts.gmailGetOAuthStatus.channel,
+        {}
+      ),
+    disconnectOAuth: () =>
+      invoke<Record<string, never>, { ok: boolean }>(IpcContracts.gmailDisconnectOAuth.channel, {})
+  },
+  system: {
+    checkConverters: () =>
+      invoke<
+        Record<string, never>,
+        {
+          converters: {
+            libreoffice: { available: boolean; version: string | null; path: string | null; installUrl: string };
+            word: { available: boolean; version: string | null; path: string | null; installUrl: string };
+            tectonic: { available: boolean; version: string | null; path: string | null; installUrl: string };
+          };
+        }
+      >(IpcContracts.systemCheckConverters.channel, {})
+  },
   navigation: {
     subscribe: (listener: (msg: { type: "navigate" | "focus-intake" | "close-modal"; route?: string }) => void): (() => void) => {
       const onNavigate = (_e: Electron.IpcRendererEvent, route: string) => listener({ type: "navigate", route });

@@ -95,7 +95,11 @@ export const IpcChannels = {
   foldersOpenDownloads: "folders:open-downloads",
   foldersChooseOutputDir: "folders:choose-output-dir",
   chatAppendMessage: "chat:append-message",
-  chatList: "chat:list"
+  chatList: "chat:list",
+  gmailStartOAuth: "gmail:start-oauth",
+  gmailGetOAuthStatus: "gmail:get-oauth-status",
+  gmailDisconnectOAuth: "gmail:disconnect-oauth",
+  systemCheckConverters: "system:check-converters"
 } as const;
 
 export const IpcContracts = {
@@ -335,6 +339,32 @@ export const IpcContracts = {
     IpcChannels.chatList,
     PaginationSchema,
     z.object({ items: z.array(ChatMessageSchema), total: z.number().int().nonnegative() })
+  ),
+  gmailStartOAuth: contract(
+    IpcChannels.gmailStartOAuth,
+    z.object({ clientId: z.string().min(1), clientSecret: z.string().min(1) }).strict(),
+    z.object({ ok: z.boolean(), message: z.string(), email: z.string().nullable() })
+  ),
+  gmailGetOAuthStatus: contract(
+    IpcChannels.gmailGetOAuthStatus,
+    EmptyRequestSchema,
+    z.object({ connected: z.boolean(), email: z.string().nullable() })
+  ),
+  gmailDisconnectOAuth: contract(
+    IpcChannels.gmailDisconnectOAuth,
+    EmptyRequestSchema,
+    z.object({ ok: z.boolean() })
+  ),
+  systemCheckConverters: contract(
+    IpcChannels.systemCheckConverters,
+    EmptyRequestSchema,
+    z.object({
+      converters: z.object({
+        libreoffice: z.object({ available: z.boolean(), version: z.string().nullable(), path: z.string().nullable(), installUrl: z.string() }),
+        word: z.object({ available: z.boolean(), version: z.string().nullable(), path: z.string().nullable(), installUrl: z.string() }),
+        tectonic: z.object({ available: z.boolean(), version: z.string().nullable(), path: z.string().nullable(), installUrl: z.string() })
+      })
+    })
   )
 } as const;
 

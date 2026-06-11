@@ -22,6 +22,8 @@ import type { z } from "zod";
 import { DocumentIngestionService } from "../services/documentIngestionService";
 import type { PythonWorkerSupervisor } from "../services/pythonWorkerSupervisor";
 import { SecureSecretStore } from "../services/secureSecretStore";
+import { GmailOAuthService } from "../services/gmailOAuthService";
+import { checkConverters } from "../services/converterDiagnostics";
 import { buildControlDocumentFiles } from "../services/runApprovalPayload";
 import { writeWorkerControlFile } from "../services/workerControlFile";
 
@@ -681,4 +683,18 @@ export const registerIpcHandlers = ({
     })
   );
   handleContract(IpcContracts.chatList, ({ limit, offset }) => chatRepository.list(limit, offset));
+
+  const gmailOAuthService = new GmailOAuthService(settingsRepository);
+  handleContract(IpcContracts.gmailStartOAuth, ({ clientId, clientSecret }) =>
+    gmailOAuthService.startOAuthFlow(clientId, clientSecret)
+  );
+  handleContract(IpcContracts.gmailGetOAuthStatus, () => gmailOAuthService.getStatus());
+  handleContract(IpcContracts.gmailDisconnectOAuth, () => {
+    gmailOAuthService.disconnect();
+    return { ok: true };
+  });
+
+  handleContract(IpcContracts.systemCheckConverters, () => ({
+    converters: checkConverters()
+  }));
 };

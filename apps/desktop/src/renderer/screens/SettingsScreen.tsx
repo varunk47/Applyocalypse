@@ -1,6 +1,6 @@
-import { For, Show } from 'solid-js'
+import { For, Show, createSignal, onMount } from 'solid-js'
 import { createStore } from 'solid-js/store'
-import { ShieldCheck } from 'lucide-solid'
+import { ShieldCheck, Mail, Wrench } from 'lucide-solid'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import type { ThemePreference } from '@applyocalypse/shared-types'
 import { PROVIDER_OPTIONS, type ProviderOptionValue } from '../utils/providerOptions'
@@ -52,6 +52,59 @@ export default function SettingsScreen() {
 
   const maxConcurrent = () => Number(state.settings['automation.maxConcurrentApplications'] ?? 2)
   const outputDir = () => (state.settings['files.outputDir'] as string | undefined) ?? ''
+
+  type ConverterStatus = { available: boolean; version: string | null; path: string | null; installUrl: string }
+  type ConverterMap = { libreoffice: ConverterStatus; word: ConverterStatus; tectonic: ConverterStatus }
+  const [converters, setConverters] = createSignal<ConverterMap | null>(null)
+  const [convertersLoading, setConvertersLoading] = createSignal(false)
+
+  const checkConverters = async () => {
+    setConvertersLoading(true)
+    try {
+      const result = await window.applyocalypse.system.checkConverters()
+      setConverters(result.converters)
+    } finally {
+      setConvertersLoading(false)
+    }
+  }
+
+  const [gmailStatus, setGmailStatus] = createSignal<{ connected: boolean; email: string | null }>({ connected: false, email: null })
+  const [gmailOAuthForm, setGmailOAuthForm] = createStore({ clientId: '', clientSecret: '' })
+  const [gmailConnecting, setGmailConnecting] = createSignal(false)
+  const [gmailError, setGmailError] = createSignal<string | null>(null)
+
+  onMount(async () => {
+    const status = await window.applyocalypse.gmail.getOAuthStatus()
+    setGmailStatus(status)
+  })
+
+  const connectGmail = async () => {
+    const clientId = gmailOAuthForm.clientId.trim()
+    const clientSecret = gmailOAuthForm.clientSecret.trim()
+    if (!clientId || !clientSecret) {
+      setGmailError('Enter your Google OAuth client ID and secret.')
+      return
+    }
+    setGmailError(null)
+    setGmailConnecting(true)
+    try {
+      const result = await window.applyocalypse.gmail.startOAuth({ clientId, clientSecret })
+      if (result.ok) {
+        setGmailStatus({ connected: true, email: result.email })
+        setGmailOAuthForm('clientId', '')
+        setGmailOAuthForm('clientSecret', '')
+      } else {
+        setGmailError(result.message)
+      }
+    } finally {
+      setGmailConnecting(false)
+    }
+  }
+
+  const disconnectGmail = async () => {
+    await window.applyocalypse.gmail.disconnectOAuth()
+    setGmailStatus({ connected: false, email: null })
+  }
 
   return (
     <section class="surface-panel surface-panel-active" data-gsap="panel" data-view-panel>
@@ -186,6 +239,124 @@ export default function SettingsScreen() {
             Change
           </button>
         </div>
+      </div>
+
+      {/* Section 6: Converter diagnostics */}
+      <div style={{ 'margin-top': '2rem' }}>
+        <div class="section-header">
+          <div>
+            <div class="panel-kicker">Document converters</div>
+            <h3>Converter diagnostics</h3>
+          </div>
+          <Wrench size={20} aria-hidden="true" />
+        </div>
+        <Show
+          when={converters() !== null}
+          fallback={
+            <button
+              class="secondary-action"
+              type="button"
+              disabled={convertersLoading()}
+              onClick={() => void checkConverters()}
+            >
+              <Wrench size={17} aria-hidden="true" />
+              <span>{convertersLoading() ? 'Checking...' : 'Check converters'}</span>
+            </button>
+          }
+        >
+          {(['libreoffice', 'word', 'tectonic'] as const).map((key) => {
+            const labels: Record<string, string> = { libreoffice: 'LibreOffice', word: 'Microsoft Word', tectonic: 'Tectonic (LaTeX)' }
+            const status = converters()![key]
+            return (
+              <div class="queue-row static-row" style={{ 'margin-top': '0.4rem' }}>
+                <span style={{ color: status.available ? 'var(--color-success, green)' : 'var(--color-danger, red)' }}>
+                  {status.available ? 'OK' : 'MISSING'}
+                </span>
+                <strong>{labels[key]}</strong>
+                <Show when={status.available && status.version}>
+                  <span style={{ color: 'var(--text-secondary)', 'font-size': '0.78rem' }}>{status.version}</span>
+                </Show>
+                <Show when={!status.available}>
+                  <a
+                    href={status.installUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    class="secondary-action"
+                    style={{ 'font-size': '0.78rem', padding: '2px 8px' }}
+                  >
+                    Install
+                  </a>
+                </Show>
+              </div>
+            )
+          })}
+          <button
+            class="secondary-action"
+            type="button"
+            style={{ 'margin-top': '0.5rem' }}
+            disabled={convertersLoading()}
+            onClick={() => void checkConverters()}
+          >
+            <span>{convertersLoading() ? 'Checking...' : 'Re-check'}</span>
+          </button>
+        </Show>
+      </div>
+
+      {/* Section 5: Gmail OTP via OAuth */}
+      <div style={{ 'margin-top': '2rem' }}>
+        <div class="section-header">
+          <div>
+            <div class="panel-kicker">OTP extraction</div>
+            <h3>Gmail OAuth</h3>
+          </div>
+          <Mail size={20} aria-hidden="true" />
+        </div>
+        <Show
+          when={gmailStatus().connected}
+          fallback={
+            <div class="starter-profile">
+              <p class="fine-print">Connect your Gmail account to automatically extract OTP codes during application runs. Requires a Google Cloud project with the Gmail API enabled.</p>
+              <label>
+                <span>OAuth client ID</span>
+                <input
+                  value={gmailOAuthForm.clientId}
+                  onInput={(e) => setGmailOAuthForm('clientId', e.currentTarget.value)}
+                  placeholder="*.apps.googleusercontent.com"
+                  autocomplete="off"
+                />
+              </label>
+              <label>
+                <span>OAuth client secret</span>
+                <input
+                  type="password"
+                  value={gmailOAuthForm.clientSecret}
+                  onInput={(e) => setGmailOAuthForm('clientSecret', e.currentTarget.value)}
+                  autocomplete="off"
+                />
+              </label>
+              <Show when={gmailError()}>
+                <p class="fine-print" style={{ color: 'var(--color-danger, red)' }}>{gmailError()}</p>
+              </Show>
+              <button
+                class="secondary-action"
+                type="button"
+                disabled={gmailConnecting()}
+                onClick={() => void connectGmail()}
+              >
+                <Mail size={17} aria-hidden="true" />
+                <span>{gmailConnecting() ? 'Connecting...' : 'Connect Gmail'}</span>
+              </button>
+            </div>
+          }
+        >
+          <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
+            <span style={{ color: 'var(--color-success, green)' }}>CONNECTED</span>
+            <strong>{gmailStatus().email ?? 'Gmail account'}</strong>
+            <button class="secondary-action" type="button" onClick={() => void disconnectGmail()}>
+              Disconnect
+            </button>
+          </div>
+        </Show>
       </div>
     </section>
   )
