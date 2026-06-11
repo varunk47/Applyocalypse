@@ -1,0 +1,32 @@
+[
+  {
+    "portal_id": "workday",
+    "url": "https://testcompany.myworkdayjobs.com/External/job/Location/Role_JR-001",
+    "requires_credentials": true,
+    "notes": "Replace with a real tenant URL (e.g. acme.myworkdayjobs.com). Requires test account and MFA bypass in cert env."
+  },
+  {
+    "portal_id": "greenhouse",
+    "url": "https://boards.greenhouse.io/certco/jobs/1234567",
+    "requires_credentials": false,
+    "notes": "Replace with a current public Greenhouse job posting URL. No account required for static gate check."
+  },
+  {
+    "portal_id": "lever",
+    "url": "https://jobs.lever.co/certco/aaaabbbb-cccc-dddd-eeee-ffff00001111",
+    "requires_credentials": false,
+    "notes": "Replace with a current public Lever job posting URL. No account required for static gate check."
+  },
+  {
+    "portal_id": "icims",
+    "url": "https://careers-certco.icims.com/jobs/1001/software-engineer/job",
+    "requires_credentials": true,
+    "notes": "Replace with a current iCIMS URL for a test tenant. Requires test identity."
+  },
+  {
+    "portal_id": "taleo",
+    "url": "https://certco.taleo.net/careersection/2/jobdetail.ftl?job=1001",
+    "requires_credentials": true,
+    "notes": "Replace with a current Taleo tenant URL. Requires returning-candidate test identity."
+  }
+]
