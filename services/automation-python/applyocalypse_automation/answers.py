@@ -79,34 +79,154 @@ def _work_authorization(profile: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+def _eeo(profile: dict[str, Any]) -> dict[str, Any]:
+    value = profile.get("equalEmploymentDefaults")
+    return value if isinstance(value, dict) else {}
+
+
+def _address(profile: dict[str, Any]) -> dict[str, Any]:
+    value = profile.get("address")
+    return value if isinstance(value, dict) else {}
+
+
+_ADDRESS_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("country",), "country"),
+    (("city", "municipality"), "city"),
+    (("state", "province", "region"), "state"),
+    (("address line 1", "street address", "address 1", "address1"), "addressLine1"),
+    (("address line 2", "apt", "suite", "address 2", "address2"), "addressLine2"),
+    (("zip", "postal", "post code", "postcode"), "postalCode"),
+    (("county",), "county"),
+]
+
+_EEO_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("gender", "sex"), "gender"),
+    (("disability", "disabled"), "disability"),
+    (("veteran", "military service"), "veteran"),
+    (("race",), "race"),
+    (("ethnicity", "ethnic"), "race"),
+    (("hispanic", "latino"), "hispanicOrLatino"),
+    (("lgbtq", "sexual orientation"), "lgbtq"),
+]
+
+
 def propose_answer_for_detected_field(
     *,
     field_label: str,
     field_type: str,
     canonical_profile: dict[str, Any],
+    autofill_approved_defaults: bool = False,
 ) -> ProposedApplicationAnswer:
     profile = _profile(canonical_profile)
     label = field_label.lower()
 
+    # ── First / last name ──────────────────────────────────────────────────────
+    if any(kw in label for kw in ("first name", "given name", "firstname")):
+        value = profile.get("firstName") or (
+            profile.get("legalName", "").split(" ")[0] if profile.get("legalName") else None
+        )
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type,
+            proposed_value=str(value) if value else None,
+            confidence=0.94 if value else 0.24, source="PROFILE" if value else "UNKNOWN",
+            requires_review=not autofill_approved_defaults or not bool(value),
+        )
+
+    if any(kw in label for kw in ("last name", "family name", "surname", "lastname")):
+        value = profile.get("lastName")
+        if not value:
+            legal = profile.get("legalName", "")
+            parts = legal.split(" ", 1)
+            value = parts[1] if len(parts) > 1 else None
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type,
+            proposed_value=str(value) if value else None,
+            confidence=0.94 if value else 0.24, source="PROFILE" if value else "UNKNOWN",
+            requires_review=not autofill_approved_defaults or not bool(value),
+        )
+
+    # ── EEO fields — always requires_review (legal sensitivity) ──────────────────
+    # Must come before address rules because "ethnicity" contains "city"
+    eeo = _eeo(profile)
+    for aliases, eeo_key in _EEO_RULES:
+        if any(alias in label for alias in aliases):
+            raw = eeo.get(eeo_key)
+            value = str(raw) if raw is not None else None
+            return ProposedApplicationAnswer(
+                field_label=field_label, field_type=field_type,
+                proposed_value=value,
+                confidence=0.88 if value else 0.20, source="PROFILE" if value else "UNKNOWN",
+                requires_review=True,
+            )
+
+    # ── Address fields ────────────────────────────────────────────────────────────
+    address = _address(profile)
+    for aliases, addr_key in _ADDRESS_RULES:
+        if any(alias in label for alias in aliases):
+            value = address.get(addr_key)
+            return ProposedApplicationAnswer(
+                field_label=field_label, field_type=field_type,
+                proposed_value=str(value) if value else None,
+                confidence=0.90 if value else 0.20, source="PROFILE" if value else "UNKNOWN",
+                requires_review=not (autofill_approved_defaults and bool(value)),
+            )
+
+    # ── Previously employed / former employee ──────────────────────────────────
+    if any(kw in label for kw in ("previously employed", "former employee", "worked for us", "worked here", "previously worked", "ever worked for")):
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type,
+            proposed_value="No", confidence=0.90, source="PROFILE", requires_review=True,
+        )
+
+    # ── Criminal / background ──────────────────────────────────────────────────
+    if any(kw in label for kw in ("criminal", "convicted", "felony", "misdemeanor")):
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type,
+            proposed_value="No", confidence=0.90, source="PROFILE", requires_review=True,
+        )
+
+    # ── Standard profile candidates ────────────────────────────────────────────
     candidates: list[tuple[tuple[str, ...], str, float]] = [
         (("email", "e-mail", "login"), "applicationEmail", 0.96),
         (("phone", "mobile", "telephone"), "phone", 0.94),
         (("full name", "legal name", "name"), "legalName", 0.92),
-        (("location", "city", "address"), "location", 0.78),
+        (("location",), "location", 0.78),
     ]
     for aliases, profile_key, confidence in candidates:
         if any(alias in label for alias in aliases):
             value = profile.get(profile_key) or (profile.get("email") if profile_key == "applicationEmail" else None)
+            non_review_keys = {"applicationEmail", "phone", "legalName"}
             return ProposedApplicationAnswer(
-                field_label=field_label,
-                field_type=field_type,
+                field_label=field_label, field_type=field_type,
                 proposed_value=str(value) if value else None,
                 confidence=confidence if value else 0.24,
                 source="PROFILE" if value else "UNKNOWN",
-                requires_review=not bool(value) or profile_key in {"location"},
+                requires_review=not bool(value) or (
+                    not (autofill_approved_defaults and profile_key in non_review_keys)
+                    and profile_key not in non_review_keys
+                ),
             )
 
+    # ── LinkedIn / GitHub / portfolio ──────────────────────────────────────────
     if "linkedin" in label or "portfolio" in label or "github" in label or "website" in label:
+        # Check convenience fields first
+        if "linkedin" in label:
+            direct = profile.get("linkedinUrl")
+            if direct:
+                return ProposedApplicationAnswer(
+                    field_label=field_label, field_type=field_type,
+                    proposed_value=str(direct), confidence=0.90, source="PROFILE",
+                    requires_review=not autofill_approved_defaults,
+                )
+        if "github" in label:
+            direct = profile.get("githubUrl")
+            if direct:
+                return ProposedApplicationAnswer(
+                    field_label=field_label, field_type=field_type,
+                    proposed_value=str(direct), confidence=0.90, source="PROFILE",
+                    requires_review=not autofill_approved_defaults,
+                )
+        # Fall through to links[] lookup
         links = profile.get("links") if isinstance(profile.get("links"), list) else []
         selected_url: str | None = None
         for link in links:
@@ -120,43 +240,44 @@ def propose_answer_for_detected_field(
             if not selected_url and (link_label in label or "portfolio" in label or "website" in label):
                 selected_url = url
         return ProposedApplicationAnswer(
-            field_label=field_label,
-            field_type=field_type,
+            field_label=field_label, field_type=field_type,
             proposed_value=selected_url,
             confidence=0.86 if selected_url else 0.25,
             source="PROFILE" if selected_url else "UNKNOWN",
-            requires_review=not bool(selected_url),
+            requires_review=not (autofill_approved_defaults and bool(selected_url)),
         )
 
+    # ── Work-auth: free-text sponsorship detail ────────────────────────────────
     if "authorization" in label or "sponsorship" in label or "visa" in label or "legally authorized" in label:
+        eeo = _eeo(profile)
+        detail_text = eeo.get("sponsorshipDetailText") if field_type in ("textarea", "text") else None
+        if detail_text:
+            return ProposedApplicationAnswer(
+                field_label=field_label, field_type=field_type,
+                proposed_value=str(detail_text), confidence=0.84, source="PROFILE",
+                requires_review=True,
+            )
         work_authorization = _work_authorization(profile)
         value = work_authorization.get("summary") or work_authorization.get("status")
         return ProposedApplicationAnswer(
-            field_label=field_label,
-            field_type=field_type,
+            field_label=field_label, field_type=field_type,
             proposed_value=str(value) if value else None,
-            confidence=0.82 if value else 0.18,
-            source="PROFILE" if value else "UNKNOWN",
+            confidence=0.82 if value else 0.18, source="PROFILE" if value else "UNKNOWN",
             requires_review=True,
         )
 
+    # ── Salary / compensation ──────────────────────────────────────────────────
     if "salary" in label or "compensation" in label or "expected pay" in label:
         defaults = profile.get("jobDefaults") if isinstance(profile.get("jobDefaults"), dict) else {}
         value = defaults.get("salaryExpectation") or defaults.get("compensationExpectation")
         return ProposedApplicationAnswer(
-            field_label=field_label,
-            field_type=field_type,
+            field_label=field_label, field_type=field_type,
             proposed_value=str(value) if value else None,
-            confidence=0.72 if value else 0.16,
-            source="PROFILE" if value else "UNKNOWN",
+            confidence=0.72 if value else 0.16, source="PROFILE" if value else "UNKNOWN",
             requires_review=True,
         )
 
     return ProposedApplicationAnswer(
-        field_label=field_label,
-        field_type=field_type,
-        proposed_value=None,
-        confidence=0.12,
-        source="UNKNOWN",
-        requires_review=True,
+        field_label=field_label, field_type=field_type,
+        proposed_value=None, confidence=0.12, source="UNKNOWN", requires_review=True,
     )
