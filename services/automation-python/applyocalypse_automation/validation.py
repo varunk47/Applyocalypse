@@ -174,8 +174,17 @@ def extract_artifact_text(path: Path) -> ArtifactTextExtraction:
     raise ValueError(f"Unsupported validation artifact format: {suffix or '<none>'}")
 
 
+_BULLET_CHAR_LIMIT_DEFAULT = 240
+
+
 class TextArtifactValidator:
-    def validate(self, text: str, *, artifact_kind: ArtifactKind) -> ValidationReport:
+    def validate(
+        self,
+        text: str,
+        *,
+        artifact_kind: ArtifactKind,
+        bullet_char_limit: int = _BULLET_CHAR_LIMIT_DEFAULT,
+    ) -> ValidationReport:
         blocking: list[ValidationIssue] = []
         warnings: list[ValidationIssue] = []
         lower = text.lower()
@@ -204,6 +213,13 @@ class TextArtifactValidator:
                 word_count = len([token for token in re.split(r"\s+", bullet.strip()) if token])
                 if word_count > 32:
                     warnings.append(ValidationIssue("LONG_BULLET", "Resume bullet is longer than the target length.", "warning"))
+                bullet_text = re.sub(r"^\s*[-*]\s+", "", bullet)
+                if len(bullet_text) > bullet_char_limit:
+                    warnings.append(ValidationIssue(
+                        "BULLET_TOO_LONG",
+                        f"Resume bullet exceeds {bullet_char_limit} characters ({len(bullet_text)} chars).",
+                        "warning",
+                    ))
                 if any(re.search(pattern, bullet, flags=re.IGNORECASE) for pattern in WEAK_BULLET_PATTERNS):
                     warnings.append(ValidationIssue("WEAK_BULLET", "Resume bullet uses weak or vague phrasing.", "warning"))
 
@@ -221,14 +237,46 @@ class TextArtifactValidator:
 
         return ValidationReport(passed=not blocking, blocking_issues=blocking, warnings=warnings)
 
-    def validate_file(self, path: Path, *, artifact_kind: ArtifactKind) -> ValidationReport:
+    def validate_file(
+        self,
+        path: Path,
+        *,
+        artifact_kind: ArtifactKind,
+        bullet_char_limit: int = _BULLET_CHAR_LIMIT_DEFAULT,
+    ) -> ValidationReport:
         extraction = extract_artifact_text(path)
-        report = self.validate(extraction.text, artifact_kind=artifact_kind)
+        report = self.validate(extraction.text, artifact_kind=artifact_kind, bullet_char_limit=bullet_char_limit)
         extraction_warnings = [
             ValidationIssue("TEXT_EXTRACTION_WARNING", warning, "warning") for warning in extraction.warnings
         ]
+        length_warnings: list[ValidationIssue] = []
+        if artifact_kind == "resume" and path.suffix.lower() in {".docx", ".tex"}:
+            length_warnings = self.check_docx_page_count(path)
         return ValidationReport(
             passed=report.passed,
             blocking_issues=report.blocking_issues,
-            warnings=[*extraction_warnings, *report.warnings],
+            warnings=[*extraction_warnings, *length_warnings, *report.warnings],
         )
+
+    @staticmethod
+    def check_docx_page_count(docx_path: Path) -> list[ValidationIssue]:
+        """Heuristic one-page check using character count per paragraph.
+
+        Estimates pages as total non-whitespace characters / 3500.
+        Flags RESUME_LENGTH_WARNING if estimated page count > 1.2.
+        """
+        try:
+            from docx import Document  # type: ignore[import]
+            doc = Document(str(docx_path))
+            total_chars = sum(len(p.text.strip()) for p in doc.paragraphs if p.text.strip())
+            estimated_pages = total_chars / 3500
+            if estimated_pages > 1.2:
+                return [ValidationIssue(
+                    "RESUME_LENGTH_WARNING",
+                    f"Resume may exceed one page (estimated {estimated_pages:.1f} pages). "
+                    "Trim to keep ATS scanners reading all content.",
+                    "warning",
+                )]
+        except Exception:
+            pass
+        return []

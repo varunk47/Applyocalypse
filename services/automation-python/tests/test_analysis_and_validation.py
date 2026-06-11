@@ -283,3 +283,39 @@ def test_cover_letter_artifact_refuses_missing_evidence() -> None:
         )
         is None
     )
+
+
+def test_validator_warns_bullet_too_long_with_default_limit() -> None:
+    long_bullet = "A" * 241
+    report = TextArtifactValidator().validate(
+        f"Experience\nSkills\n- {long_bullet}",
+        artifact_kind="resume",
+    )
+
+    assert report.passed is True
+    codes = {issue.code for issue in report.warnings}
+    assert "BULLET_TOO_LONG" in codes
+
+
+def test_validator_no_bullet_too_long_within_limit() -> None:
+    bullet = "A" * 115
+    report = TextArtifactValidator().validate(
+        f"Experience\nSkills\n- {bullet}",
+        artifact_kind="resume",
+        bullet_char_limit=220,
+    )
+
+    codes = {issue.code for issue in report.warnings}
+    assert "BULLET_TOO_LONG" not in codes
+
+
+def test_validator_bullet_too_long_custom_limit() -> None:
+    bullet = "A" * 221
+    report = TextArtifactValidator().validate(
+        f"Experience\nSkills\n- {bullet}",
+        artifact_kind="resume",
+        bullet_char_limit=220,
+    )
+
+    codes = {issue.code for issue in report.warnings}
+    assert "BULLET_TOO_LONG" in codes

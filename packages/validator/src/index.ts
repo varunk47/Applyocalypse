@@ -52,6 +52,7 @@ const COVER_LETTER_SIGN_OFF = /\b(sincerely|best regards|regards|thank you)\b/i;
 export type ValidateTextOptions = {
   artifactKind: "resume" | "cover_letter" | "generic";
   maxCoverLetterWords?: number;
+  bulletCharLimit?: number;
 };
 
 const countWords = (value: string): number => value.trim().split(/\s+/).filter(Boolean).length;
@@ -110,6 +111,7 @@ export const validateTextArtifact = (content: string, options: ValidateTextOptio
   }
 
   if (options.artifactKind === "resume") {
+    const charLimit = options.bulletCharLimit ?? 240;
     const bullets = content.split(/\r?\n/).filter((line) => /^\s*[-*]\s+/.test(line));
     for (const [index, bullet] of bullets.entries()) {
       if (countWords(bullet) > 32) {
@@ -117,6 +119,15 @@ export const validateTextArtifact = (content: string, options: ValidateTextOptio
           severity: "warning",
           code: "LONG_BULLET",
           message: "Resume bullet is longer than the target length.",
+          location: `bullet:${index + 1}`
+        });
+      }
+      const bulletText = bullet.replace(/^\s*[-*]\s+/, "");
+      if (bulletText.length > charLimit) {
+        warnings.push({
+          severity: "warning",
+          code: "BULLET_TOO_LONG",
+          message: `Resume bullet exceeds ${charLimit} characters (${bulletText.length} chars).`,
           location: `bullet:${index + 1}`
         });
       }
