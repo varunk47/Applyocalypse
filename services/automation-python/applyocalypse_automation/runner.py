@@ -29,6 +29,8 @@ from .documents.artifact_generation import (
     split_legal_name,
     write_text_artifact,
 )
+from .documents.docx_builder import build_cover_letter_docx
+from .cover_letter_tailoring import generate_cover_letter
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
 from .llm.litellm_client import LiteLlmClient
 from .resume_tailoring import tailor_resume_sections
@@ -2343,29 +2345,47 @@ def main() -> None:
                 ui_state={"current_step": "cover_letter"},
                 payload={"required": True, "source": "JD_ANALYSIS"},
             ).emit()
-            cover_letter_content = build_cover_letter_text(
-                canonical_profile=canonical_profile,
-                job_metadata=job_metadata,
-                tailoring_plan=tailoring_plan,
-            )
+            cl_llm_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
+            cover_letter_content: str | None = None
+            cl_generation_mode = "DETERMINISTIC"
+            if cl_llm_model and job_text:
+                generated = asyncio.run(generate_cover_letter(
+                    job_description=job_text,
+                    canonical_profile=canonical_profile,
+                    cover_letter_sample=cover_letter_sample_text,
+                    llm_client=LiteLlmClient(model=cl_llm_model),
+                ))
+                if generated:
+                    cover_letter_content = generated.text
+                    cl_generation_mode = "LLM"
+            if cover_letter_content is None:
+                cover_letter_content = build_cover_letter_text(
+                    canonical_profile=canonical_profile,
+                    job_metadata=job_metadata,
+                    tailoring_plan=tailoring_plan,
+                )
+                cl_generation_mode = "DETERMINISTIC"
+
             if cover_letter_content:
                 cover_letter_report = TextArtifactValidator().validate(cover_letter_content, artifact_kind="cover_letter")
                 cover_letter_report_path = work_dir / "cover-letter-validation-report.json"
                 cover_letter_report_path.write_text(json.dumps(cover_letter_report.to_dict(), indent=2, sort_keys=True), encoding="utf-8")
                 if cover_letter_report.passed:
-                    cover_letter_artifact = write_text_artifact(
-                        output_dir=output_dir,
-                        filename_input=GeneratedNameInput(
-                            first_name=first_name,
-                            last_name=last_name,
-                            company=company,
-                            role=role,
-                            kind="CoverLetter",
-                            extension="md",
-                        ),
-                        content=cover_letter_content,
+                    cl_filename_input = GeneratedNameInput(
+                        first_name=first_name,
+                        last_name=last_name,
+                        company=company,
+                        role=role,
+                        kind="Cover Letter",
+                        extension="docx",
+                    )
+                    cl_filename = build_generated_filename(cl_filename_input)
+                    cl_docx_path = choose_collision_safe_path(output_dir, cl_filename)
+                    build_cover_letter_docx(cover_letter_content, canonical_profile, cl_docx_path)
+                    cover_letter_artifact = metadata_for_existing_file(
+                        path=cl_docx_path,
                         file_kind="COVER_LETTER",
-                        extension="md",
+                        format_name="DOCX",
                         review_only=True,
                     )
                     WorkerEvent(
@@ -2374,18 +2394,36 @@ def main() -> None:
                         step_id=None,
                         severity=Severity.INFO,
                         message="Cover letter review artifact rendered to local filesystem",
-                        machine_state={"format": "MD", "review_only": True},
+                        machine_state={"format": "DOCX", "review_only": True, "generation_mode": cl_generation_mode},
                         ui_state={"current_step": "document_review"},
                         payload={**cover_letter_artifact.to_payload(), "validation_report_path": str(cover_letter_report_path)},
                     ).emit()
+                    pdf_export = export_docx_to_pdf(cl_docx_path, output_dir)
+                    if pdf_export.ok and pdf_export.pdf_path:
+                        pdf_artifact = metadata_for_existing_file(
+                            path=pdf_export.pdf_path,
+                            file_kind="COVER_LETTER",
+                            format_name="PDF",
+                            review_only=True,
+                        )
+                        WorkerEvent(
+                            event_type=EventType.COVER_LETTER_RENDERED,
+                            run_id=args.run_id,
+                            step_id=None,
+                            severity=Severity.INFO,
+                            message="Cover letter PDF exported",
+                            machine_state={"format": "PDF", "review_only": True, "generation_mode": cl_generation_mode},
+                            ui_state={"current_step": "document_review"},
+                            payload={**pdf_artifact.to_payload(), "validation_report_path": str(cover_letter_report_path)},
+                        ).emit()
                 else:
                     WorkerEvent(
                         event_type=EventType.VALIDATION_FAILED,
                         run_id=args.run_id,
                         step_id=None,
                         severity=Severity.ERROR,
-                        message="Cover letter artifact failed deterministic validation",
-                        machine_state={"format": "MD", "review_only": True},
+                        message="Cover letter artifact failed validation",
+                        machine_state={"format": "DOCX", "review_only": True, "generation_mode": cl_generation_mode},
                         ui_state={"current_step": "document_review", "requires_user_review": True},
                         payload={"artifact_kind": "cover_letter", "validation_report_path": str(cover_letter_report_path), **cover_letter_report.to_dict()},
                     ).emit()
