@@ -29,7 +29,7 @@ from .documents.artifact_generation import (
     split_legal_name,
     write_text_artifact,
 )
-from .documents.docx_builder import build_cover_letter_docx
+from .documents.docx_builder import build_cover_letter_docx, build_resume_docx
 from .cover_letter_tailoring import generate_cover_letter
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
 from .llm.litellm_client import LiteLlmClient
@@ -2401,17 +2401,62 @@ def main() -> None:
                             },
                         ).emit()
                 else:
+                    # Anchor-free fallback: build a fresh DOCX from canonical profile
                     output_path.unlink(missing_ok=True)
-                    WorkerEvent(
-                        event_type=EventType.USER_REVIEW_REQUIRED,
-                        run_id=args.run_id,
-                        step_id=None,
-                        severity=Severity.WARN,
-                        message="Verified DOCX master has no explicit Applyocalypse anchors for safe mutation",
-                        machine_state={"source_format": "DOCX", "source_master_path": str(master_path)},
-                        ui_state={"requires_user_review": True},
-                        payload={"code": "MISSING_DOCX_ANCHORS", "source_master_path": str(master_path)},
-                    ).emit()
+                    try:
+                        from .documents.font_detection import detect_resume_font_size
+                        fallback_font_size = detect_resume_font_size(master_path)
+                        build_resume_docx(
+                            canonical_profile=canonical_profile,
+                            tailoring_plan=tailoring_plan,
+                            output_path=output_path,
+                            font_size=fallback_font_size,
+                        )
+                        fallback_artifact = metadata_for_existing_file(
+                            path=output_path,
+                            file_kind="RESUME",
+                            format_name="DOCX",
+                            review_only=True,
+                        )
+                        WorkerEvent(
+                            event_type=EventType.RESUME_RENDERED,
+                            run_id=args.run_id,
+                            step_id=None,
+                            severity=Severity.WARN,
+                            message="Anchor-free DOCX fallback generated from canonical profile (no master anchors found)",
+                            machine_state={"source_format": "DOCX", "fallback": True, "review_only": True},
+                            ui_state={"current_step": "document_review", "requires_user_review": True},
+                            payload=fallback_artifact.to_payload(),
+                        ).emit()
+                        fallback_pdf = export_docx_to_pdf(output_path, output_dir)
+                        if fallback_pdf.ok and fallback_pdf.pdf_path:
+                            fallback_pdf_artifact = metadata_for_existing_file(
+                                path=fallback_pdf.pdf_path,
+                                file_kind="RESUME",
+                                format_name="PDF",
+                                review_only=True,
+                            )
+                            WorkerEvent(
+                                event_type=EventType.RESUME_RENDERED,
+                                run_id=args.run_id,
+                                step_id=None,
+                                severity=Severity.WARN,
+                                message="Anchor-free DOCX fallback exported to PDF",
+                                machine_state={"format": "PDF", "fallback": True, "review_only": True},
+                                ui_state={"current_step": "document_review", "requires_user_review": True},
+                                payload=fallback_pdf_artifact.to_payload(),
+                            ).emit()
+                    except Exception as _fallback_exc:
+                        WorkerEvent(
+                            event_type=EventType.USER_REVIEW_REQUIRED,
+                            run_id=args.run_id,
+                            step_id=None,
+                            severity=Severity.WARN,
+                            message="Verified DOCX master has no explicit Applyocalypse anchors for safe mutation",
+                            machine_state={"source_format": "DOCX", "source_master_path": str(master_path)},
+                            ui_state={"requires_user_review": True},
+                            payload={"code": "MISSING_DOCX_ANCHORS", "source_master_path": str(master_path)},
+                        ).emit()
             elif master_format == "TEX":
                 output_path = choose_collision_safe_path(
                     output_dir,
