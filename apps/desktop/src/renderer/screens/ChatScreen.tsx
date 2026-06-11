@@ -1,7 +1,9 @@
-import { createSignal, For, onMount, createEffect } from 'solid-js'
+import { createSignal, For, onMount, createEffect, Show } from 'solid-js'
+import { createStore } from 'solid-js/store'
 import { Send } from 'lucide-solid'
 import { chatState, chatDispatch } from '../contexts/ChatStore'
 import { JobCard } from '../features/chat/JobCard'
+import { BatchHeader } from '../features/chat/BatchHeader'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
 import { useProfileStore } from '../contexts/ProfileStore'
 import type { ChatMessage } from '@applyocalypse/shared-types'
@@ -11,6 +13,7 @@ export default function ChatScreen() {
   const [input, setInput] = createSignal('')
   const [submitting, setSubmitting] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
+  const [collapsed, setCollapsed] = createStore<Record<string, boolean>>({})
   let threadRef: HTMLDivElement | undefined
 
   onMount(async () => {
@@ -20,9 +23,7 @@ export default function ChatScreen() {
   })
 
   const scrollToBottom = () => {
-    if (threadRef) {
-      threadRef.scrollTop = threadRef.scrollHeight
-    }
+    if (threadRef) threadRef.scrollTop = threadRef.scrollHeight
   }
 
   createEffect(() => {
@@ -30,6 +31,14 @@ export default function ChatScreen() {
     void _
     scrollToBottom()
   })
+
+  const appendMsg = async (
+    input: Parameters<typeof window.applyocalypse.chat.appendMessage>[0]
+  ): Promise<ChatMessage> => {
+    const msg = await window.applyocalypse.chat.appendMessage(input)
+    chatDispatch({ type: 'APPENDED', message: msg })
+    return msg
+  }
 
   const handleSubmit = async () => {
     const value = input().trim()
@@ -42,38 +51,50 @@ export default function ChatScreen() {
     setError(null)
     setSubmitting(true)
     try {
-      const userMsg = await window.applyocalypse.chat.appendMessage({
-        role: 'USER',
-        kind: 'TEXT',
-        content: value
-      })
-      chatDispatch({ type: 'APPENDED', message: userMsg })
+      await appendMsg({ role: 'USER', kind: 'TEXT', content: value })
       setInput('')
 
       const parsed = parseJobIntake(value)
-      if (parsed.length > 0) {
-        const enqueued = await window.applyocalypse.jobs.enqueue(
-          profileId,
-          parsed.map((item) => ({ sourceKind: item.sourceKind, sourceValue: item.sourceValue }))
-        )
-        for (const queueItem of enqueued.queueItems) {
-          const jobTarget = enqueued.jobTargets.find((jt) => jt.id === queueItem.jobTargetId)
-          const cardMsg = await window.applyocalypse.chat.appendMessage({
-            role: 'SYSTEM',
-            kind: 'JOB_CARD',
-            content: '',
-            jobId: queueItem.id,
-            metadata: {
-              sourceKind: jobTarget?.sourceKind ?? 'URL',
-              sourceValue: jobTarget?.sourceValue ?? '',
-              queueItemId: queueItem.id,
-              company: jobTarget?.company ?? null,
-              role: jobTarget?.role ?? null,
-              status: queueItem.status
-            }
-          })
-          chatDispatch({ type: 'APPENDED', message: cardMsg })
-        }
+      if (parsed.length === 0) return
+
+      const enqueued = await window.applyocalypse.jobs.enqueue(
+        profileId,
+        parsed.map((item) => ({ sourceKind: item.sourceKind, sourceValue: item.sourceValue }))
+      )
+
+      const isBatch = enqueued.queueItems.length > 1
+      const batchId = isBatch ? crypto.randomUUID() : null
+
+      if (isBatch) {
+        await appendMsg({
+          role: 'SYSTEM',
+          kind: 'BATCH_HEADER',
+          content: '',
+          batchId,
+          metadata: {
+            batchId,
+            jobCount: enqueued.queueItems.length
+          }
+        })
+      }
+
+      for (const queueItem of enqueued.queueItems) {
+        const jobTarget = enqueued.jobTargets.find((jt) => jt.id === queueItem.jobTargetId)
+        await appendMsg({
+          role: 'SYSTEM',
+          kind: 'JOB_CARD',
+          content: '',
+          batchId,
+          jobId: queueItem.id,
+          metadata: {
+            sourceKind: jobTarget?.sourceKind ?? 'URL',
+            sourceValue: jobTarget?.sourceValue ?? '',
+            queueItemId: queueItem.id,
+            company: jobTarget?.company ?? null,
+            role: jobTarget?.role ?? null,
+            status: queueItem.status
+          }
+        })
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
@@ -83,9 +104,12 @@ export default function ChatScreen() {
   }
 
   const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-      void handleSubmit()
-    }
+    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) void handleSubmit()
+  }
+
+  const isBatchCardHidden = (msg: ChatMessage): boolean => {
+    if (msg.kind !== 'JOB_CARD' || !msg.batchId) return false
+    return collapsed[msg.batchId] === true
   }
 
   return (
@@ -100,19 +124,36 @@ export default function ChatScreen() {
           </div>
         }>
           {(msg: ChatMessage) => (
-            <div class={`chat-message chat-message--${msg.role.toLowerCase()}`} data-kind={msg.kind}>
-              {msg.kind === 'JOB_CARD' ? (
-                <JobCard message={msg} />
-              ) : (
-                <span class="chat-message-text">{msg.content}</span>
-              )}
-            </div>
+            <Show when={!isBatchCardHidden(msg)}>
+              <div
+                class={`chat-message chat-message--${msg.role.toLowerCase()}`}
+                data-kind={msg.kind}
+              >
+                {msg.kind === 'BATCH_HEADER' ? (
+                  <BatchHeader
+                    message={msg}
+                    allMessages={chatState.messages}
+                    collapsed={collapsed[msg.batchId ?? ''] === true}
+                    onToggle={() => {
+                      const id = msg.batchId ?? ''
+                      setCollapsed(id, !collapsed[id])
+                    }}
+                  />
+                ) : msg.kind === 'JOB_CARD' ? (
+                  <JobCard message={msg} />
+                ) : (
+                  <span class="chat-message-text">{msg.content}</span>
+                )}
+              </div>
+            </Show>
           )}
         </For>
       </div>
 
       <div class="chat-input-row">
-        {error() && <p class="chat-error">{error()}</p>}
+        <Show when={error()}>
+          <p class="chat-error">{error()}</p>
+        </Show>
         <div class="chat-input-wrap">
           <textarea
             class="chat-input"

@@ -19,6 +19,26 @@ export const chatReducer = (state: ChatState, action: ChatAction): ChatState => 
   }
 }
 
+export const getBatchJobCards = (messages: ChatMessage[], batchId: string): ChatMessage[] =>
+  messages.filter((m) => m.kind === 'JOB_CARD' && m.batchId === batchId)
+
+export const getBatchProgress = (
+  messages: ChatMessage[],
+  batchId: string
+): { total: number; queued: number; running: number; completed: number; failed: number } => {
+  const cards = getBatchJobCards(messages, batchId)
+  let queued = 0, running = 0, completed = 0, failed = 0
+  for (const m of cards) {
+    const status = (m.metadata as { status?: string }).status ?? 'QUEUED'
+    if (status === 'QUEUED' || status === 'PREPARING') queued++
+    else if (status === 'RUNNING_AUTOMATION' || status === 'PAUSED') running++
+    else if (status === 'COMPLETED') completed++
+    else if (status === 'FAILED' || status === 'CANCELLED') failed++
+    else queued++
+  }
+  return { total: cards.length, queued, running, completed, failed }
+}
+
 const [chatState, setChatState] = createStore<ChatState>({ messages: [], loading: false })
 
 export { chatState }

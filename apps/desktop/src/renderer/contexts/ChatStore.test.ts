@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { chatReducer } from './ChatStore'
+import { chatReducer, getBatchJobCards, getBatchProgress } from './ChatStore'
 import type { ChatState } from './ChatStore'
 import type { ChatMessage } from '@applyocalypse/shared-types'
 
@@ -51,5 +51,66 @@ describe('chatReducer', () => {
     const s = chatReducer(empty, { type: 'LOADED', messages: [msg] })
     expect(s.messages[0]?.role).toBe('SYSTEM')
     expect(s.messages[0]?.kind).toBe('JOB_CARD')
+  })
+})
+
+describe('getBatchJobCards', () => {
+  it('returns only JOB_CARD messages with the matching batchId', () => {
+    const batchId = 'batch-abc'
+    const msgs: ChatMessage[] = [
+      makeMessage({ id: '1', kind: 'BATCH_HEADER', role: 'SYSTEM', batchId }),
+      makeMessage({ id: '2', kind: 'JOB_CARD', role: 'SYSTEM', batchId }),
+      makeMessage({ id: '3', kind: 'JOB_CARD', role: 'SYSTEM', batchId }),
+      makeMessage({ id: '4', kind: 'JOB_CARD', role: 'SYSTEM', batchId: 'other-batch' }),
+      makeMessage({ id: '5', kind: 'TEXT', role: 'USER' }),
+    ]
+    const cards = getBatchJobCards(msgs, batchId)
+    expect(cards).toHaveLength(2)
+    expect(cards.every((m) => m.batchId === batchId && m.kind === 'JOB_CARD')).toBe(true)
+  })
+})
+
+describe('getBatchProgress', () => {
+  const batchId = 'batch-xyz'
+
+  const makeJobCard = (id: string, status: string): ChatMessage =>
+    makeMessage({ id, kind: 'JOB_CARD', role: 'SYSTEM', batchId, metadata: { status } })
+
+  it('counts 5 queued cards for a fresh 5-link batch', () => {
+    const msgs: ChatMessage[] = [
+      makeMessage({ id: 'header', kind: 'BATCH_HEADER', role: 'SYSTEM', batchId }),
+      makeJobCard('c1', 'QUEUED'),
+      makeJobCard('c2', 'QUEUED'),
+      makeJobCard('c3', 'QUEUED'),
+      makeJobCard('c4', 'QUEUED'),
+      makeJobCard('c5', 'QUEUED'),
+    ]
+    const p = getBatchProgress(msgs, batchId)
+    expect(p.total).toBe(5)
+    expect(p.queued).toBe(5)
+    expect(p.running).toBe(0)
+    expect(p.completed).toBe(0)
+  })
+
+  it('aggregates mixed statuses correctly', () => {
+    const msgs: ChatMessage[] = [
+      makeJobCard('c1', 'COMPLETED'),
+      makeJobCard('c2', 'RUNNING_AUTOMATION'),
+      makeJobCard('c3', 'QUEUED'),
+      makeJobCard('c4', 'FAILED'),
+      makeJobCard('c5', 'PAUSED'),
+    ]
+    const p = getBatchProgress(msgs, batchId)
+    expect(p.total).toBe(5)
+    expect(p.completed).toBe(1)
+    expect(p.running).toBe(2)
+    expect(p.queued).toBe(1)
+    expect(p.failed).toBe(1)
+  })
+
+  it('returns zeros for an empty batch', () => {
+    const p = getBatchProgress([], batchId)
+    expect(p.total).toBe(0)
+    expect(p.queued).toBe(0)
   })
 })
