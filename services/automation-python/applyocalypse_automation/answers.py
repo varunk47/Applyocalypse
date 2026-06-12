@@ -100,13 +100,14 @@ _ADDRESS_RULES: list[tuple[tuple[str, ...], str]] = [
 ]
 
 _EEO_RULES: list[tuple[tuple[str, ...], str]] = [
+    (("sexual orientation", "sexualorientation"), "sexualOrientation"),
     (("gender", "sex"), "gender"),
     (("disability", "disabled"), "disability"),
     (("veteran", "military service"), "veteran"),
     (("race",), "race"),
     (("ethnicity", "ethnic"), "race"),
     (("hispanic", "latino"), "hispanicOrLatino"),
-    (("lgbtq", "sexual orientation"), "lgbtq"),
+    (("lgbtq",), "lgbtq"),
 ]
 
 
@@ -151,7 +152,10 @@ def propose_answer_for_detected_field(
     for aliases, eeo_key in _EEO_RULES:
         if any(alias in label for alias in aliases):
             raw = eeo.get(eeo_key)
-            value = str(raw) if raw is not None else None
+            if isinstance(raw, list):
+                value = ", ".join(str(v) for v in raw) if raw else None
+            else:
+                value = str(raw) if raw is not None else None
             return ProposedApplicationAnswer(
                 field_label=field_label, field_type=field_type,
                 proposed_value=value,

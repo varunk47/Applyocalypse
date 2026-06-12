@@ -41,6 +41,7 @@ PROFILE = {
             "veteran": "No",
             "race": "Asian",
             "hispanicOrLatino": "No",
+            "sexualOrientation": ["Heterosexual"],
         },
     }
 }
@@ -78,6 +79,9 @@ EMPTY_PROFILE: dict = {"profile": {}}
     ("Race / ethnicity", "select", "Asian", True, "PROFILE"),
     ("Are you Hispanic or Latino?", "radio", "No", True, "PROFILE"),
     ("LGBTQ+ identity", "select", "No", True, "PROFILE"),
+    ("How would you describe your sexual orientation?", "select", "Heterosexual", True, "PROFILE"),
+    ("Sexual Orientation", "select", "Heterosexual", True, "PROFILE"),
+    ("Do you identify as LGBTQ+?", "select", "No", True, "PROFILE"),
 
     # ── Previously employed / criminal (always requires_review=True) ─────────
     ("Have you previously worked for us?", "radio", "No", True, "PROFILE"),
@@ -197,3 +201,20 @@ def test_last_name_derived_from_legal_name_when_not_set() -> None:
         canonical_profile=profile,
     )
     assert answer.proposed_value == "Lovelace"
+
+
+def test_sexual_orientation_list_joined_as_comma_separated() -> None:
+    profile = {
+        "profile": {
+            "equalEmploymentDefaults": {
+                "sexualOrientation": ["Heterosexual", "Prefer not to say"],
+            }
+        }
+    }
+    answer = propose_answer_for_detected_field(
+        field_label="Sexual Orientation",
+        field_type="select",
+        canonical_profile=profile,
+    )
+    assert answer.proposed_value == "Heterosexual, Prefer not to say"
+    assert answer.requires_review is True
