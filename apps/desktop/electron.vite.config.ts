@@ -28,7 +28,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "src/main/index.ts")
         },
-        external: ["better-sqlite3"]
+        external: ["electron", "better-sqlite3"]
       }
     }
   },
@@ -41,6 +41,7 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "src/preload/index.ts")
         },
+        external: ["electron"],
         output: {
           format: "cjs",
           entryFileNames: "[name].js"
