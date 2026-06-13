@@ -41,7 +41,7 @@ from .event_protocol import EventType, Severity, WorkerEvent, utc_now
 from .jd_analysis import analyze_with_optional_llm
 from .otp import read_gmail_otp_from_env
 from .tailoring.engine import TailoringEngine
-from .validation import TextArtifactValidator
+from .validation import TextArtifactValidator, ValidationReport
 
 
 @dataclass(frozen=True, slots=True)
@@ -1293,6 +1293,16 @@ def _role_from_url(url: str) -> str | None:
     return None
 
 
+def _build_bullet_retry_jd(job_text: str, report: ValidationReport) -> str:
+    """Return a modified job description string that appends violation guidance for a retry."""
+    violation_codes = ", ".join(issue.code for issue in report.blocking_issues)
+    return job_text + (
+        "\n\nIMPORTANT: The previous bullet set failed validation ("
+        + violation_codes
+        + "). No em dashes. No banned words. Plain text bullets only."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="applyocalypse-worker")
     parser.add_argument("--run-id", required=True)
@@ -2330,6 +2340,41 @@ def main() -> None:
                         proj_bullets = tailored.all_project_bullets()
                         if proj_bullets:
                             bullet_map["{{APPLYO_PROJECTS_BULLETS}}"] = proj_bullets
+                        # Validate LLM bullet content before writing to DOCX
+                        if bullet_map:
+                            bullet_text = "\n".join(b for bullets in bullet_map.values() for b in bullets)
+                            bullet_report = TextArtifactValidator().validate(bullet_text, artifact_kind="resume")
+                            if not bullet_report.passed:
+                                # One retry with violation guidance appended to the job description
+                                retry_tailored = asyncio.run(tailor_resume_sections(
+                                    job_description=_build_bullet_retry_jd(job_text, bullet_report),
+                                    resume_text=resume_text_for_tailor,
+                                    llm_client=LiteLlmClient(model=llm_model),
+                                    font_size=detected_font_size,
+                                ))
+                                if retry_tailored:
+                                    bullet_map = {}
+                                    for i in range(4):
+                                        retry_bullets = retry_tailored.exp_bullets(i)
+                                        if retry_bullets:
+                                            bullet_map[f"{{{{APPLYO_EXP_{i}_BULLETS}}}}"] = retry_bullets
+                                    retry_proj_bullets = retry_tailored.all_project_bullets()
+                                    if retry_proj_bullets:
+                                        bullet_map["{{APPLYO_PROJECTS_BULLETS}}"] = retry_proj_bullets
+                                    retry_bullet_text = "\n".join(b for bullets in bullet_map.values() for b in bullets)
+                                    bullet_report = TextArtifactValidator().validate(retry_bullet_text, artifact_kind="resume")
+                                if not bullet_report.passed:
+                                    WorkerEvent(
+                                        event_type=EventType.VALIDATION_FAILED,
+                                        run_id=args.run_id,
+                                        step_id=None,
+                                        severity=Severity.WARN,
+                                        message="LLM resume bullets failed validation after retry; skipping bullet mutation",
+                                        machine_state={"format": "DOCX", "review_only": False},
+                                        ui_state={"current_step": "document_review", "requires_user_review": True},
+                                        payload={"artifact_kind": "resume", "stage": "llm_bullets", **bullet_report.to_dict()},
+                                    ).emit()
+                                    bullet_map = {}
                         if bullet_map:
                             _, bullet_replaced = mutate_docx_bullet_anchors(output_path, output_path, bullet_map)
                             replaced_placeholders = list(set(replaced_placeholders) | set(bullet_replaced))
@@ -2341,6 +2386,20 @@ def main() -> None:
                         _, replaced_placeholders = mutate_docx_placeholders(
                             Path(str(anchored["localPath"])), output_path, replacements
                         )
+
+                # Final-file validation gate: catch any banned content in the mutated DOCX
+                final_report = TextArtifactValidator().validate_file(output_path, artifact_kind="resume") if output_path.exists() else None
+                if final_report is not None and not final_report.passed:
+                    WorkerEvent(
+                        event_type=EventType.VALIDATION_FAILED,
+                        run_id=args.run_id,
+                        step_id=None,
+                        severity=Severity.ERROR,
+                        message="Mutated DOCX resume failed deterministic validation",
+                        machine_state={"format": "DOCX", "review_only": False},
+                        ui_state={"current_step": "document_review", "requires_user_review": True},
+                        payload={"artifact_kind": "resume", "stage": "final_file", "generated_path": str(output_path), **final_report.to_dict()},
+                    ).emit()
 
                 if replaced_placeholders:
                     artifact = metadata_for_existing_file(path=output_path, file_kind="RESUME", format_name="DOCX", review_only=False)
@@ -2473,6 +2532,21 @@ def main() -> None:
                 )
                 tex_replacements = {placeholder: tex_escape(replacement) for placeholder, replacement in replacements.items()}
                 _, replaced_placeholders = mutate_tex_placeholders(master_path, output_path, tex_replacements)
+
+                # Final-file validation gate: catch any banned content in the mutated TEX
+                tex_final_report = TextArtifactValidator().validate_file(output_path, artifact_kind="resume") if output_path.exists() else None
+                if tex_final_report is not None and not tex_final_report.passed:
+                    WorkerEvent(
+                        event_type=EventType.VALIDATION_FAILED,
+                        run_id=args.run_id,
+                        step_id=None,
+                        severity=Severity.ERROR,
+                        message="Mutated TEX resume failed deterministic validation",
+                        machine_state={"format": "TEX", "review_only": False},
+                        ui_state={"current_step": "document_review", "requires_user_review": True},
+                        payload={"artifact_kind": "resume", "stage": "final_file", "generated_path": str(output_path), **tex_final_report.to_dict()},
+                    ).emit()
+
                 if replaced_placeholders:
                     artifact = metadata_for_existing_file(path=output_path, file_kind="RESUME", format_name="TEX", review_only=False)
                     WorkerEvent(
