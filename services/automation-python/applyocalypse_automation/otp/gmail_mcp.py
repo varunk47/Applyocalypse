@@ -11,6 +11,8 @@ import re
 import time
 from typing import Any
 
+from ..secret_env import get_secret
+
 
 OTP_PATTERN = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
 
@@ -298,7 +300,7 @@ def read_gmail_otp_from_env() -> GmailOtpResult:
     poll = float(os.getenv("APPLYO_GMAIL_OTP_POLL_SECONDS", "5"))
     return GmailMcpOtpExtractor(
         email_address=os.getenv("APPLYO_GMAIL_OTP_EMAIL", ""),
-        password=os.getenv("APPLYO_GMAIL_OTP_PASSWORD", ""),
+        password=get_secret("APPLYO_GMAIL_OTP_PASSWORD") or "",
         timeout_seconds=timeout,
         poll_seconds=poll,
     ).wait_for_latest_code()

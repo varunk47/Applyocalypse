@@ -13,6 +13,7 @@ import time
 from urllib.parse import urlparse, unquote
 
 from .answers import ProposedApplicationAnswer, propose_answer_for_detected_field, propose_profile_answers
+from .secret_env import get_secret
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.portal_adapters import COMMON_STEP_PROGRESSION_LABELS, progression_labels_for_workflow
@@ -372,7 +373,7 @@ def is_otp_field(field: BrowserField) -> bool:
 
 
 def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: dict[str, object]) -> ProposedApplicationAnswer:
-    if is_password_field(field) and os.getenv("APPLYO_APPLICATION_PASSWORD"):
+    if is_password_field(field) and get_secret("APPLYO_APPLICATION_PASSWORD"):
         return ProposedApplicationAnswer(
             field_label=field.label,
             field_type=field.field_type,
@@ -390,7 +391,7 @@ def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: di
 
 def resolve_secret_reviewed_value(field: BrowserField, reviewed_value: str | None) -> tuple[str | None, str | None]:
     if reviewed_value == APPLICATION_PASSWORD_SENTINEL and is_password_field(field):
-        password = os.getenv("APPLYO_APPLICATION_PASSWORD")
+        password = get_secret("APPLYO_APPLICATION_PASSWORD")
         return (password if password else None, "APPLICATION_PASSWORD_SECRET")
     return reviewed_value, None
 
