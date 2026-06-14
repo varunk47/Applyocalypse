@@ -1303,6 +1303,23 @@ def _build_bullet_retry_jd(job_text: str, report: ValidationReport) -> str:
     )
 
 
+def _build_overflow_jd(job_text: str, pages: int) -> str:
+    """Return a modified job description string that instructs the LLM to reduce resume length."""
+    return job_text + (
+        "\n\nIMPORTANT: The tailored resume overflowed to "
+        + str(pages)
+        + " pages. Cut the weakest bullets and tighten wording so the resume fits ONE page."
+    )
+
+
+def _remutate_and_export(master_path, output_path, replacements, bullet_map, output_dir):
+    """Re-run placeholder + bullet mutation from the master and export PDF. Returns the export result."""
+    mutate_docx_placeholders(master_path, output_path, replacements)
+    if bullet_map:
+        mutate_docx_bullet_anchors(output_path, output_path, bullet_map)
+    return export_docx_to_pdf(output_path, output_dir)
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="applyocalypse-worker")
     parser.add_argument("--run-id", required=True)
@@ -2441,6 +2458,45 @@ def main() -> None:
                             ui_state={"current_step": "document_review"},
                             payload=pdf_artifact.to_payload(),
                         ).emit()
+                        # One-page enforcement: count pages and retry with overflow instruction
+                        from .documents.font_detection import count_pdf_pages
+                        pages = count_pdf_pages(pdf_export.pdf_path)
+                        if pages > 1 and llm_model and job_text:
+                            overflow_tailored = asyncio.run(tailor_resume_sections(
+                                job_description=_build_overflow_jd(job_text, pages),
+                                resume_text=resume_text_for_tailor,
+                                llm_client=LiteLlmClient(model=llm_model),
+                                font_size=detected_font_size,
+                            ))
+                            if overflow_tailored:
+                                overflow_bullet_map: dict[str, list[str]] = {}
+                                for i in range(4):
+                                    ob = overflow_tailored.exp_bullets(i)
+                                    if ob:
+                                        overflow_bullet_map[f"{{{{APPLYO_EXP_{i}_BULLETS}}}}"] = ob
+                                overflow_proj = overflow_tailored.all_project_bullets()
+                                if overflow_proj:
+                                    overflow_bullet_map["{{APPLYO_PROJECTS_BULLETS}}"] = overflow_proj
+                                retry_export = _remutate_and_export(master_path, output_path, replacements, overflow_bullet_map, output_dir)
+                                if retry_export.ok and retry_export.pdf_path:
+                                    pages = count_pdf_pages(retry_export.pdf_path)
+                                    pdf_export = retry_export
+                        if pages > 1:
+                            WorkerEvent(
+                                event_type=EventType.VALIDATION_FAILED,
+                                run_id=args.run_id,
+                                step_id=None,
+                                severity=Severity.WARN,
+                                message="Tailored resume overflows one page",
+                                machine_state={"format": "PDF", "pages": pages},
+                                ui_state={"current_step": "document_review", "requires_user_review": True},
+                                payload={
+                                    "artifact_kind": "resume",
+                                    "blocking_issues": [{"code": "RESUME_OVERFLOWS_ONE_PAGE"}],
+                                    "pages": pages,
+                                    "pdf_path": str(pdf_export.pdf_path),
+                                },
+                            ).emit()
                     else:
                         WorkerEvent(
                             event_type=EventType.VALIDATION_FAILED,

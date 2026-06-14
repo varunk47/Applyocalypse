@@ -10,4 +10,5 @@ pytest>=8.3.5
 pyinstaller>=6.15.0
 tzdata>=2025.2
 ruff>=0.8.0
+pypdf>=5.0
 # tectonic>=0.15.0 is a binary tool, not a PyPI package — bundled via PyInstaller build script
