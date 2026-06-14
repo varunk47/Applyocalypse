@@ -1,4 +1,6 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { rmSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import type { BrowserWindow } from "electron";
 import { DEFAULT_QUEUE_LEASE_MS } from "@applyocalypse/config";
@@ -88,6 +90,11 @@ export class PythonWorkerSupervisor {
       const activeWorker = this.active.get(input.runId);
       clearInterval(activeWorker?.heartbeat ?? heartbeat);
       this.active.delete(input.runId);
+      try {
+        rmSync(join(input.workDir, "gmail-oauth-token.json"), { force: true });
+      } catch {
+        // best-effort: never let cleanup failure mask the exit handling
+      }
       if (!activeWorker?.stopping) {
         this.pauseRunAfterUnexpectedWorkerExit(input.runId, code, signal);
       }

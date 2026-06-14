@@ -7,6 +7,7 @@ import { LocalQueueScheduler } from "./scheduler/localQueueScheduler";
 import { registerArtifactProtocolHandler, registerArtifactScheme } from "./services/artifactProtocol";
 import { GeneratedFileCleanupService } from "./services/generatedFileCleanupService";
 import { PythonWorkerSupervisor } from "./services/pythonWorkerSupervisor";
+import { sweepStaleRunWorkDirs } from "./services/runWorkDirJanitor";
 import { ThemeController } from "./theme";
 import { createMainWindow } from "./window";
 
@@ -59,6 +60,7 @@ const boot = async (): Promise<void> => {
   const cleanupService = new GeneratedFileCleanupService(database, getSafeArtifactRoots);
   cleanupService.cleanupExpired();
   cleanupTimer = setInterval(() => cleanupService.cleanupExpired(), 60 * 60 * 1000);
+  sweepStaleRunWorkDirs(join(app.getPath("userData"), "runs"));
   registerArtifactProtocolHandler({
     isAllowedPath: isKnownArtifactPath
   });
