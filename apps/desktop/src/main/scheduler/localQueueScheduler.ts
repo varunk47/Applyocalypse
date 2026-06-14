@@ -152,6 +152,7 @@ export class LocalQueueScheduler {
       const outputDir = new SettingsRepository(this.db).get("files.outputDir", app.getPath("downloads"));
       const providerSecret = providerRepository.getFirstConnectedSecretReference();
       let providerEnv: Record<string, string> | undefined;
+      let secretsForRedaction: Record<string, string> | undefined;
       try {
         providerEnv = providerSecret
           ? buildProviderRuntimeEnv({
@@ -164,10 +165,12 @@ export class LocalQueueScheduler {
         const credentials = profileRepository.getApplicationCredentialReference(item.profileId);
         if (credentials?.applicationEmail && credentials.encryptedReference) {
           const applicationPassword = secureSecretStore.decryptSecret(credentials.encryptedReference);
+          const secretPayload: Record<string, string> = {
+            APPLYO_APPLICATION_PASSWORD: applicationPassword
+          };
           providerEnv = {
             ...(providerEnv ?? {}),
-            APPLYO_APPLICATION_EMAIL: credentials.applicationEmail,
-            APPLYO_APPLICATION_PASSWORD: applicationPassword
+            APPLYO_APPLICATION_EMAIL: credentials.applicationEmail
           };
 
           if (credentials.otpHandlingEnabled) {
@@ -192,14 +195,19 @@ export class LocalQueueScheduler {
                 otpSecret?.provider === "gmail"
                   ? secureSecretStore.decryptSecret(otpSecret.encryptedReference)
                   : applicationPassword;
+              secretPayload.APPLYO_GMAIL_OTP_PASSWORD = otpPassword;
               providerEnv = {
                 ...providerEnv,
                 APPLYO_GMAIL_OTP_ENABLED: "1",
-                APPLYO_GMAIL_OTP_EMAIL: credentials.applicationEmail,
-                APPLYO_GMAIL_OTP_PASSWORD: otpPassword
+                APPLYO_GMAIL_OTP_EMAIL: credentials.applicationEmail
               };
             }
           }
+
+          const secretsFilePath = join(runWorkDir, "worker-secrets.json");
+          writeFileSync(secretsFilePath, JSON.stringify(secretPayload), { encoding: "utf8", mode: 0o600 });
+          providerEnv = { ...providerEnv, APPLYO_SECRETS_FILE: secretsFilePath };
+          secretsForRedaction = secretPayload;
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : "Sensitive local credential could not be loaded";
@@ -240,6 +248,7 @@ export class LocalQueueScheduler {
         ...(coverLetterSampleFile ? { coverLetterSampleFile } : {}),
         outputDir,
         ...(providerEnv ? { providerEnv } : {}),
+        ...(secretsForRedaction ? { secretsForRedaction } : {}),
         workDir: runWorkDir
       });
     } catch (error) {

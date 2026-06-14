@@ -20,6 +20,8 @@ export type StartWorkerInput = {
   coverLetterSampleFile?: string;
   outputDir?: string;
   providerEnv?: Record<string, string>;
+  /** Secret values that must be redacted from supervisor stderr but are NOT passed via child env. */
+  secretsForRedaction?: Record<string, string>;
   workDir: string;
 };
 
@@ -61,6 +63,7 @@ export class PythonWorkerSupervisor {
     ];
 
     const providerEnv = input.providerEnv ?? {};
+    const redactionEnv = { ...providerEnv, ...(input.secretsForRedaction ?? {}) };
     const child = spawn(launch.executable, args, {
       cwd: launch.cwd,
       env: { ...process.env, APPLYO_WORKER_WAIT_FOR_REVIEW: "1", ...providerEnv },
@@ -78,12 +81,12 @@ export class PythonWorkerSupervisor {
       try {
         ingestPythonEventLine({ db: this.db, windows: this.windows, rawLine: line, safeArtifactRoots: this.safeArtifactRoots() });
       } catch (error) {
-        this.persistSupervisorError(input.runId, error, (message) => redactSensitiveSupervisorText(message, providerEnv));
+        this.persistSupervisorError(input.runId, error, (message) => redactSensitiveSupervisorText(message, redactionEnv));
       }
     });
 
     child.stderr.on("data", (chunk: Buffer) => {
-      this.persistSupervisorError(input.runId, new Error(chunk.toString("utf8")), (message) => redactSensitiveSupervisorText(message, providerEnv));
+      this.persistSupervisorError(input.runId, new Error(chunk.toString("utf8")), (message) => redactSensitiveSupervisorText(message, redactionEnv));
     });
 
     child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
@@ -92,6 +95,7 @@ export class PythonWorkerSupervisor {
       this.active.delete(input.runId);
       try {
         rmSync(join(input.workDir, "gmail-oauth-token.json"), { force: true });
+        rmSync(join(input.workDir, "worker-secrets.json"), { force: true });
       } catch {
         // best-effort: never let cleanup failure mask the exit handling
       }
