@@ -193,6 +193,13 @@ export const registerIpcHandlers = ({
         settingsRepository.set(key, clamped);
         continue;
       }
+      if (key === "automation.autofillApprovedDefaults") {
+        if (typeof value !== "boolean") {
+          throw new Error("autofillApprovedDefaults must be a boolean");
+        }
+        settingsRepository.set(key, value);
+        continue;
+      }
       if (key !== "files.outputDir") {
         throw new Error(`Unsupported setting key: ${key}`);
       }
