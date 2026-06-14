@@ -134,3 +134,15 @@ def test_detect_resume_font_size_returns_fallback_for_pdf() -> None:
 
 def test_count_pdf_pages_returns_zero_on_missing_file() -> None:
     assert count_pdf_pages(Path("/nonexistent/file.pdf")) == 0
+
+
+def test_count_pdf_pages_counts_real_pdf(tmp_path: Path) -> None:
+    from pypdf import PdfWriter
+
+    pdf_path = tmp_path / "two_pages.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=612, height=792)
+    writer.add_blank_page(width=612, height=792)
+    with open(pdf_path, "wb") as fh:
+        writer.write(fh)
+    assert count_pdf_pages(pdf_path) == 2
