@@ -176,7 +176,7 @@ def propose_answer_for_detected_field(
             )
 
     # ── Previously employed / former employee ──────────────────────────────────
-    if any(kw in label for kw in ("previously employed", "former employee", "worked for us", "worked here", "previously worked", "ever worked for")):
+    if any(kw in label for kw in ("previously employed", "former employee", "worked for us", "worked here", "previously worked", "ever worked for", "employed by", "employed with")):
         return ProposedApplicationAnswer(
             field_label=field_label, field_type=field_type,
             proposed_value="No", confidence=0.90, source="PROFILE", requires_review=True,

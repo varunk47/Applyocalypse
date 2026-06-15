@@ -4,32 +4,30 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
-from .validation import TextArtifactValidator
+from .validation import BANNED_WORDS, TextArtifactValidator
 
 
-COVER_LETTER_SYSTEM_PROMPT = """\
+COVER_LETTER_SYSTEM_PROMPT = f"""\
 You are a professional career coach writing a cover letter on behalf of the candidate.
 
 Your task: Given a job description and the candidate's background, write a focused, \
 truthful cover letter of at most 400 words.
 
 Rules:
-1. Use only verified facts from the candidate context — do not invent experience.
+1. Use only verified facts from the candidate context. Do not invent experience.
 2. Address the letter to "Hiring Team" if no specific name is available.
 3. Open with a specific connection between the candidate's background and this role. \
    Do not open with "I am applying for" or "I am writing to apply".
 4. Mention 1-2 concrete achievements or skills that directly match the job description.
 5. Close with a brief, confident sign-off. Include "Thank you" or "Best regards".
-6. Plain text only — no markdown bold markers (**word**), no bullet points, no em dashes.
-7. Do not use any of these banned words: leverage, utilize, spearheaded, robust, \
-   comprehensive, seamless, transformative, passionate, excited, thrilled, dynamic, \
-   innovative, holistic, empower, foster, harness.
-8. Maximum 400 words. Minimum 100 words.
+6. Plain text only. No markdown bold markers (**word**), no bullet points, no em dashes.
+7. Do not use any of these banned words: {", ".join(BANNED_WORDS)}.
+8. Target 250-350 words. Hard maximum 400 words.
 
-Output a JSON object with this exact structure — no markdown fences, no other text:
-{
+Output a JSON object with this exact structure. No markdown fences, no other text:
+{{
   "cover_letter_text": "<the full cover letter as a plain text string>"
-}
+}}
 """
 
 
@@ -128,7 +126,7 @@ async def generate_cover_letter(
             user_message += (
                 "\n\nIMPORTANT: The previous attempt failed validation. "
                 "Return raw JSON only. No markdown fences. No bold markers. "
-                "No banned words. No em dashes. Stay under 400 words."
+                "No banned words. No em dashes. Target 250-350 words; never exceed 400."
             )
             continue
         except Exception as exc:

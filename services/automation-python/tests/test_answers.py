@@ -86,6 +86,8 @@ EMPTY_PROFILE: dict = {"profile": {}}
     # ── Previously employed / criminal (always requires_review=True) ─────────
     ("Have you previously worked for us?", "radio", "No", True, "PROFILE"),
     ("Are you a former employee?", "radio", "No", True, "PROFILE"),
+    ("Have you ever been employed by this company?", "select", "No", True, "PROFILE"),
+    ("Are you or have you been employed with CertCo?", "select", "No", True, "PROFILE"),
     ("Have you ever been convicted of a felony?", "radio", "No", True, "PROFILE"),
     ("Any criminal history?", "radio", "No", True, "PROFILE"),
 

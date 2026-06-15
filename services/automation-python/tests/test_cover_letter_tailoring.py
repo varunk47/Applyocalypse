@@ -9,10 +9,12 @@ from unittest.mock import AsyncMock
 import pytest
 
 from applyocalypse_automation.cover_letter_tailoring import (
+    COVER_LETTER_SYSTEM_PROMPT,
     GeneratedCoverLetter,
     _build_user_message,
     generate_cover_letter,
 )
+from applyocalypse_automation.validation import BANNED_WORDS
 
 
 # ---------------------------------------------------------------------------
@@ -291,3 +293,9 @@ def test_build_user_message_truncates_sample_to_1200_chars() -> None:
     )
     assert "x" * 1200 in msg
     assert "x" * 1201 not in msg
+
+
+def test_system_prompt_matches_validator_banned_words() -> None:
+    for word in BANNED_WORDS:
+        assert word in COVER_LETTER_SYSTEM_PROMPT
+    assert "—" not in COVER_LETTER_SYSTEM_PROMPT
