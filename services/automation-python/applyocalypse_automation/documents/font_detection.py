@@ -29,13 +29,31 @@ def detect_docx_body_font_size(path: Path) -> int:
 
     try:
         doc = Document(str(path))
+
+        def _style_size_pt(para) -> int | None:
+            try:
+                style_size = para.style.font.size if para.style is not None else None
+            except Exception:
+                style_size = None
+            if style_size is None:
+                try:
+                    style_size = doc.styles["Normal"].font.size
+                except Exception:
+                    style_size = None
+            return round(style_size / 12700) if style_size is not None else None
+
         size_counts: dict[int, int] = {}
         for para in doc.paragraphs:
             for run in para.runs:
                 size = run.font.size
                 if size is not None:
                     pt = round(size / 12700)  # EMUs → pt
-                    size_counts[pt] = size_counts.get(pt, 0) + 1
+                else:
+                    pt_or_none = _style_size_pt(para)
+                    if pt_or_none is None:
+                        continue
+                    pt = pt_or_none
+                size_counts[pt] = size_counts.get(pt, 0) + 1
         if not size_counts:
             return _FALLBACK_FONT_SIZE
         dominant = max(size_counts, key=lambda s: size_counts[s])

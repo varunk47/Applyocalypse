@@ -112,6 +112,64 @@ def test_docx_returns_fallback_on_missing_file() -> None:
     assert detect_docx_body_font_size(Path("/nonexistent/resume.docx")) == _FALLBACK_FONT_SIZE
 
 
+def test_detects_size_from_normal_style_when_runs_inherit(tmp_path: Path) -> None:
+    try:
+        from docx import Document  # type: ignore
+        from docx.shared import Pt  # type: ignore
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    path = tmp_path / "resume.docx"
+    doc = Document()
+    doc.styles["Normal"].font.size = Pt(11)
+    for _ in range(5):
+        para = doc.add_paragraph()
+        run = para.add_run("Some bullet text here.")
+        assert run.font.size is None  # runs inherit from the Normal style
+    doc.save(str(path))
+
+    assert detect_docx_body_font_size(path) == 11
+
+
+def test_explicit_run_sizes_outvote_style_default(tmp_path: Path) -> None:
+    try:
+        from docx import Document  # type: ignore
+        from docx.shared import Pt  # type: ignore
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    path = tmp_path / "resume.docx"
+    doc = Document()
+    doc.styles["Normal"].font.size = Pt(11)
+    for _ in range(3):
+        para = doc.add_paragraph()
+        run = para.add_run("Explicit ten point line.")
+        run.font.size = Pt(10)
+    inheriting = doc.add_paragraph()
+    inheriting.add_run("Inheriting line.")
+    doc.save(str(path))
+
+    assert detect_docx_body_font_size(path) == 10
+
+
+def test_unsupported_style_size_falls_back(tmp_path: Path) -> None:
+    try:
+        from docx import Document  # type: ignore
+        from docx.shared import Pt  # type: ignore
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    path = tmp_path / "resume.docx"
+    doc = Document()
+    doc.styles["Normal"].font.size = Pt(12)
+    for _ in range(5):
+        para = doc.add_paragraph()
+        para.add_run("Twelve point inherited line.")
+    doc.save(str(path))
+
+    assert detect_docx_body_font_size(path) == _FALLBACK_FONT_SIZE
+
+
 # ---------------------------------------------------------------------------
 # detect_resume_font_size dispatcher
 # ---------------------------------------------------------------------------
