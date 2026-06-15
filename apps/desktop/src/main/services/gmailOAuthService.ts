@@ -29,7 +29,7 @@ type TokenResponse = {
   id_token?: string;
 };
 
-function parseIdTokenEmail(idToken: string): string | null {
+export function parseIdTokenEmail(idToken: string): string | null {
   try {
     const parts = idToken.split(".");
     if (parts.length < 2) return null;
