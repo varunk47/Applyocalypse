@@ -252,6 +252,49 @@ describe("python event ingest", () => {
     }
   });
 
+  it("rolls back the run_events row when a later write in the same event fails", () => {
+    const { db, runId } = createRun();
+    try {
+      const countEvents = () =>
+        (db.prepare("SELECT COUNT(*) AS n FROM run_events WHERE application_run_id = ?").get(runId) as { n: number }).n;
+      const before = countEvents();
+
+      const outsidePath = join(tempDirs.at(-1)!, "outside.png");
+      writeFileSync(outsidePath, Buffer.from("fake-png"));
+
+      expect(() =>
+        ingestPythonEventLine({
+          db,
+          windows: () => [],
+          safeArtifactRoots: [join(tempDirs.at(-1)!, "allowed")],
+          rawLine: JSON.stringify({
+            event_type: "SCREENSHOT_CAPTURED",
+            run_id: runId,
+            step_id: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            severity: "INFO",
+            message: "Screenshot outside roots",
+            machine_state: { screenshot_id: "rollback-1" },
+            ui_state: {},
+            payload: {
+              screenshot_id: "rollback-1",
+              local_path: outsidePath,
+              mime_type: "image/png",
+              width: 800,
+              height: 600,
+              sha256: "d".repeat(64),
+              captured_at: "2026-01-01T00:00:00.000Z"
+            }
+          })
+        })
+      ).toThrow(/outside Applyocalypse artifact roots/);
+
+      expect(countEvents()).toBe(before);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("rejects generated artifact paths outside configured safe roots", () => {
     const { db, runId } = createRun();
     try {
