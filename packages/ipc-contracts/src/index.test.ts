@@ -111,4 +111,15 @@ describe("ipc contracts", () => {
 
     expect(parsed.uploadedFileId).toBe("upload-1");
   });
+
+  it("accepts absolute localPath values and rejects relative or null-byte paths", () => {
+    const parse = (localPath: string) => IpcContracts.filesOpenLocalPath.request.parse({ localPath });
+
+    expect(parse("C:\\Users\\someone\\file.docx").localPath).toBe("C:\\Users\\someone\\file.docx");
+    expect(parse("/home/user/file.docx").localPath).toBe("/home/user/file.docx");
+
+    expect(() => parse("..\\..\\secrets.txt")).toThrow();
+    expect(() => parse("docs/resume.docx")).toThrow();
+    expect(() => parse("/home/user/file\0.docx")).toThrow();
+  });
 });

@@ -29,6 +29,22 @@ import {
   UploadedFileSchema
 } from "@applyocalypse/shared-schemas";
 
+// Renderer-supplied file paths must be absolute and free of null bytes. This is
+// defense-in-depth at the contract boundary; new IPC contracts carrying
+// renderer-supplied paths must use this schema. The picker-allowlist check in
+// requirePickedPath (main process) remains the primary authorization gate.
+const WINDOWS_ABSOLUTE = /^[A-Za-z]:[\\/]/;
+const POSIX_ABSOLUTE = /^\//;
+const UNC_ABSOLUTE = /^\\\\/;
+
+export const AbsoluteLocalPathSchema = z
+  .string()
+  .min(1)
+  .refine((p) => !p.includes("\0"), { message: "Path contains invalid characters" })
+  .refine((p) => WINDOWS_ABSOLUTE.test(p) || POSIX_ABSOLUTE.test(p) || UNC_ABSOLUTE.test(p), {
+    message: "Path must be absolute"
+  });
+
 const StructuredEntryIdField = { id: IdSchema.nullable().optional() };
 const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), gpa: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional() });
 const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]) });
@@ -135,7 +151,7 @@ export const IpcContracts = {
     IpcChannels.documentsIngestResumeSource,
     z.object({
       profileId: IdSchema.nullable(),
-      localPath: z.string().min(1)
+      localPath: AbsoluteLocalPathSchema
     }).strict(),
     z.object({
       sourceFile: UploadedFileSchema,
@@ -231,12 +247,12 @@ export const IpcContracts = {
     IpcChannels.filesRegisterUpload,
     z.object({
       profileId: IdSchema.nullable(),
-      localPath: z.string().min(1),
+      localPath: AbsoluteLocalPathSchema,
       fileKind: z.enum(["RESUME", "COVER_LETTER", "SUPPORTING_DETAILS", "OTHER"])
     }).strict(),
     z.object({ uploadedFile: UploadedFileSchema, parsing: ParsedDocumentMergeSummarySchema.nullable() })
   ),
-  filesOpenLocalPath: contract(IpcChannels.filesOpenLocalPath, z.object({ localPath: z.string().min(1) }).strict(), z.object({ opened: z.boolean() })),
+  filesOpenLocalPath: contract(IpcChannels.filesOpenLocalPath, z.object({ localPath: AbsoluteLocalPathSchema }).strict(), z.object({ opened: z.boolean() })),
   jobsEnqueue: contract(
     IpcChannels.jobsEnqueue,
     z.object({
