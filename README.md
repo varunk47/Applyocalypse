@@ -4,10 +4,26 @@ Applyocalypse is a local-first Electron desktop application for AI-assisted job 
 
 ## Development
 
+> **Agents: read [CLAUDE.md](CLAUDE.md) first** — it captures the architecture, safety invariants, and verification commands.
+
+### Prerequisites
+
+- Node >= 22 with corepack (pnpm >= 10)
+- Python 3.12 on `PATH`
+- Windows: Visual Studio Build Tools (C++ workload) for the `better-sqlite3` node-gyp build
+
+### First run
+
 ```powershell
 pnpm install
 pnpm dev
 ```
+
+`pnpm dev` auto-bootstraps the Python virtual environment (`services/automation-python/.venv-build`) and rebuilds the native modules for Electron before launching.
+
+### Configuration
+
+There is **no `.env` file**. LLM provider API keys, application credentials, and the Gmail OAuth client are entered in the app's Settings screen and stored encrypted via Electron `safeStorage` in SQLite. The only meaningful external environment variable for development is `APPLYO_PYTHON`, which overrides the host Python interpreter used to build the worker venv.
 
 The Electron main process owns SQLite, filesystem access, native theme synchronization, Python process supervision, and browser automation coordination. The SolidJS renderer only talks to a typed preload API.
 
