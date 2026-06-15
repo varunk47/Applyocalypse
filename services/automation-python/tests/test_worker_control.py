@@ -7,8 +7,9 @@ import pytest
 
 from applyocalypse_automation import runner as runner_module
 from applyocalypse_automation.browser.adapter import BrowserBlocker, BrowserField, BrowserStepResult
-from applyocalypse_automation.control import WorkerControl, read_worker_control
 from applyocalypse_automation.browser.field_detection import build_click_by_text_script, build_final_submit_script
+from applyocalypse_automation.browser.portal_workflows import workflow_for_url
+from applyocalypse_automation.control import WorkerControl, read_worker_control
 from applyocalypse_automation.otp import GmailOtpResult
 from applyocalypse_automation.runner import (
     approved_value_for_field,
@@ -16,20 +17,19 @@ from applyocalypse_automation.runner import (
     cover_letter_requirement_from_fields,
     field_file_count,
     handle_runtime_control,
-    perform_final_submit_after_approval,
-    perform_final_submit_with_control,
     pause_for_blockers,
     pause_for_portal_entry_action,
+    perform_final_submit_after_approval,
+    perform_final_submit_with_control,
     portal_entry_requires_manual_action,
     required_document_missing_payload,
-    wait_for_document_approval,
-    wait_for_review_resume,
-    run_url_observation_flow,
     run_browser_apply_after_review,
+    run_url_observation_flow,
     select_generated_file_for_upload,
     submission_confirmation_detected,
+    wait_for_document_approval,
+    wait_for_review_resume,
 )
-from applyocalypse_automation.browser.portal_workflows import workflow_for_url
 
 
 def test_read_worker_control_returns_none_without_file(tmp_path):

@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from pathlib import Path
 import re
 import shutil
+from dataclasses import asdict, dataclass
+from pathlib import Path
 
 from .docx_mutation import iter_document_paragraphs, replace_paragraph_text_preserving_runs
-
 
 REQUIRED_PLACEHOLDERS = (
     "{{APPLYO_FULL_NAME}}",
@@ -169,7 +168,7 @@ def repair_docx_anchors(source: Path, output: Path) -> AnchorRepairResult:
     missing_exp = [a for a in exp_anchors if a not in already_present]
     if missing_exp:
         exp_bullets = find_first_bullet_in_each_experience_block(paragraphs)
-        for anchor, paragraph in zip(missing_exp, exp_bullets):
+        for anchor, paragraph in zip(missing_exp, exp_bullets, strict=False):
             replace_paragraph_text_preserving_runs(paragraph, anchor)
             added.append(anchor)
         if not exp_bullets:

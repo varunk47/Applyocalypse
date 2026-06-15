@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, asdict
-from pathlib import Path
 import re
+from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Literal
-
 
 BANNED_WORDS = [
     "leverage",

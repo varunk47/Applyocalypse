@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from .portal_workflows import PortalWorkflow
 from .adapter import BrowserAdapter
 from .nodriver_adapter import NodriverBrowserAdapter
 from .playwright_adapter import PlaywrightBrowserAdapter
+from .portal_workflows import PortalWorkflow
 from .seleniumbase_adapter import SeleniumBaseBrowserAdapter
 
 SUPPORTED_BROWSER_ADAPTERS = ("nodriver", "playwright", "seleniumbase")

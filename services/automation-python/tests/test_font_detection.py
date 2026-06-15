@@ -13,7 +13,6 @@ from applyocalypse_automation.documents.font_detection import (
     detect_tex_body_font_size,
 )
 
-
 # ---------------------------------------------------------------------------
 # detect_tex_body_font_size
 # ---------------------------------------------------------------------------

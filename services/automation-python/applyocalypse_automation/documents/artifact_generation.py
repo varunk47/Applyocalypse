@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
-from datetime import datetime, timedelta, timezone
 import hashlib
+from dataclasses import asdict, dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -301,7 +301,7 @@ def write_text_artifact(
     local_path = choose_collision_safe_path(output_dir, filename)
     local_path.write_text(content, encoding="utf-8")
     raw = local_path.read_bytes()
-    delete_after = datetime.now(timezone.utc) + timedelta(days=14)
+    delete_after = datetime.now(UTC) + timedelta(days=14)
     return ArtifactMetadata(
         file_kind=file_kind,
         format=extension.strip(".").upper(),
@@ -317,7 +317,7 @@ def write_text_artifact(
 
 def metadata_for_existing_file(*, path: Path, file_kind: str, format_name: str, review_only: bool) -> ArtifactMetadata:
     raw = path.read_bytes()
-    delete_after = datetime.now(timezone.utc) + timedelta(days=14)
+    delete_after = datetime.now(UTC) + timedelta(days=14)
     return ArtifactMetadata(
         file_kind=file_kind,
         format=format_name,

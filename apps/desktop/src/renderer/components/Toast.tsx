@@ -1,4 +1,4 @@
-import { For, createContext, createSignal, onCleanup, useContext, type ParentProps } from 'solid-js'
+import { For, createContext, createSignal, useContext, type ParentProps } from 'solid-js'
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-solid'
 import { gsap } from '../animations/gsap'
 

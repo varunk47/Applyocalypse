@@ -1,4 +1,4 @@
-import { createSignal, Show } from 'solid-js'
+import { Show } from 'solid-js'
 import { ChevronDown, ChevronRight } from 'lucide-solid'
 import type { ChatMessage } from '@applyocalypse/shared-types'
 

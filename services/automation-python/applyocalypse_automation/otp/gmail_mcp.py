@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from email import policy
-from email.parser import BytesParser
 import hashlib
 import imaplib
 import os
 import re
 import time
+from dataclasses import dataclass, field
+from datetime import UTC, datetime
+from email import policy
+from email.parser import BytesParser
 from typing import Any
 
 from ..secret_env import get_secret
-
 
 OTP_PATTERN = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
 

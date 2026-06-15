@@ -6,7 +6,12 @@ from docx import Document
 
 from applyocalypse_automation.documents.anchor_repair import repair_editable_master_anchors
 from applyocalypse_automation.documents.artifact_generation import find_anchored_resume_candidate
-from applyocalypse_automation.documents.docx_mutation import DocxParagraphMutation, extract_docx_text, mutate_docx_paragraphs, mutate_docx_placeholders
+from applyocalypse_automation.documents.docx_mutation import (
+    DocxParagraphMutation,
+    extract_docx_text,
+    mutate_docx_paragraphs,
+    mutate_docx_placeholders,
+)
 from applyocalypse_automation.documents.file_generation import (
     GeneratedNameInput,
     build_generated_filename,

@@ -9,7 +9,6 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 _FALLBACK_FONT_SIZE = 10
 _SUPPORTED_SIZES = {10, 11}
 
@@ -23,7 +22,7 @@ def detect_docx_body_font_size(path: Path) -> int:
     """
     try:
         from docx import Document  # type: ignore
-        from docx.shared import Pt  # type: ignore
+        from docx.shared import Pt  # type: ignore  # noqa: F401
     except ImportError:
         return _FALLBACK_FONT_SIZE
 

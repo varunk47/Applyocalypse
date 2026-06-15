@@ -2,11 +2,8 @@
 from __future__ import annotations
 
 import asyncio
-import json
 from typing import Any
 from unittest.mock import AsyncMock
-
-import pytest
 
 from applyocalypse_automation.cover_letter_tailoring import (
     COVER_LETTER_SYSTEM_PROMPT,
@@ -15,7 +12,6 @@ from applyocalypse_automation.cover_letter_tailoring import (
     generate_cover_letter,
 )
 from applyocalypse_automation.validation import BANNED_WORDS
-
 
 # ---------------------------------------------------------------------------
 # Helpers

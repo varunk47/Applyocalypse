@@ -5,7 +5,6 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-
 _TAILOR_SYSTEM_PROMPT_TEMPLATE = """\
 You are an ATS optimization expert tailoring a resume to one job description.
 

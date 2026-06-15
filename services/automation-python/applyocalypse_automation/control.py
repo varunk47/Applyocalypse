@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
-
 
 WorkerCommand = Literal["PAUSE", "RESUME", "CANCEL", "RETRY_STEP", "SKIP_STEP"]
 

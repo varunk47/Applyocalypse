@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { extname, join } from "node:path";
 
+// eslint-disable-next-line no-control-regex -- strips C0 control chars from filenames
 const INVALID_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001F]/g;
 const COLLAPSE_WHITESPACE = /\s+/g;
 

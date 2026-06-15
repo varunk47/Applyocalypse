@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import io
 import json
-import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -354,7 +353,7 @@ def _capture_events(fn: Any, *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
 
 def test_lazy_cover_letter_emits_rendered_and_review_events(monkeypatch: pytest.MonkeyPatch) -> None:
     try:
-        from docx import Document  # type: ignore
+        from docx import Document  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("python-docx not installed")
 

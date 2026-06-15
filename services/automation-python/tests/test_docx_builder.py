@@ -12,7 +12,6 @@ from applyocalypse_automation.documents.file_generation import (
     build_generated_filename,
 )
 
-
 _PROFILE = {
     "profile": {
         "legalName": "Margaret Hamilton",
@@ -33,7 +32,7 @@ _BODY = (
 
 def test_cover_letter_docx_is_created() -> None:
     try:
-        from docx import Document  # type: ignore
+        from docx import Document  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("python-docx not installed")
 
@@ -197,7 +196,7 @@ _RESUME_PLAN: dict = {
 
 def test_build_resume_docx_creates_file() -> None:
     try:
-        from docx import Document  # type: ignore
+        from docx import Document  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("python-docx not installed")
 
@@ -269,7 +268,7 @@ def test_build_resume_docx_contains_education() -> None:
 
 def test_build_resume_docx_handles_empty_profile() -> None:
     try:
-        from docx import Document  # type: ignore
+        from docx import Document  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("python-docx not installed")
 
@@ -282,7 +281,7 @@ def test_build_resume_docx_handles_empty_profile() -> None:
 def test_build_resume_docx_respects_font_size_param() -> None:
     try:
         from docx import Document  # type: ignore
-        from docx.shared import Pt  # type: ignore
+        from docx.shared import Pt  # type: ignore  # noqa: F401
     except ImportError:
         pytest.skip("python-docx not installed")
 

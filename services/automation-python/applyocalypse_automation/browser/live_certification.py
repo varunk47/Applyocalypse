@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
 import json
 import os
+from dataclasses import dataclass
 from pathlib import Path
 from urllib.error import URLError
 from urllib.request import Request, urlopen
@@ -11,7 +11,6 @@ from urllib.request import Request, urlopen
 from .portal_adapters import portal_adapter_plan_for_workflow
 from .portal_registry import PORTALS, detect_portal
 from .portal_workflows import workflow_for_url
-
 
 TARGET_PORTAL_IDS = tuple(portal.portal_id for portal in PORTALS)
 

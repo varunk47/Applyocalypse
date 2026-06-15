@@ -6,7 +6,6 @@ from typing import Any
 
 from .validation import BANNED_WORDS, TextArtifactValidator
 
-
 COVER_LETTER_SYSTEM_PROMPT = f"""\
 You are a professional career coach writing a cover letter on behalf of the candidate.
 

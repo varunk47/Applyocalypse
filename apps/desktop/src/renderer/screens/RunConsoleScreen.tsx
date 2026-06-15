@@ -4,7 +4,7 @@ import type { ApplicationAnswer, Approval, ReviewRequest } from '@applyocalypse/
 import { useRunStore } from '../contexts/RunStore'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { buildCoverLetterRequirementSummary } from '../features/run-console/materialRequirementsView'
-import { buildPortalWorkflowSummary, formatWorkflowKind } from '../features/run-console/portalWorkflowView'
+import { buildPortalWorkflowSummary } from '../features/run-console/portalWorkflowView'
 import { gsap } from '../animations/gsap'
 
 const artifactUrlForPath = (p: string) => `applyocalypse://artifact?path=${encodeURIComponent(p)}`
@@ -70,7 +70,9 @@ export default function RunConsoleScreen() {
   let prevSrc = ''
   const rejectReason = 'Final submit rejected by local user.'
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- TODO(plan-017): render portal workflow summary
   const portalWorkflow     = createMemo(() => buildPortalWorkflowSummary(state.runDetail?.events ?? state.events))
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars -- TODO(plan-017): render cover-letter requirement summary
   const coverLetter        = createMemo(() => buildCoverLetterRequirementSummary(state.runDetail?.events ?? state.events))
   const latestScreenshot   = createMemo(() => state.screenshots[state.screenshots.length - 1])
 

@@ -2,24 +2,24 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 import hashlib
 import json
 import os
-from pathlib import Path
 import re
 import sys
 import time
-from urllib.parse import urlparse, unquote
+from dataclasses import dataclass
+from pathlib import Path
+from urllib.parse import unquote, urlparse
 
 from .answers import ProposedApplicationAnswer, propose_answer_for_detected_field, propose_profile_answers
-from .secret_env import get_secret
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.portal_adapters import COMMON_STEP_PROGRESSION_LABELS, progression_labels_for_workflow
 from .browser.portal_state import PortalPageState, classify_portal_page_state
 from .browser.portal_workflows import PortalWorkflow, workflow_for_url
 from .control import WorkerControl, read_worker_control
+from .cover_letter_tailoring import generate_cover_letter
 from .documents.artifact_generation import (
     build_cover_letter_text,
     build_placeholder_replacements,
@@ -31,16 +31,16 @@ from .documents.artifact_generation import (
     write_text_artifact,
 )
 from .documents.docx_builder import build_cover_letter_docx, build_resume_docx
-from .cover_letter_tailoring import generate_cover_letter
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
-from .llm.litellm_client import LiteLlmClient
-from .resume_tailoring import tailor_resume_sections
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent, utc_now
 from .jd_analysis import analyze_with_optional_llm
+from .llm.litellm_client import LiteLlmClient
 from .otp import read_gmail_otp_from_env
+from .resume_tailoring import tailor_resume_sections
+from .secret_env import get_secret
 from .tailoring.engine import TailoringEngine
 from .validation import TextArtifactValidator, ValidationReport
 
@@ -605,7 +605,7 @@ async def observe_portal_page_state(
     context: str,
     field_count: int | None = None,
 ) -> PortalPageState | None:
-    extract_visible_text = getattr(adapter, "extract_visible_text")
+    extract_visible_text = adapter.extract_visible_text
     result = await extract_visible_text()
     if not result.ok:
         WorkerEvent(
@@ -1120,7 +1120,7 @@ async def execute_portal_entry_action(
     labels = list(workflow.entry_action_labels)
     if not labels:
         return BrowserStepResult(False, "no portal entry labels configured", {"attempted_labels": []})
-    click_by_text = getattr(adapter, "click_by_text")
+    click_by_text = adapter.click_by_text
     result = await click_by_text(labels)
     WorkerEvent(
         event_type=EventType.PORTAL_ACTION_APPLIED,
@@ -1159,7 +1159,7 @@ async def attempt_safe_step_progression(
     context: str,
     step_index: int,
 ) -> str:
-    click_by_text = getattr(adapter, "click_by_text")
+    click_by_text = adapter.click_by_text
     labels = list(progression_labels_for_workflow(workflow))
     result = await click_by_text(labels)
     message = str(result.payload.get("message") or getattr(result, "message", ""))

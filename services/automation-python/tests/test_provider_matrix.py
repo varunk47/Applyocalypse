@@ -4,7 +4,12 @@ import asyncio
 
 import pytest
 
-from applyocalypse_automation.llm.provider_matrix import PROVIDER_MATRIX, provider_entry, provider_readiness, run_provider_matrix
+from applyocalypse_automation.llm.provider_matrix import (
+    PROVIDER_MATRIX,
+    provider_entry,
+    provider_readiness,
+    run_provider_matrix,
+)
 
 
 def test_provider_matrix_covers_required_byok_providers() -> None:
@@ -41,13 +46,13 @@ def test_provider_matrix_offline_mode_is_machine_readable() -> None:
 
 def test_jd_analysis_uses_fast_model_when_set(monkeypatch: pytest.MonkeyPatch) -> None:
     """LITELLM_MODEL_FAST takes precedence over LITELLM_MODEL for JD analysis."""
-    import os
 
     monkeypatch.setenv("LITELLM_MODEL", "openai/default-model")
     monkeypatch.setenv("LITELLM_MODEL_FAST", "groq/openai/gpt-oss-120b")
 
     # Import after monkeypatching so os.getenv reads the patched env
     import importlib
+
     import applyocalypse_automation.jd_analysis as jd_mod
     importlib.reload(jd_mod)
 
@@ -70,12 +75,12 @@ def test_jd_analysis_uses_fast_model_when_set(monkeypatch: pytest.MonkeyPatch) -
 
 def test_jd_analysis_falls_back_to_litellm_model_when_fast_unset(monkeypatch: pytest.MonkeyPatch) -> None:
     """Falls back to LITELLM_MODEL when LITELLM_MODEL_FAST is not set."""
-    import os
 
     monkeypatch.delenv("LITELLM_MODEL_FAST", raising=False)
     monkeypatch.setenv("LITELLM_MODEL", "openai/gpt-5.5")
 
     import importlib
+
     import applyocalypse_automation.jd_analysis as jd_mod
     importlib.reload(jd_mod)
 

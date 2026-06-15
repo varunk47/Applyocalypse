@@ -11,7 +11,6 @@ from applyocalypse_automation.resume_tailoring import (
     tailor_resume_sections,
 )
 
-
 # ---------------------------------------------------------------------------
 # Prompt generation
 # ---------------------------------------------------------------------------

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from collections.abc import Iterable
 from typing import Any
 
 
@@ -144,8 +144,8 @@ def _expand_anchor_to_bullets(document: Any, anchor_text: str, bullets: list[str
     so bullet formatting is preserved exactly. Returns True if the anchor was found.
     """
     try:
-        from docx.oxml.ns import qn  # type: ignore
         from docx.oxml import OxmlElement  # type: ignore
+        from docx.oxml.ns import qn  # type: ignore
     except ImportError as exc:
         raise RuntimeError("python-docx is required for bullet expansion") from exc
 

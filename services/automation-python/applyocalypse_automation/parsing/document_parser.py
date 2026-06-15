@@ -1,13 +1,12 @@
 from __future__ import annotations
 
+import re
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-import re
 from typing import Any
 
 from ..documents.docx_mutation import inspect_docx_for_anchors
 from ..documents.tex_mutation import inspect_tex_regions
-
 
 PARSER_NAME = "applyocalypse-local-parser"
 PARSER_VERSION = "0.3.0"

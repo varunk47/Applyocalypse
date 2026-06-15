@@ -1,8 +1,8 @@
 from __future__ import annotations
 
 import asyncio
-from pathlib import Path
 import json
+from pathlib import Path
 
 from .adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult, screenshot_payload
 from .field_detection import (

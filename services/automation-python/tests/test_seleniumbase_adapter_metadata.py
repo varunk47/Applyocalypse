@@ -16,9 +16,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-from applyocalypse_automation.browser.seleniumbase_adapter import SeleniumBaseBrowserAdapter
 from applyocalypse_automation.browser.adapter import BrowserField
-
+from applyocalypse_automation.browser.seleniumbase_adapter import SeleniumBaseBrowserAdapter
 
 # ---------------------------------------------------------------------------
 # Helpers

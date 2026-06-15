@@ -667,7 +667,7 @@ describe("db repositories", () => {
       const chat = new ChatRepository(db);
 
       const msg1 = chat.appendMessage({ role: "USER", kind: "TEXT", content: "Hello" });
-      const msg2 = chat.appendMessage({ role: "SYSTEM", kind: "TEXT", content: "Acknowledged" });
+      chat.appendMessage({ role: "SYSTEM", kind: "TEXT", content: "Acknowledged" });
       const msg3 = chat.appendMessage({
         role: "SYSTEM",
         kind: "JOB_CARD",

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
+import json
+import sys
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-import json
-import sys
 from typing import Any
 
 

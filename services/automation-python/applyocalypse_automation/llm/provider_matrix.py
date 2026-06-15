@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import dataclass
 import json
 import os
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True, slots=True)

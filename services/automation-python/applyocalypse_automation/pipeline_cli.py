@@ -5,8 +5,8 @@ import json
 from pathlib import Path
 from typing import Any
 
-from .documents.docx_mutation import DocxParagraphMutation, mutate_docx_paragraphs
 from .documents.anchor_repair import repair_editable_master_anchors
+from .documents.docx_mutation import DocxParagraphMutation, mutate_docx_paragraphs
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 from .documents.tex_mutation import TexBlockMutation, compile_tex_with_tectonic, mutate_tex_regions
 from .jd_analysis import JobDescriptionAnalyzer

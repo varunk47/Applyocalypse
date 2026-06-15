@@ -22,6 +22,7 @@ export type SourceCustodyInput = {
 };
 
 const sanitizeSourceFilename = (filename: string): string => {
+  // eslint-disable-next-line no-control-regex -- strips C0 control chars from filenames
   const sanitized = filename.replace(/[<>:"/\\|?*\u0000-\u001f]/g, "_").replace(/\s+/g, " ").trim();
   return sanitized || "source-material";
 };

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +23,8 @@ def build_cover_letter_docx(
     """
     try:
         from docx import Document  # type: ignore
-        from docx.shared import Inches, Pt
         from docx.oxml.ns import qn  # type: ignore
+        from docx.shared import Inches, Pt
     except ImportError as exc:
         raise RuntimeError("python-docx is required for cover letter DOCX generation") from exc
 
@@ -72,7 +72,7 @@ def build_cover_letter_docx(
     _add_para("")
 
     # Date
-    today = datetime.now(timezone.utc).strftime("%B %d, %Y")
+    today = datetime.now(UTC).strftime("%B %d, %Y")
     _add_para(today)
 
     # Blank line before body
@@ -106,9 +106,9 @@ def build_resume_docx(
     """
     try:
         from docx import Document  # type: ignore
-        from docx.shared import Inches, Pt, RGBColor  # type: ignore
         from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
         from docx.oxml.ns import qn  # type: ignore
+        from docx.shared import Inches, Pt, RGBColor  # type: ignore  # noqa: F401
     except ImportError as exc:
         raise RuntimeError("python-docx is required for resume DOCX generation") from exc
 

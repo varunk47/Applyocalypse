@@ -4,7 +4,6 @@ from dataclasses import dataclass
 
 from .portal_workflows import PortalWorkflow
 
-
 COMMON_STEP_PROGRESSION_LABELS = (
     "Next",
     "Continue",
