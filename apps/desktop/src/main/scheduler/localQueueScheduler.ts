@@ -239,6 +239,10 @@ export class LocalQueueScheduler {
           .run({ queueItemId: item.id, updatedAt: new Date().toISOString() });
         return;
       }
+      const autofillDefaults = new SettingsRepository(this.db).get<boolean>("automation.autofillApprovedDefaults", false);
+      if (autofillDefaults === true) {
+        providerEnv = { ...(providerEnv ?? {}), APPLYO_AUTOFILL_APPROVED_DEFAULTS: "1" };
+      }
       this.supervisor.start({
         runId,
         ...(jobTarget.sourceKind === "URL" ? { jobUrl: jobTarget.sourceValue } : {}),

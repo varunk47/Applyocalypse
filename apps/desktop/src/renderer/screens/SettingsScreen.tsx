@@ -14,6 +14,7 @@ export default function SettingsScreen() {
     state,
     setThemePreference,
     setMaxConcurrentApplications,
+    setAutofillApprovedDefaults,
     chooseOutputDir,
     saveProviderApiKey,
   } = useSettingsStore()
@@ -51,6 +52,7 @@ export default function SettingsScreen() {
   }
 
   const maxConcurrent = () => Number(state.settings['automation.maxConcurrentApplications'] ?? 2)
+  const autofillDefaults = () => state.settings['automation.autofillApprovedDefaults'] === true
   const outputDir = () => (state.settings['files.outputDir'] as string | undefined) ?? ''
 
   type ConverterStatus = { available: boolean; version: string | null; path: string | null; installUrl: string }
@@ -226,6 +228,23 @@ export default function SettingsScreen() {
             </button>
           ))}
         </div>
+      </div>
+
+      {/* Section 3b: Autofill approved defaults */}
+      <div style={{ 'margin-top': '2rem' }}>
+        <div class="panel-kicker">Autofill approved defaults (name, address, links) without review</div>
+        <div class="segmented-control" aria-label="Autofill approved defaults">
+          {([false, true] as const).map((val) => (
+            <button
+              classList={{ active: autofillDefaults() === val }}
+              type="button"
+              onClick={() => void setAutofillApprovedDefaults(val)}
+            >
+              {val ? 'On' : 'Off'}
+            </button>
+          ))}
+        </div>
+        <p class="fine-print">EEO and sensitive questions always require review.</p>
       </div>
 
       {/* Section 4: Output dir */}

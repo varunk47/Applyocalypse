@@ -386,6 +386,7 @@ def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: di
         field_label=field.label,
         field_type=field.field_type,
         canonical_profile=canonical_profile,
+        autofill_approved_defaults=os.getenv("APPLYO_AUTOFILL_APPROVED_DEFAULTS") == "1",
     )
 
 
