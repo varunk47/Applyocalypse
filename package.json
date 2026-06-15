@@ -28,15 +28,25 @@
     "cert:portals": "node scripts/certification/live-portal-certification.mjs",
     "cert:providers": "node scripts/certification/byok-provider-matrix.mjs",
     "release:preflight": "node scripts/release/preflight.mjs",
-    "verify": "pnpm typecheck && pnpm test && pnpm test:python && pnpm python:audit && pnpm audit --audit-level high",
+    "verify": "pnpm typecheck && pnpm lint:js && pnpm lint:python && pnpm test && pnpm test:python && pnpm python:audit && pnpm audit --audit-level high",
     "verify:packaged": "pnpm desktop:package && pnpm test:worker-smoke && pnpm test:desktop-smoke && pnpm test:desktop-user-flow && pnpm test:desktop-e2e",
     "lint": "pnpm -r lint",
+    "lint:js": "eslint .",
+    "lint:python": "node scripts/test/python-lint.mjs",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "db:migrate": "pnpm --filter @applyocalypse/db migrate"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.1",
     "@types/node": "^22.15.3",
+    "eslint": "^9.39.1",
+    "eslint-plugin-solid": "^0.14.5",
+    "globals": "^16.5.0",
+    "prettier": "^3.6.2",
     "tsx": "^4.19.4",
     "typescript": "^5.8.3",
+    "typescript-eslint": "^8.46.1",
     "vitest": "^3.2.6"
   },
   "pnpm": {
