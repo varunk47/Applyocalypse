@@ -1,5 +1,10 @@
 import { ExternalLink } from 'lucide-solid'
+import { Show } from 'solid-js'
+import { useNavigate } from '@solidjs/router'
 import type { ChatMessage } from '@applyocalypse/shared-types'
+
+// Statuses where the user must act in the Run Console.
+const REVIEW_STATUSES = new Set(['READY_FOR_REVIEW', 'WAITING_FOR_USER_EDIT', 'BLOCKED_OTP', 'READY_TO_SUBMIT'])
 
 type JobCardMeta = {
   sourceKind?: 'URL' | 'TEXT'
@@ -19,7 +24,15 @@ const statusLabel = (status: string): string => {
   const map: Record<string, string> = {
     QUEUED: 'Queued',
     PREPARING: 'Preparing',
+    ANALYZING: 'Analyzing',
+    TAILORING_RESUME: 'Tailoring',
+    GENERATING_COVER_LETTER: 'Cover letter',
+    READY_FOR_REVIEW: 'Review required',
+    WAITING_FOR_USER_EDIT: 'Edit required',
     RUNNING_AUTOMATION: 'Running',
+    BLOCKED_OTP: 'OTP needed',
+    READY_TO_SUBMIT: 'Ready to submit',
+    SUBMITTED: 'Submitted',
     PAUSED: 'Paused',
     COMPLETED: 'Completed',
     FAILED: 'Failed',
@@ -29,13 +42,17 @@ const statusLabel = (status: string): string => {
 }
 
 const statusClass = (status: string): string => {
-  if (status === 'COMPLETED') return 'status-completed'
+  if (status === 'COMPLETED' || status === 'SUBMITTED') return 'status-completed'
   if (['FAILED', 'CANCELLED'].includes(status)) return 'status-failed'
-  if (['RUNNING_AUTOMATION', 'PREPARING'].includes(status)) return 'status-running'
+  if (REVIEW_STATUSES.has(status)) return 'status-review'
+  if (['RUNNING_AUTOMATION', 'PREPARING', 'ANALYZING', 'TAILORING_RESUME', 'GENERATING_COVER_LETTER'].includes(status))
+    return 'status-running'
   return 'status-pending'
 }
 
 export const JobCard = (props: Props) => {
+  const navigate = useNavigate()
+
   const meta = () => {
     try {
       return props.message.metadata as JobCardMeta
@@ -43,6 +60,8 @@ export const JobCard = (props: Props) => {
       return {} as JobCardMeta
     }
   }
+
+  const needsReview = () => REVIEW_STATUSES.has(status()) && Boolean(meta().runId)
 
   const displayTitle = () => {
     const m = meta()
@@ -81,6 +100,15 @@ export const JobCard = (props: Props) => {
           {url()}
         </a>
       )}
+      <Show when={needsReview()}>
+        <button
+          type="button"
+          class="chat-job-card-open-run"
+          onClick={() => navigate(`/run/${meta().runId}`)}
+        >
+          Open run
+        </button>
+      </Show>
     </div>
   )
 }

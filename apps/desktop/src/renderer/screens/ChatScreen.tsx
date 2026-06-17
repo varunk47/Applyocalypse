@@ -1,7 +1,8 @@
-import { createSignal, For, onMount, createEffect, Show } from 'solid-js'
+import { createSignal, For, onMount, onCleanup, createEffect, Show } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import { Send } from 'lucide-solid'
 import { chatState, chatDispatch } from '../contexts/ChatStore'
+import { startChatLiveSync, notifyCardsChanged } from '../contexts/chatLiveSync'
 import { JobCard } from '../features/chat/JobCard'
 import { BatchHeader } from '../features/chat/BatchHeader'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
@@ -16,11 +17,18 @@ export default function ChatScreen() {
   const [collapsed, setCollapsed] = createStore<Record<string, boolean>>({})
   let threadRef: HTMLDivElement | undefined
 
+  let stopSync: (() => void) | undefined
+
   onMount(async () => {
     chatDispatch({ type: 'LOADED', messages: [] })
     const { items } = await window.applyocalypse.chat.list(200, 0)
     chatDispatch({ type: 'LOADED', messages: items })
+    // Live-sync the (now hydrated) job cards against runs.list. The first
+    // reconcile also corrects any stale persisted statuses loaded from SQLite.
+    stopSync = startChatLiveSync()
   })
+
+  onCleanup(() => stopSync?.())
 
   const scrollToBottom = () => {
     if (threadRef) threadRef.scrollTop = threadRef.scrollHeight
@@ -96,6 +104,8 @@ export default function ChatScreen() {
           }
         })
       }
+      // Restart/refresh the live-sync loop now that new cards exist.
+      notifyCardsChanged()
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong')
     } finally {

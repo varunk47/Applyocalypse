@@ -52,6 +52,36 @@ describe('chatReducer', () => {
     expect(s.messages[0]?.role).toBe('SYSTEM')
     expect(s.messages[0]?.kind).toBe('JOB_CARD')
   })
+
+  it('CARD_RUN_STATE updates the target card metadata immutably, preserving other keys', () => {
+    const card = makeMessage({
+      id: 'card-1',
+      kind: 'JOB_CARD',
+      role: 'SYSTEM',
+      metadata: { queueItemId: 'q1', company: 'Acme', role: 'Engineer', status: 'QUEUED' }
+    })
+    const other = makeMessage({ id: 'card-2', kind: 'JOB_CARD', role: 'SYSTEM', metadata: { status: 'QUEUED' } })
+    const s1 = chatReducer(empty, { type: 'LOADED', messages: [card, other] })
+    const s2 = chatReducer(s1, { type: 'CARD_RUN_STATE', messageId: 'card-1', runId: 'run-1', status: 'TAILORING_RESUME' })
+
+    expect(s2.messages[0]?.metadata).toEqual({
+      queueItemId: 'q1',
+      company: 'Acme',
+      role: 'Engineer',
+      runId: 'run-1',
+      status: 'TAILORING_RESUME'
+    })
+    // Other card untouched, and the source message object is not mutated.
+    expect(s2.messages[1]).toBe(other)
+    expect((card.metadata as { status?: string }).status).toBe('QUEUED')
+  })
+
+  it('CARD_RUN_STATE is a no-op when no message id matches', () => {
+    const card = makeMessage({ id: 'card-1', kind: 'JOB_CARD', role: 'SYSTEM', metadata: { status: 'QUEUED' } })
+    const s1 = chatReducer(empty, { type: 'LOADED', messages: [card] })
+    const s2 = chatReducer(s1, { type: 'CARD_RUN_STATE', messageId: 'missing', runId: 'run-1', status: 'COMPLETED' })
+    expect(s2.messages[0]?.metadata).toEqual({ status: 'QUEUED' })
+  })
 })
 
 describe('getBatchJobCards', () => {
@@ -106,6 +136,23 @@ describe('getBatchProgress', () => {
     expect(p.running).toBe(2)
     expect(p.queued).toBe(1)
     expect(p.failed).toBe(1)
+  })
+
+  it('counts in-flight statuses as running and SUBMITTED as completed', () => {
+    const msgs: ChatMessage[] = [
+      makeJobCard('c1', 'ANALYZING'),
+      makeJobCard('c2', 'TAILORING_RESUME'),
+      makeJobCard('c3', 'READY_FOR_REVIEW'),
+      makeJobCard('c4', 'BLOCKED_OTP'),
+      makeJobCard('c5', 'SUBMITTED'),
+      makeJobCard('c6', 'QUEUED'),
+    ]
+    const p = getBatchProgress(msgs, batchId)
+    expect(p.total).toBe(6)
+    expect(p.running).toBe(4)
+    expect(p.completed).toBe(1)
+    expect(p.queued).toBe(1)
+    expect(p.failed).toBe(0)
   })
 
   it('returns zeros for an empty batch', () => {
