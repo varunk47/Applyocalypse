@@ -15,3 +15,6 @@ services/automation-python/dist/
 services/automation-python/build/
 services/automation-python/.venv-build/
 services/automation-python/*.spec
+
+# Vitest coverage output
+coverage/

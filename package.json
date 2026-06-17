@@ -16,6 +16,7 @@
     "desktop:package": "pnpm python:build && pnpm --filter @applyocalypse/desktop build && node scripts/build/package-desktop.mjs",
     "typecheck": "pnpm -r --stream typecheck",
     "test": "pnpm native:rebuild:node && vitest run",
+    "test:coverage": "pnpm native:rebuild:node && vitest run --coverage",
     "test:python": "node scripts/test/python-tests.mjs",
     "test:desktop-smoke": "pnpm native:rebuild:electron && node scripts/test/desktop-boot-smoke.mjs",
     "test:desktop-user-flow": "pnpm native:rebuild:electron && node scripts/test/desktop-user-flow-smoke.mjs",
@@ -40,6 +41,7 @@
   "devDependencies": {
     "@eslint/js": "^9.39.1",
     "@types/node": "^22.15.3",
+    "@vitest/coverage-v8": "^3.2.6",
     "eslint": "^9.39.1",
     "eslint-plugin-solid": "^0.14.5",
     "globals": "^16.5.0",
