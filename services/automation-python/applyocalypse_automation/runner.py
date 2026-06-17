@@ -32,6 +32,7 @@ from .documents.artifact_generation import (
 )
 from .documents.docx_builder import build_cover_letter_docx, build_resume_docx
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
+from .documents.export_flow import RESUME_DOCX_TAIL, RESUME_TEX_TAIL, run_resume_render_tail
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
@@ -2421,45 +2422,16 @@ def main() -> None:
                     ).emit()
 
                 if replaced_placeholders:
-                    artifact = metadata_for_existing_file(path=output_path, file_kind="RESUME", format_name="DOCX", review_only=False)
-                    WorkerEvent(
-                        event_type=EventType.RESUME_MUTATION_COMPLETED,
+                    pdf_export = run_resume_render_tail(
                         run_id=args.run_id,
-                        step_id=None,
-                        severity=Severity.INFO,
-                        message="DOCX editable master mutated through explicit Applyocalypse anchors",
-                        machine_state={"source_format": "DOCX", "replaced_placeholders": replaced_placeholders},
-                        ui_state={"current_step": "document_review"},
-                        payload={"source_master_path": str(master_path), "generated_path": str(output_path), "replaced_placeholders": replaced_placeholders},
-                    ).emit()
-                    WorkerEvent(
-                        event_type=EventType.RESUME_RENDERED,
-                        run_id=args.run_id,
-                        step_id=None,
-                        severity=Severity.INFO,
-                        message="Format-preserving DOCX resume rendered to local filesystem",
-                        machine_state={"format": "DOCX", "review_only": False},
-                        ui_state={"current_step": "document_review"},
-                        payload=artifact.to_payload(),
-                    ).emit()
-                    pdf_export = export_docx_to_pdf(output_path, output_dir)
+                        output_path=output_path,
+                        output_dir=output_dir,
+                        master_path=master_path,
+                        replaced_placeholders=replaced_placeholders,
+                        spec=RESUME_DOCX_TAIL,
+                        exporter=export_docx_to_pdf,
+                    )
                     if pdf_export.ok and pdf_export.pdf_path:
-                        pdf_artifact = metadata_for_existing_file(
-                            path=pdf_export.pdf_path,
-                            file_kind="RESUME",
-                            format_name="PDF",
-                            review_only=False,
-                        )
-                        WorkerEvent(
-                            event_type=EventType.RESUME_RENDERED,
-                            run_id=args.run_id,
-                            step_id=None,
-                            severity=Severity.INFO,
-                            message="DOCX resume exported to PDF with a local converter",
-                            machine_state={"format": "PDF", "exporter": pdf_export.exporter, "review_only": False},
-                            ui_state={"current_step": "document_review"},
-                            payload=pdf_artifact.to_payload(),
-                        ).emit()
                         # One-page enforcement: count pages and retry with overflow instruction
                         from .documents.font_detection import count_pdf_pages
                         pages = count_pdf_pages(pdf_export.pdf_path)
@@ -2499,24 +2471,6 @@ def main() -> None:
                                     "pdf_path": str(pdf_export.pdf_path),
                                 },
                             ).emit()
-                    else:
-                        WorkerEvent(
-                            event_type=EventType.VALIDATION_FAILED,
-                            run_id=args.run_id,
-                            step_id=None,
-                            severity=Severity.WARN,
-                            message="DOCX resume was tailored but PDF export did not complete",
-                            machine_state={"format": "DOCX", "exporter": pdf_export.exporter, "reason": pdf_export.code},
-                            ui_state={"current_step": "document_review", "requires_user_review": True},
-                            payload={
-                                "artifact_kind": "resume",
-                                "format": "DOCX",
-                                "source_docx_path": str(output_path),
-                                "stdout": pdf_export.stdout[-4000:],
-                                "stderr": pdf_export.stderr[-4000:],
-                                "blocking_issues": [{"code": pdf_export.code or "DOCX_PDF_EXPORT_FAILED"}],
-                            },
-                        ).emit()
                 else:
                     # Anchor-free fallback: build a fresh DOCX from canonical profile
                     output_path.unlink(missing_ok=True)
@@ -2606,62 +2560,15 @@ def main() -> None:
                     ).emit()
 
                 if replaced_placeholders:
-                    artifact = metadata_for_existing_file(path=output_path, file_kind="RESUME", format_name="TEX", review_only=False)
-                    WorkerEvent(
-                        event_type=EventType.RESUME_MUTATION_COMPLETED,
+                    run_resume_render_tail(
                         run_id=args.run_id,
-                        step_id=None,
-                        severity=Severity.INFO,
-                        message="TEX editable master mutated through explicit Applyocalypse anchors",
-                        machine_state={"source_format": "TEX", "replaced_placeholders": replaced_placeholders},
-                        ui_state={"current_step": "document_review"},
-                        payload={"source_master_path": str(master_path), "generated_path": str(output_path), "replaced_placeholders": replaced_placeholders},
-                    ).emit()
-                    WorkerEvent(
-                        event_type=EventType.RESUME_RENDERED,
-                        run_id=args.run_id,
-                        step_id=None,
-                        severity=Severity.INFO,
-                        message="Format-preserving TEX resume rendered to local filesystem",
-                        machine_state={"format": "TEX", "review_only": False},
-                        ui_state={"current_step": "document_review"},
-                        payload=artifact.to_payload(),
-                    ).emit()
-                    compile_result = compile_tex_with_tectonic(output_path, output_dir)
-                    if compile_result.ok and compile_result.pdf_path:
-                        pdf_artifact = metadata_for_existing_file(
-                            path=compile_result.pdf_path,
-                            file_kind="RESUME",
-                            format_name="PDF",
-                            review_only=False,
-                        )
-                        WorkerEvent(
-                            event_type=EventType.RESUME_RENDERED,
-                            run_id=args.run_id,
-                            step_id=None,
-                            severity=Severity.INFO,
-                            message="TEX resume compiled to PDF with Tectonic",
-                            machine_state={"format": "PDF", "compiler": "tectonic", "review_only": False},
-                            ui_state={"current_step": "document_review"},
-                            payload=pdf_artifact.to_payload(),
-                        ).emit()
-                    else:
-                        WorkerEvent(
-                            event_type=EventType.VALIDATION_FAILED,
-                            run_id=args.run_id,
-                            step_id=None,
-                            severity=Severity.WARN,
-                            message="TEX resume was tailored but Tectonic PDF compilation did not complete",
-                            machine_state={"format": "TEX", "compiler": "tectonic", "reason": "TEX_COMPILE_FAILED"},
-                            ui_state={"current_step": "document_review", "requires_user_review": True},
-                            payload={
-                                "artifact_kind": "resume",
-                                "source_tex_path": str(output_path),
-                                "stdout": compile_result.stdout[-4000:],
-                                "stderr": compile_result.stderr[-4000:],
-                                "blocking_issues": [{"code": "TEX_COMPILE_FAILED"}],
-                            },
-                        ).emit()
+                        output_path=output_path,
+                        output_dir=output_dir,
+                        master_path=master_path,
+                        replaced_placeholders=replaced_placeholders,
+                        spec=RESUME_TEX_TAIL,
+                        exporter=compile_tex_with_tectonic,
+                    )
                 else:
                     output_path.unlink(missing_ok=True)
                     WorkerEvent(
