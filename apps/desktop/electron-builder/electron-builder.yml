@@ -25,7 +25,16 @@ win:
     - target: dir
       arch:
         - x64
+    - target: nsis
+      arch:
+        - x64
   signAndEditExecutable: false
   verifyUpdateCodeSignature: false
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: Applyocalypse
 afterPack: ../../scripts/build/after-pack.cjs
 afterSign: ../../scripts/build/after-sign.cjs
