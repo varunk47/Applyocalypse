@@ -51,6 +51,7 @@ def test_portal_registry_covers_requested_targets() -> None:
         "workday",
         "greenhouse",
         "lever",
+        "ashby",
         "icims",
         "taleo",
     }.issubset(portal_ids)
@@ -67,6 +68,15 @@ def test_detect_portal_from_known_url() -> None:
     assert portal is not None
     assert portal.portal_id == "greenhouse"
     assert portal.default_adapter == "playwright"
+
+
+def test_detect_portal_for_ashby_url() -> None:
+    portal = detect_portal("https://jobs.ashbyhq.com/example/aaaabbbb-cccc-dddd-eeee-ffff00001111")
+
+    assert portal is not None
+    assert portal.portal_id == "ashby"
+    assert portal.default_adapter == "playwright"
+    assert portal.requires_high_stealth is False
 
 
 def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
@@ -208,9 +218,19 @@ def test_safe_step_progression_labels_are_non_final_submit_controls() -> None:
 
 def test_common_ats_entry_actions_do_not_configure_final_submit_labels() -> None:
     dangerous_prefixes = ("submit", "send", "finish", "complete")
-    for portal_id in ("workday", "greenhouse", "lever", "icims", "taleo"):
-        workflow = workflow_for_url(f"https://{portal_id}.example.com/jobs/123")
+    urls = {
+        "workday": "https://acme.myworkdayjobs.com/en-US/acme/job/Engineer",
+        "greenhouse": "https://boards.greenhouse.io/example/jobs/123",
+        "lever": "https://jobs.lever.co/example/abc",
+        "ashby": "https://jobs.ashbyhq.com/example/aaaabbbb-cccc-dddd-eeee-ffff00001111",
+        "icims": "https://acme.icims.com/jobs/123/job",
+        "taleo": "https://acme.taleo.net/careersection/jobdetail.ftl?job=123",
+    }
+    for portal_id, url in urls.items():
+        workflow = workflow_for_url(url)
         normalized = [label.strip().lower() for label in workflow.entry_action_labels]
+        assert workflow.portal_id == portal_id
+        assert normalized
         assert all(not label.startswith(dangerous_prefixes) for label in normalized)
 
 
@@ -219,6 +239,7 @@ def test_common_ats_targets_have_portal_specific_multi_page_adapter_plans() -> N
         "workday": "https://acme.myworkdayjobs.com/en-US/acme/job/Engineer",
         "greenhouse": "https://boards.greenhouse.io/example/jobs/123",
         "lever": "https://jobs.lever.co/example/abc",
+        "ashby": "https://jobs.ashbyhq.com/example/aaaabbbb-cccc-dddd-eeee-ffff00001111",
         "icims": "https://acme.icims.com/jobs/123/job",
         "taleo": "https://acme.taleo.net/careersection/jobdetail.ftl?job=123",
     }

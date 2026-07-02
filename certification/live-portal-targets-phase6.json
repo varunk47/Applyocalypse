@@ -18,6 +18,12 @@
     "notes": "Replace with a current public Lever job posting URL. No account required for static gate check."
   },
   {
+    "portal_id": "ashby",
+    "url": "https://jobs.ashbyhq.com/certco/aaaabbbb-cccc-dddd-eeee-ffff00001111",
+    "requires_credentials": false,
+    "notes": "Replace with a current public Ashby job posting URL. No account required for static gate check."
+  },
+  {
     "portal_id": "icims",
     "url": "https://careers-certco.icims.com/jobs/1001/software-engineer/job",
     "requires_credentials": true,

@@ -37,6 +37,7 @@ PORTALS: tuple[PortalDefinition, ...] = (
     PortalDefinition("workday", "Workday", ("myworkdayjobs.com", "workdayjobs.com"), "playwright", False),
     PortalDefinition("greenhouse", "Greenhouse", ("greenhouse.io", "greenhouse.com"), "playwright", False),
     PortalDefinition("lever", "Lever", ("lever.co",), "playwright", False),
+    PortalDefinition("ashby", "Ashby", ("ashbyhq.com",), "playwright", False),
     PortalDefinition("icims", "iCIMS", ("icims.com",), "playwright", False),
     PortalDefinition("taleo", "Taleo", ("taleo.net",), "playwright", False),
 )

@@ -71,6 +71,23 @@ from applyocalypse_automation.runner import _lazy_generate_cover_letter_for_port
             "Apply for this job",
         ),
         (
+            "https://jobs.ashbyhq.com/northstar/aaaabbbb-cccc-dddd-eeee-ffff00001111",
+            """
+            <html><title>Product Engineer - Northstar</title><body>
+              <button>Apply for this Job</button>
+              <form>
+                <label for="name">Full name</label><input id="name" required>
+                <label for="email">Email</label><input id="email" type="email" required>
+                <label for="resume">Resume</label><input id="resume" type="file" accept=".pdf,.docx" required>
+                <label for="cover">Cover letter</label><input id="cover" type="file" accept=".pdf">
+              </form>
+              <p>Review your autofilled answers before you submit your application.</p>
+            </body></html>
+            """,
+            "ashby",
+            "Apply for this Job",
+        ),
+        (
             "https://acme.icims.com/jobs/123/software-engineer/job",
             """
             <html><title>Software Engineer Application</title><body>
@@ -112,6 +129,7 @@ def test_ats_html_replay_fixtures_detect_workflow_fields_and_safe_entry_action(u
     assert analysis.workflow.workflow_kind == "ATS_DIRECT_FORM"
     assert analysis.page_state.likely_application_surface is True
     assert analysis.page_state.confidence >= 0.65
+    assert "known_ats_surface" in analysis.page_state.signals
     assert len(analysis.fields) >= 3
     assert entry_action.ok is True
     assert entry_action.payload["clicked_label"] == expected_click

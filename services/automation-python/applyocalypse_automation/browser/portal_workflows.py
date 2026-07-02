@@ -41,6 +41,7 @@ ATS_ENTRY_ACTIONS: dict[str, tuple[str, ...]] = {
     "workday": ("Apply", "Apply Manually", "Start Application", "Apply Now"),
     "greenhouse": ("Apply for this job", "Apply now"),
     "lever": ("Apply for this job", "Apply now"),
+    "ashby": ("Apply for this Job", "Apply now", "Apply"),
     "icims": ("Apply Now", "Apply for this job"),
     "taleo": ("Apply Online", "Apply", "Start"),
     "governmentjobs": ("Apply", "Apply Online"),
