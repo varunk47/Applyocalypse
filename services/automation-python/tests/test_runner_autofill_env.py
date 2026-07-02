@@ -1,4 +1,4 @@
-"""Tests for the APPLYO_AUTOFILL_APPROVED_DEFAULTS env var wiring in runner.py.
+"""Tests for the APPLYO_AUTOFILL_APPROVED_DEFAULTS env var wiring in field_resolution.py.
 
 Verifies that proposed_answer_for_browser_field passes autofill_approved_defaults
 from the environment to propose_answer_for_detected_field, and that EEO fields
@@ -9,7 +9,7 @@ from __future__ import annotations
 import pytest
 
 from applyocalypse_automation.browser.adapter import BrowserField
-from applyocalypse_automation.runner import proposed_answer_for_browser_field
+from applyocalypse_automation.field_resolution import proposed_answer_for_browser_field
 
 PROFILE = {
     "profile": {
