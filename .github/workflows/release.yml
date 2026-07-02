@@ -1,0 +1,78 @@
+name: Applyocalypse Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
+jobs:
+  release:
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm must be on PATH before setup-node so its `cache: pnpm` can locate the store.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: services/automation-python/requirements.txt
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild native modules
+        run: pnpm native:rebuild
+
+      - name: Package and run packaged smoke suites
+        run: pnpm verify:packaged
+        env:
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+          WINDOWS_CERT_SHA1: ${{ secrets.WINDOWS_CERT_SHA1 }}
+          WINDOWS_TIMESTAMP_URL: ${{ secrets.WINDOWS_TIMESTAMP_URL }}
+          # Enforce signing only when a certificate is configured; unsigned
+          # builds stay draft-only and never ship auto-updates.
+          APPLYO_REQUIRE_CODE_SIGNING: ${{ secrets.WINDOWS_CERT_SHA1 != '' && '1' || '' }}
+
+      - name: Release preflight report
+        run: pnpm release:preflight
+        env:
+          WINDOWS_SIGNTOOL_PATH: ${{ secrets.WINDOWS_SIGNTOOL_PATH }}
+          WINDOWS_CERT_SHA1: ${{ secrets.WINDOWS_CERT_SHA1 }}
+          APPLYO_REQUIRE_RELEASE_READY: ${{ secrets.WINDOWS_CERT_SHA1 != '' && '1' || '' }}
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: applyocalypse-windows-installer
+          path: |
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+          if-no-files-found: error
+
+      - name: Create draft GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object { $_.FullName }
+          gh release create "${{ github.ref_name }}" @files --draft --title "Applyocalypse ${{ github.ref_name }}" --generate-notes

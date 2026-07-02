@@ -28,6 +28,7 @@ export const SUPPORTED_PORTALS = [
   "workday",
   "greenhouse",
   "lever",
+  "ashby",
   "icims",
   "taleo"
 ] as const;

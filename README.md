@@ -78,7 +78,7 @@ pnpm release:preflight
 - The local parser extracts high-confidence structured profile facts from common sections and now reads DOCX table-cell paragraphs so column/table resumes are visible to section detection.
 - Python worker event protocol, BYOK `litellm` adapter, Nodriver/Playwright browser abstraction, portal registry, document ingestion, validation, and tailoring pipeline primitives.
 - Portal workflows use deterministic browser adapter candidates: high-stealth boards remain Nodriver-only, while ATS and government portals can fall back from Playwright to Nodriver when Playwright is not installed.
-- Workday, Greenhouse, Lever, iCIMS, and Taleo now have explicit multi-step adapter plans with portal-specific progression labels, material hints, review gates, step caps, and final-submit labels.
+- Workday, Greenhouse, Lever, Ashby, iCIMS, and Taleo now have explicit multi-step adapter plans with portal-specific progression labels, material hints, review gates, step caps, and final-submit labels.
 - Portal workflow events include expected runner steps and mandatory review checkpoints so the Run Console can show what the browser worker is allowed to do before it does it.
 - Provider settings now capture model, API base, Azure API version, and AWS Bedrock region/access-key metadata while keeping the secret value encrypted in Electron Main; Python receives only runtime environment variables.
 - PDF ingestion converts with `pdf2docx` into an unverified DOCX candidate that requires explicit user confirmation.
@@ -96,7 +96,7 @@ pnpm release:preflight
 - Portal entry clicks pause instead of choosing arbitrarily when multiple safe Apply/Start controls match, and the run event carries only sanitized candidate labels for user review.
 - Browser automation emits portal page-state observations after entry actions, including redirect evidence, detected portal, field count, and application-surface confidence for the run console.
 - Apply-phase browser automation captures optional run-scoped screenshots after the application is reopened, after reviewed fields/uploads are applied, and after each safe non-final portal step. Screenshot metadata is path-validated, hash-verified, idempotent by run and screenshot id, and records actual PNG dimensions when available.
-- Replayable portal fixtures now cover representative Workday, Greenhouse, Lever, iCIMS, and Taleo application pages plus representative US and India job-board listing surfaces. They validate portal classification, application-surface confidence, field detection, blocker detection, and the shared safe-click policy without touching live sites.
+- Replayable portal fixtures now cover representative Workday, Greenhouse, Lever, Ashby, iCIMS, and Taleo application pages plus representative US and India job-board listing surfaces. They validate portal classification, application-surface confidence, field detection, blocker detection, and the shared safe-click policy without touching live sites.
 - Requested US and India job-board targets now have conservative Apply/Start entry-action hints where the portal is registered; the click layer still blocks submit-like labels and pauses if a trusted application surface is not detected.
 - Cover-letter need is detected from both JD analysis and actual application-form fields. If a portal exposes a required cover-letter upload and no reviewed artifact exists, the worker pauses before the final-submit gate.
 - Reviewed local cover-letter uploads are passed to the worker as upload-eligible artifacts during document approval, without storing document bytes in SQLite.
@@ -122,7 +122,7 @@ pnpm release:preflight
 
 ## Known Production Gaps
 
-- Portal-specific multi-page workflows have adapter plans and fixture coverage for the first ATS set and representative job-board listing states, but not yet certified against live Workday, Greenhouse, Lever, iCIMS, Taleo, LinkedIn, Naukri, and similar targets. Current behavior is safer than blind automation: unknown, missed, or untrusted portal transitions pause for user review instead of proceeding.
+- Portal-specific multi-page workflows have adapter plans and fixture coverage for the first ATS set and representative job-board listing states, but not yet certified against live Workday, Greenhouse, Lever, Ashby, iCIMS, Taleo, LinkedIn, Naukri, and similar targets. Current behavior is safer than blind automation: unknown, missed, or untrusted portal transitions pause for user review instead of proceeding.
 - BYOK provider certification requires real keys. The matrix harness validates provider coverage offline and only performs live calls when explicitly enabled with `APPLYO_BYOK_LIVE_TESTS=1`.
 - DOCX/TEX anchor repair is intentionally conservative. The app can create a reviewable anchored candidate for common summary and skills regions, including DOCX table-cell layouts, but a richer visual placement editor is still needed for arbitrary layouts.
 - DOCX-to-PDF export depends on a local converter being available. TEX-to-PDF uses Tectonic when available.

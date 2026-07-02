@@ -22,6 +22,7 @@
   { "portal_id": "workday", "url": null, "requires_credentials": true, "notes": "Replace with a current test Workday application URL owned by the certification operator." },
   { "portal_id": "greenhouse", "url": null, "requires_credentials": false, "notes": "Replace with a current public Greenhouse application URL." },
   { "portal_id": "lever", "url": null, "requires_credentials": false, "notes": "Replace with a current public Lever application URL." },
+  { "portal_id": "ashby", "url": null, "requires_credentials": false, "notes": "Replace with a current public Ashby application URL." },
   { "portal_id": "icims", "url": null, "requires_credentials": true, "notes": "Replace with a current iCIMS application URL and test identity." },
   { "portal_id": "taleo", "url": null, "requires_credentials": true, "notes": "Replace with a current Taleo application URL and test identity." }
 ]

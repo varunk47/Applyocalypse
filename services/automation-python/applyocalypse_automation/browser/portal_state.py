@@ -6,7 +6,7 @@ from urllib.parse import urlparse
 from .portal_registry import detect_portal
 from .portal_workflows import PortalWorkflow
 
-ATS_PORTAL_IDS = {"workday", "greenhouse", "lever", "icims", "taleo", "governmentjobs", "usajobs", "ncs"}
+ATS_PORTAL_IDS = {"workday", "greenhouse", "lever", "ashby", "icims", "taleo", "governmentjobs", "usajobs", "ncs"}
 APPLICATION_TERMS = (
     "application",
     "apply",
