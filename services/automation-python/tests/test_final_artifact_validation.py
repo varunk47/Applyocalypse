@@ -44,7 +44,7 @@ def test_validate_file_passes_clean_docx(tmp_path: Path) -> None:
 
 
 def test_bullet_retry_message_includes_violation_codes() -> None:
-    from applyocalypse_automation.runner import _build_bullet_retry_jd
+    from applyocalypse_automation.document_stage import _build_bullet_retry_jd
 
     # Build a failing ValidationReport by validating a string with an em dash
     failing_text = "Led teams — delivered results"

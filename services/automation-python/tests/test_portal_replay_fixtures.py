@@ -12,8 +12,8 @@ import pytest
 
 from applyocalypse_automation.browser.field_detection import ControlCandidate, choose_safe_click_target
 from applyocalypse_automation.browser.html_replay import analyze_portal_html_fixture, choose_entry_action_for_fixture
+from applyocalypse_automation.document_stage import _lazy_generate_cover_letter_for_portal
 from applyocalypse_automation.event_protocol import EventType
-from applyocalypse_automation.runner import _lazy_generate_cover_letter_for_portal
 
 
 @pytest.mark.parametrize(
