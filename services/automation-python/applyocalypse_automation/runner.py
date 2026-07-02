@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from .answers import ProposedApplicationAnswer, propose_answer_for_detected_field, propose_profile_answers
+from .answers import propose_profile_answers
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.portal_adapters import COMMON_STEP_PROGRESSION_LABELS, progression_labels_for_workflow
@@ -37,11 +37,16 @@ from .documents.file_generation import GeneratedNameInput, build_generated_filen
 from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent, utc_now
+from .field_resolution import (
+    is_otp_field,
+    normalize_field_label,
+    proposed_answer_for_browser_field,
+    resolve_secret_reviewed_value,
+)
 from .jd_analysis import analyze_with_optional_llm
 from .llm.litellm_client import LiteLlmClient
 from .otp import read_gmail_otp_from_env
 from .resume_tailoring import tailor_resume_sections
-from .secret_env import get_secret
 from .tailoring.engine import TailoringEngine
 from .validation import TextArtifactValidator, ValidationReport
 
@@ -73,17 +78,6 @@ SUBMISSION_CONFIRMATION_PATTERNS = (
     "thanks for applying",
     "received your application",
     "we have received your application",
-)
-
-APPLICATION_PASSWORD_SENTINEL = "Use stored application password"
-
-OTP_FIELD_HINTS = (
-    "otp",
-    "one-time code",
-    "one time code",
-    "verification code",
-    "security code",
-    "passcode",
 )
 
 
@@ -361,41 +355,6 @@ def blocker_payload_from(blockers: list[BrowserBlocker]) -> list[dict[str, objec
         }
         for blocker in blockers
     ]
-
-
-def is_password_field(field: BrowserField) -> bool:
-    label = normalize_field_label(field.label)
-    return field.field_type == "password" or "password" in label
-
-
-def is_otp_field(field: BrowserField) -> bool:
-    label = normalize_field_label(field.label)
-    return any(hint in label for hint in OTP_FIELD_HINTS)
-
-
-def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: dict[str, object]) -> ProposedApplicationAnswer:
-    if is_password_field(field) and get_secret("APPLYO_APPLICATION_PASSWORD"):
-        return ProposedApplicationAnswer(
-            field_label=field.label,
-            field_type=field.field_type,
-            proposed_value=APPLICATION_PASSWORD_SENTINEL,
-            confidence=0.84,
-            source="PROFILE",
-            requires_review=True,
-        )
-    return propose_answer_for_detected_field(
-        field_label=field.label,
-        field_type=field.field_type,
-        canonical_profile=canonical_profile,
-        autofill_approved_defaults=os.getenv("APPLYO_AUTOFILL_APPROVED_DEFAULTS") == "1",
-    )
-
-
-def resolve_secret_reviewed_value(field: BrowserField, reviewed_value: str | None) -> tuple[str | None, str | None]:
-    if reviewed_value == APPLICATION_PASSWORD_SENTINEL and is_password_field(field):
-        password = get_secret("APPLYO_APPLICATION_PASSWORD")
-        return (password if password else None, "APPLICATION_PASSWORD_SECRET")
-    return reviewed_value, None
 
 
 async def apply_otp_code_to_detected_field(adapter: object, run_id: str, code: str) -> bool:
@@ -730,10 +689,6 @@ async def pause_for_portal_state_review(
     if blockers:
         return await pause_for_blockers(adapter, work_dir, run_id, blockers, context=f"{context} after portal state review")
     return False
-
-
-def normalize_field_label(value: str) -> str:
-    return " ".join("".join(character.lower() if character.isalnum() else " " for character in value).split())
 
 
 def approved_value_for_field(field: BrowserField, approved_answers: object) -> str | None:
