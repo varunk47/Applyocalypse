@@ -30,6 +30,9 @@ const run = async (command, args, cwd = rootDir) => {
 const main = async () => {
   let packageError = null;
   try {
+    // electron-builder packages the prebuilt binaries as-is (npmRebuild: false),
+    // so better-sqlite3@12 must carry the Electron ABI before packaging.
+    await run(node, ["scripts/dev/rebuild-native.mjs", "electron"]);
     await run(pnpm, ["--filter", "@applyocalypse/desktop", "package:raw"]);
   } catch (error) {
     packageError = error;

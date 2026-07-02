@@ -3,6 +3,11 @@ productName: Applyocalypse
 directories:
   output: release
 asar: true
+# Native rebuilds are handled by scripts/dev/rebuild-native.mjs (prebuild-install
+# on better-sqlite3@12 only). electron-builder's own rebuild walks the workspace
+# tree and tries to compile the better-sqlite3@11 copy (pinned for Node-ABI
+# vitest), which cannot build against Electron >=39 headers.
+npmRebuild: false
 files:
   - out/**
   - package.json

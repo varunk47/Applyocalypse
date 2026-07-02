@@ -146,7 +146,8 @@ const boot = async (): Promise<void> => {
             smoke.hasShell === true &&
             smoke.hasBrand === true &&
             (smoke.navItemCount ?? 0) >= 7 &&
-            (smoke.panelCount ?? 0) >= 6 &&
+            // Routed screens mount one view panel at a time: topbar + active screen.
+            (smoke.panelCount ?? 0) >= 2 &&
             smoke.hasPreloadApi === true &&
             (smoke.htmlTheme === "dark" || smoke.htmlTheme === "light");
           clearTimeout(timeout);
