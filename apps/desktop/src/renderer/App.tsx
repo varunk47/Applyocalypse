@@ -1,4 +1,4 @@
-import { onCleanup, onMount, type ParentProps } from 'solid-js'
+import { createEffect, onCleanup, onMount, type ParentProps } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import { gsap } from './animations/gsap'
 import { enterFromRight, exitToLeft } from './animations/screenTransition'
@@ -17,11 +17,14 @@ export const AppShell = (props: ParentProps) => {
   const { state: profileState } = useProfileStore()
   const navigate = useNavigate()
 
-  onMount(() => {
+  // First run: once the profile load settles with no profile, route to onboarding.
+  createEffect(() => {
     if (!profileState.isLoading && !profileState.profile) {
       navigate('/onboarding', { replace: true })
     }
+  })
 
+  onMount(() => {
     // Wire keyboard shortcuts from Electron Main → renderer navigation
     const unsubNav = window.applyocalypse.navigation.subscribe((msg) => {
       if (msg.type === 'navigate' && msg.route) navigate(msg.route)

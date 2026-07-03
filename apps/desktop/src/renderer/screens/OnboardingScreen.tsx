@@ -1,4 +1,4 @@
-import { For, Show, createSignal, onCleanup, onMount } from 'solid-js'
+import { For, Show, createSignal, onMount } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import { createStore } from 'solid-js/store'
 import { ChevronRight, ShieldCheck, Upload } from 'lucide-solid'
@@ -162,14 +162,6 @@ export default function OnboardingScreen() {
     }
   }
 
-  const handleKeyDown = (e: KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) advance()
-    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); retreat() }
-  }
-
-  onMount(() => window.addEventListener('keydown', handleKeyDown))
-  onCleanup(() => window.removeEventListener('keydown', handleKeyDown))
-
   // Prefill general-questions from parsed resume canonical when entering that step
   const prefillGeneralFromParsed = () => {
     const canonical = profileState.parsedDocuments[0]?.canonical
@@ -301,7 +293,7 @@ export default function OnboardingScreen() {
   const coverFile = () => profileState.uploadedFiles.find((f) => f.fileKind === 'COVER_LETTER')
 
   return (
-    <div style={{ position: 'fixed', inset: '0', display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'var(--bg)', 'z-index': '100' }}>
+    <div style={{ position: 'fixed', inset: '44px 0 0 0', display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'var(--bg)', 'z-index': '100' }}>
       <div style={{ width: '100%', 'max-width': '560px', padding: '2rem' }}>
         <div class="wizard-progress-bar" style={{ 'margin-bottom': '2rem' }}>
           <div class="fill" ref={progressFillRef} style={{ width: `${progress()}%` }} />

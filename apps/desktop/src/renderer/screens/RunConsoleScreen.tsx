@@ -1,11 +1,10 @@
-import { For, Show, createEffect, createMemo, onMount } from 'solid-js'
+import { For, Show, createMemo, onMount } from 'solid-js'
 import { useNavigate, useParams } from '@solidjs/router'
 import type { ApplicationAnswer, ApplicationStep, Approval, ReviewRequest, SafeRendererRunEvent } from '@applyocalypse/shared-types'
 import { useRunStore } from '../contexts/RunStore'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { jobLabel, useQueueStore } from '../contexts/QueueStore'
 import { buildPortalWorkflowSummary } from '../features/run-console/portalWorkflowView'
-import { gsap } from '../animations/gsap'
 
 const artifactUrlForPath = (p: string) => `applyocalypse://artifact?path=${encodeURIComponent(p)}`
 
@@ -106,8 +105,6 @@ export default function RunConsoleScreen() {
   const params = useParams<{ runId?: string }>()
   const navigate = useNavigate()
 
-  let imgRef: HTMLImageElement | undefined
-  let prevSrc = ''
   const rejectReason = 'Final submit rejected by local user.'
 
   onMount(() => {
@@ -145,21 +142,6 @@ export default function RunConsoleScreen() {
   })
 
   const nextPendingStep = createMemo(() => state.runDetail?.steps.find((s) => s.status === 'PENDING'))
-
-  // Cross-fade when screenshot changes
-  createEffect(() => {
-    const shot = latestScreenshot()
-    if (!shot || !imgRef) return
-    const newSrc = artifactUrlForPath(shot.localPath)
-    if (newSrc === prevSrc) return
-    prevSrc = newSrc
-    gsap.to(imgRef, {
-      opacity: 0, duration: 0.15, ease: 'power2.in',
-      onComplete: () => {
-        if (imgRef) { imgRef.src = newSrc; gsap.to(imgRef, { opacity: 1, duration: 0.25, ease: 'power2.out' }) }
-      },
-    })
-  })
 
   const approveReview = async (r: { id: string; reviewType: string }) => {
     if (isManualBlocker(r.reviewType))
@@ -266,7 +248,7 @@ export default function RunConsoleScreen() {
                 when={latestScreenshot()}
                 fallback={<span>[ LIVE PORTAL VIEWPORT ]<br />SCREENSHOTS APPEAR AS THE WORKER MOVES</span>}
               >
-                {(shot) => <img ref={imgRef} src={artifactUrlForPath(shot().localPath)} alt="Latest browser screenshot" />}
+                {(shot) => <img src={artifactUrlForPath(shot().localPath)} alt="Latest browser screenshot" />}
               </Show>
             </div>
           </div>

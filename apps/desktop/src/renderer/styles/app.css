@@ -1355,6 +1355,10 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .toast {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 360px;
   background: var(--ink);
   color: var(--paper);
   border-radius: 9px;
@@ -1458,10 +1462,15 @@ h1, h2, h3, p { margin: 0; }
   gap: 8px;
 }
 
+.structured-entry input,
+.structured-entry textarea { width: 100%; min-width: 0; }
+.structured-entry-header input { flex: 1; }
+.bullet-row input { flex: 1; }
+
 .entry-title-input { font: 400 15px var(--serif) !important; }
 .entry-sub-input, .entry-date-input { font-size: 12px !important; }
 
-.chip-input { font: 400 12px var(--mono) !important; }
+.chip-input { font: 400 12px var(--mono) !important; width: 100%; }
 
 .tool-chips {
   display: flex;
@@ -1554,7 +1563,14 @@ h1, h2, h3, p { margin: 0; }
 /* ── Onboarding wizard (re-skinned legacy vocabulary) ──────────────────────── */
 :root {
   --bg: var(--paper);
+  --text: var(--ink);
   --text-secondary: var(--ink-2);
+  --muted: var(--ink-3);
+  --success: var(--live);
+  --success-soft: rgba(71, 113, 79, 0.12);
+  --danger: var(--wax);
+  --warning: var(--edited);
+  --accent-strong: var(--wax);
 }
 
 .eyebrow {

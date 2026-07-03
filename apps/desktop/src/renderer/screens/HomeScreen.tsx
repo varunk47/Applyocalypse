@@ -1,4 +1,4 @@
-import { createMemo, createSignal, For, Show } from 'solid-js'
+import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import type { ApplicationRun, JobTarget } from '@applyocalypse/shared-types'
 import { useProfileStore } from '../contexts/ProfileStore'
@@ -86,6 +86,9 @@ export default function HomeScreen() {
   const [autoSubmit, setAutoSubmit] = createSignal(false)
   const [error, setError] = createSignal<string | null>(null)
   const [isSubmitting, setIsSubmitting] = createSignal(false)
+  const [nowKicker, setNowKicker] = createSignal(dateKicker())
+  const kickerTimer = setInterval(() => setNowKicker(dateKicker()), 30_000)
+  onCleanup(() => clearInterval(kickerTimer))
 
   const targetFor = (run: { jobTargetId: string }) => queueState.jobTargetMap[run.jobTargetId]
 
@@ -133,15 +136,15 @@ export default function HomeScreen() {
     setError(null)
     setIsSubmitting(true)
     try {
-      await enqueueJobText(jobInput(), profileId, {
+      const queued = await enqueueJobText(jobInput(), profileId, {
         autoSubmitEnabled: autoSubmit(),
         onRunReady: async (runId) => {
           await loadRunDetail(runId)
-          setJobInput('')
           navigate(`/run/${runId}`)
         },
       })
-      setJobInput('')
+      // Keep the pasted links in the box when enqueue fails so nothing is lost.
+      if (queued) setJobInput('')
     } finally {
       setIsSubmitting(false)
     }
@@ -156,7 +159,7 @@ export default function HomeScreen() {
     <section class="screen" data-gsap="panel" data-view-panel>
       <div class="home-grid">
         <div class="home-main">
-          <div class="kicker">{dateKicker()}</div>
+          <div class="kicker">{nowKicker()}</div>
           <h1 class="screen-headline">
             <span class="headline-rise">
               <span>
@@ -178,7 +181,7 @@ export default function HomeScreen() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  void handleSubmit()
+                  if (hasIntake() && !isSubmitting()) void handleSubmit()
                 }
               }}
               placeholder="Paste job links, one or five at a time…"
@@ -194,7 +197,8 @@ export default function HomeScreen() {
               <input type="checkbox" checked={autoSubmit()} onChange={(e) => setAutoSubmit(e.currentTarget.checked)} />
               <span>
                 <strong>Auto-submit after review</strong>
-                Final submission still waits for your explicit approval on each run.
+                You still review and approve the tailored documents. After that approval, this run
+                submits on its own — no second confirmation click.
               </span>
             </label>
             <Show when={error() ?? queueState.error}>

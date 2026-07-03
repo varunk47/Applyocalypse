@@ -24,7 +24,7 @@ export default function DocumentsScreen() {
   } = useProfileStore()
   const { state: queueState } = useQueueStore()
 
-  const [generated] = createResource(
+  const [generated, { refetch: refetchGenerated }] = createResource(
     async () => (await window.applyocalypse.documents.listGenerated(50)).items,
     { initialValue: [] as GeneratedFile[] }
   )
@@ -179,6 +179,7 @@ export default function DocumentsScreen() {
             <div class="rule-row">
               <span class="kicker">TAILORED OUTPUT</span>
               <span class="rule" />
+              <button class="btn-mono" type="button" onClick={() => void refetchGenerated()}>REFRESH</button>
               <span class="provenance-tag">EXPORT: PDF VIA LOCAL CONVERTER</span>
             </div>
             <Show

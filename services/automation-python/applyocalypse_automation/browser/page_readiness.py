@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 PAGE_TEXT_TIMEOUT_S = 15.0
 PAGE_TEXT_POLL_INTERVAL_S = 0.5
 PAGE_TEXT_STABLE_POLLS = 2
-PAGE_TEXT_MIN_LENGTH = 1
+PAGE_TEXT_MIN_LENGTH = 200
 
 
 async def wait_for_page_text(
@@ -29,7 +29,8 @@ async def wait_for_page_text(
     """Poll until visible text is non-empty and stable, or the timeout elapses.
 
     Ready means `stable_polls` consecutive probes returned the same length of at
-    least `min_text_length`. Probe exceptions count as an empty page (the page
+    least `min_text_length` (defaulted high enough to skip header-only loading
+    skeletons; real postings run thousands of characters). Probe exceptions count as an empty page (the page
     may still be booting). Always probes at least once, even with timeout_s=0.
     """
     started = clock()

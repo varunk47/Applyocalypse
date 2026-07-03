@@ -46,7 +46,7 @@ class FakeTimeline:
         # Workday-style hydration: empty, empty, partial, grows, stabilizes.
         ([0, 0, 273, 9239, 9239], True, 5),
         # Exceptions while the page boots count as empty, then recovery.
-        ([RuntimeError("target detached"), 100, 100], True, 3),
+        ([RuntimeError("target detached"), 500, 500], True, 3),
     ],
 )
 def test_wait_for_page_text_reaches_ready(

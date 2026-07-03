@@ -18,6 +18,14 @@ from .field_detection import (
     parse_click_by_text_result,
     parse_final_submit_result,
 )
+from .page_readiness import (
+    PAGE_TEXT_POLL_INTERVAL_S,
+    PAGE_TEXT_TIMEOUT_S,
+    wait_for_page_text,
+)
+
+PAGE_TEXT_LENGTH_PROBE_FUNCTION = "() => (((document.body && document.body.innerText) || '').trim().length)"
+
 
 
 class PlaywrightBrowserAdapter(BrowserAdapter):
@@ -64,14 +72,21 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             await self._page.goto(url, wait_until="domcontentloaded", timeout=45_000)
         except Exception as exc:
             return BrowserStepResult(False, "page navigation failed", {"url": url, "error": str(exc)})
+        readiness = await wait_for_page_text(
+            self._probe_visible_text_length,
+            timeout_s=PAGE_TEXT_TIMEOUT_S,
+            poll_interval_s=PAGE_TEXT_POLL_INTERVAL_S,
+        )
+        return BrowserStepResult(True, "page navigated", {"url": url, "page_text": readiness})
+
+    async def _probe_visible_text_length(self) -> int:
+        if self._page is None:
+            return 0
+        raw = await self._page.evaluate(PAGE_TEXT_LENGTH_PROBE_FUNCTION)
         try:
-            await self._page.wait_for_function(
-                "() => document.title !== '' || (document.body && document.body.innerText.trim().length > 50)",
-                timeout=20_000,
-            )
-        except Exception:
-            pass
-        return BrowserStepResult(True, "page navigated", {"url": url})
+            return int(raw or 0)
+        except (TypeError, ValueError):
+            return 0
 
     async def detect_fields(self) -> list[BrowserField]:
         if self._page is None:

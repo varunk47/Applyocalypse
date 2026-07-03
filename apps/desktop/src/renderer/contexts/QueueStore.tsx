@@ -1,4 +1,4 @@
-import { createContext, useContext, type ParentProps } from 'solid-js'
+import { createContext, onCleanup, useContext, type ParentProps } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import type { ApplicationRun, JobTarget, QueueItem } from '@applyocalypse/shared-types'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
@@ -32,7 +32,7 @@ type QueueStoreValue = {
     value: string,
     profileId: string,
     options?: { autoSubmitEnabled?: boolean; onRunReady?: (runId: string) => Promise<void> }
-  ) => Promise<void>
+  ) => Promise<boolean>
   refreshQueue: () => Promise<void>
   refreshRuns: () => Promise<void>
 }
@@ -113,7 +113,7 @@ export const QueueStoreProvider = (props: ParentProps) => {
     value: string,
     profileId: string,
     options: { autoSubmitEnabled?: boolean; onRunReady?: (runId: string) => Promise<void> } = {}
-  ): Promise<void> => {
+  ): Promise<boolean> => {
     const items = parseJobIntake(value).map((item) => ({
       ...item,
       autoSubmitEnabled: options.autoSubmitEnabled === true,
@@ -121,7 +121,7 @@ export const QueueStoreProvider = (props: ParentProps) => {
 
     if (items.length === 0) {
       setState('error', 'Paste at least one job link or description.')
-      return
+      return false
     }
 
     setState('isLoading', true)
@@ -142,14 +142,22 @@ export const QueueStoreProvider = (props: ParentProps) => {
       }
       setState('error', null)
       toast.success(`${enqueued.queueItems.length} ${enqueued.queueItems.length === 1 ? 'job' : 'jobs'} queued`)
+      return true
     } catch (error) {
       const msg = error instanceof Error ? error.message : 'Unable to enqueue jobs'
       setState('error', msg)
       toast.error(msg)
+      return false
     } finally {
       setState('isLoading', false)
     }
   }
+
+  const pollTimer = setInterval(() => {
+    void refreshQueue()
+    void refreshRuns()
+  }, 5_000)
+  onCleanup(() => clearInterval(pollTimer))
 
   return (
     <QueueContext.Provider value={{ state, enqueueJobText, refreshQueue, refreshRuns }}>
