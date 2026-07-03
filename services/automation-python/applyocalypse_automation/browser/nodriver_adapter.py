@@ -19,6 +19,13 @@ from .field_detection import (
     parse_click_by_text_result,
     parse_final_submit_result,
 )
+from .page_readiness import (
+    PAGE_TEXT_POLL_INTERVAL_S,
+    PAGE_TEXT_TIMEOUT_S,
+    wait_for_page_text,
+)
+
+PAGE_TEXT_LENGTH_PROBE_SCRIPT = "String(((document.body && document.body.innerText) || '').trim().length)"
 
 
 class NodriverBrowserAdapter(BrowserAdapter):
@@ -43,7 +50,21 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._browser is None:
             return BrowserStepResult(False, "browser is not launched")
         self._page = await self._browser.get(url)
-        return BrowserStepResult(True, "page navigated", {"url": url})
+        readiness = await wait_for_page_text(
+            self._probe_visible_text_length,
+            timeout_s=PAGE_TEXT_TIMEOUT_S,
+            poll_interval_s=PAGE_TEXT_POLL_INTERVAL_S,
+        )
+        return BrowserStepResult(True, "page navigated", {"url": url, "page_text": readiness})
+
+    async def _probe_visible_text_length(self) -> int:
+        if self._page is None:
+            return 0
+        raw = await self._page.evaluate(PAGE_TEXT_LENGTH_PROBE_SCRIPT)
+        try:
+            return int(str(raw).strip() or "0")
+        except ValueError:
+            return 0
 
     async def detect_fields(self) -> list[BrowserField]:
         if self._page is None:
