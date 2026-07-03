@@ -9,9 +9,9 @@ export const createMainWindow = (themeState: ThemeState): BrowserWindow => {
     minWidth: 1080,
     minHeight: 760,
     title: "Applyocalypse",
-    backgroundColor: themeState.activeTheme === "dark" ? "#0b0f14" : "#f6f5f1",
+    backgroundColor: themeState.activeTheme === "dark" ? "#191612" : "#FBFAF7",
     show: false,
-    titleBarStyle: "hiddenInset",
+    frame: false,
     webPreferences: {
       preload: join(__dirname, "../preload/index.js"),
       contextIsolation: true,

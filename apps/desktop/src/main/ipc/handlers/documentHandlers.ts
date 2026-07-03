@@ -2,7 +2,11 @@ import { IpcContracts } from "@applyocalypse/ipc-contracts";
 import { handleContract, type IpcHandlerContext } from "./context";
 
 export const registerDocumentHandlers = (ctx: IpcHandlerContext): void => {
-  const { documentIngestionService, uploadRepository, parsedDocumentRepository, auditRepository, requirePickedPath } = ctx;
+  const { documentIngestionService, uploadRepository, parsedDocumentRepository, auditRepository, requirePickedPath, runRepository } = ctx;
+
+  handleContract(IpcContracts.documentsListGenerated, ({ limit }) => ({
+    items: runRepository.listRecentGeneratedFiles(limit)
+  }));
 
   handleContract(IpcContracts.documentsIngestResumeSource, ({ profileId, localPath }) =>
     documentIngestionService.ingestResumeSource({ profileId, localPath: requirePickedPath(localPath) })

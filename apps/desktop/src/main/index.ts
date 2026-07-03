@@ -145,7 +145,8 @@ const boot = async (): Promise<void> => {
           const passed =
             smoke.hasShell === true &&
             smoke.hasBrand === true &&
-            (smoke.navItemCount ?? 0) >= 7 &&
+            // Dossier nav: brand mark + 5 destinations carry the nav-item marker.
+            (smoke.navItemCount ?? 0) >= 5 &&
             // Routed screens mount one view panel at a time: topbar + active screen.
             (smoke.panelCount ?? 0) >= 2 &&
             smoke.hasPreloadApi === true &&
@@ -443,7 +444,7 @@ app.on("activate", () => {
   }
 });
 
-const SCREEN_ROUTES = ['/', '/intake', '/profile', '/queue', '/run', '/documents', '/history', '/settings'];
+const SCREEN_ROUTES = ['/', '/run', '/documents', '/profile', '/history', '/settings'];
 
 const registerKeyboardShortcuts = (): void => {
   SCREEN_ROUTES.forEach((route, index) => {
@@ -453,7 +454,7 @@ const registerKeyboardShortcuts = (): void => {
     });
   });
   globalShortcut.register('CmdOrCtrl+P', () => {
-    mainWindow?.webContents.send('navigate', '/intake');
+    mainWindow?.webContents.send('navigate', '/');
     mainWindow?.webContents.send('focus-intake');
   });
   globalShortcut.register('Escape', () => {

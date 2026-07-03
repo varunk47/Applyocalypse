@@ -1,14 +1,18 @@
 import { IpcContracts } from "@applyocalypse/ipc-contracts";
 import { ScreenshotSchema } from "@applyocalypse/shared-schemas";
-import { handleContract, type IpcHandlerContext } from "./context";
+import { handleContract, lookupJobTargets, type IpcHandlerContext } from "./context";
 
 export const registerRunQueryHandlers = (ctx: IpcHandlerContext): void => {
-  const { db, runRepository } = ctx;
+  const { db, runRepository, jobRepository } = ctx;
 
-  handleContract(IpcContracts.runsList, ({ limit, offset }) => ({
-    items: runRepository.listApplicationRuns(limit, offset),
-    total: runRepository.countApplicationRuns()
-  }));
+  handleContract(IpcContracts.runsList, ({ limit, offset }) => {
+    const items = runRepository.listApplicationRuns(limit, offset);
+    return {
+      items,
+      total: runRepository.countApplicationRuns(),
+      jobTargets: lookupJobTargets(jobRepository, items.map((run) => run.jobTargetId))
+    };
+  });
   handleContract(IpcContracts.runsGetDetail, ({ runId }) => ({
     run: runRepository.getApplicationRun(runId),
     steps: runRepository.listSteps(runId),

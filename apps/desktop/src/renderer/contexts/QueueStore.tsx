@@ -51,6 +51,15 @@ export const QueueStoreProvider = (props: ParentProps) => {
     error: null,
   })
 
+  const mergeJobTargets = (targets: JobTarget[]): void => {
+    if (targets.length === 0) return
+    setState('jobTargetMap', (map) => {
+      const next = { ...map }
+      for (const target of targets) next[target.id] = target
+      return next
+    })
+  }
+
   const init = async () => {
     setState('isLoading', true)
     try {
@@ -62,6 +71,7 @@ export const QueueStoreProvider = (props: ParentProps) => {
       setState('queueTotal', queue.total)
       setState('applicationRuns', runs.items)
       setState('runsTotal', runs.total)
+      mergeJobTargets([...queue.jobTargets, ...runs.jobTargets])
       setState('error', null)
     } catch (error) {
       setState('error', error instanceof Error ? error.message : 'Unable to load queue')
@@ -75,12 +85,14 @@ export const QueueStoreProvider = (props: ParentProps) => {
   const refreshQueue = async (): Promise<void> => {
     const queue = await window.applyocalypse.jobs.list(50, 0)
     setState('queueItems', queue.items)
+    mergeJobTargets(queue.jobTargets)
     setState('queueTotal', queue.total)
   }
 
   const refreshRuns = async (): Promise<void> => {
     const runs = await window.applyocalypse.runs.list(50, 0)
     setState('applicationRuns', runs.items)
+    mergeJobTargets(runs.jobTargets)
     setState('runsTotal', runs.total)
   }
 

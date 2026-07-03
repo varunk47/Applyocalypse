@@ -1,6 +1,6 @@
 import { IpcContracts } from "@applyocalypse/ipc-contracts";
 import { RunEventSchema } from "@applyocalypse/shared-schemas";
-import { handleContract, type IpcHandlerContext } from "./context";
+import { handleContract, lookupJobTargets, type IpcHandlerContext } from "./context";
 
 const parseJson = <T>(value: string, fallback: T): T => {
   try {
@@ -15,10 +15,14 @@ export const registerJobQueueHandlers = (ctx: IpcHandlerContext): void => {
 
   handleContract(IpcContracts.jobsEnqueue, ({ profileId, items }) => jobRepository.enqueueTargets({ profileId, items }));
 
-  handleContract(IpcContracts.jobsList, ({ limit, offset }) => ({
-    items: queueRepository.list(limit, offset),
-    total: queueRepository.count()
-  }));
+  handleContract(IpcContracts.jobsList, ({ limit, offset }) => {
+    const items = queueRepository.list(limit, offset);
+    return {
+      items,
+      total: queueRepository.count(),
+      jobTargets: lookupJobTargets(jobRepository, items.map((item) => item.jobTargetId))
+    };
+  });
 
   handleContract(IpcContracts.jobsGet, ({ runId }) => {
     const row = db.prepare("SELECT * FROM run_events WHERE application_run_id = ? ORDER BY created_at DESC LIMIT 1").get(runId) as

@@ -781,6 +781,56 @@ export class RunRepository {
     );
   }
 
+  listRecentGeneratedFiles(limit = 50): GeneratedFile[] {
+    const rows = this.db
+      .prepare(
+        `
+        SELECT *
+        FROM generated_files
+        WHERE deleted_at IS NULL
+        ORDER BY created_at DESC
+        LIMIT @limit
+      `
+      )
+      .all({ limit }) as Array<{
+      id: string;
+      tailoring_run_id: string | null;
+      profile_id: string;
+      job_target_id: string;
+      file_kind: string;
+      format: string;
+      filename: string;
+      local_path: string;
+      sha256: string | null;
+      size_bytes: number | null;
+      upload_status: string;
+      uploaded_at: string | null;
+      retention_policy: string;
+      delete_after: string | null;
+      deleted_at: string | null;
+    }>;
+
+    return rows.map((row) =>
+      GeneratedFileSchema.parse({
+        id: row.id,
+        tailoringRunId: row.tailoring_run_id,
+        profileId: row.profile_id,
+        jobTargetId: row.job_target_id,
+        fileKind: row.file_kind,
+        format: row.format,
+        filename: row.filename,
+        localPath: row.local_path,
+        sha256: row.sha256,
+        sizeBytes: row.size_bytes,
+        uploadStatus: row.upload_status,
+        uploadedAt: row.uploaded_at,
+        retentionPolicy: row.retention_policy,
+        deleteAfter: row.delete_after,
+        deletedAt: row.deleted_at
+      })
+    );
+  }
+
   listBrowserArtifacts(applicationRunId: string): BrowserArtifact[] {
     const rows = this.db
       .prepare("SELECT * FROM browser_artifacts WHERE application_run_id = ? AND deleted_at IS NULL ORDER BY created_at ASC")

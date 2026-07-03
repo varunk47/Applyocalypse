@@ -1,81 +1,76 @@
-import { For, Show, onMount } from 'solid-js'
+import { For, Show } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
-import { FileText } from 'lucide-solid'
-import { EmptyState } from '../components/EmptyState'
 import { useQueueStore, jobLabel } from '../contexts/QueueStore'
 import { useRunStore } from '../contexts/RunStore'
-import { gsap } from '../animations/gsap'
+
+const receiptState = (status: string): { text: string; kind: 'submitted' | 'failed' | 'neutral' } => {
+  if (status === 'SUBMITTED' || status === 'COMPLETED') return { text: 'SUBMITTED ✓', kind: 'submitted' }
+  if (status === 'FAILED') return { text: 'FAILED', kind: 'failed' }
+  if (status === 'CANCELLED') return { text: 'WITHDRAWN', kind: 'neutral' }
+  return { text: status.replace(/_/g, ' '), kind: 'neutral' }
+}
+
+const receiptTime = (iso: string | null): string => {
+  if (!iso) return '—'
+  const t = new Date(iso)
+  if (Number.isNaN(t.getTime())) return '—'
+  return `${t.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })} · ${t.toTimeString().slice(0, 5)}`
+}
 
 export default function HistoryScreen() {
   const { state: queueState } = useQueueStore()
-  const { state: runState, loadRunDetail } = useRunStore()
+  const { loadRunDetail } = useRunStore()
   const navigate = useNavigate()
-  let listRef: HTMLDivElement | undefined
-
-  onMount(() => {
-    if (listRef) {
-      gsap.from(listRef.querySelectorAll('[data-list-item]'), {
-        y: 12, opacity: 0, duration: 0.35, stagger: 0.04, ease: 'expo.out',
-      })
-    }
-  })
 
   const handleRowClick = async (runId: string) => {
     await loadRunDetail(runId)
-    navigate('/run')
+    navigate(`/run/${runId}`)
   }
 
   return (
-    <section class="history-panel diagnostics-panel surface-panel surface-panel-active" data-gsap="panel" data-view-panel>
-      <div class="section-header">
-        <div>
-          <div class="panel-kicker">History</div>
-          <h2>Run history and audit trail</h2>
-        </div>
-        <span class="metric">{queueState.runsTotal}</span>
-      </div>
+    <section class="screen screen-scroll" data-gsap="panel" data-view-panel>
+      <div class="screen-pad">
+        <h1 class="screen-headline" style={{ 'font-size': '30px' }}>History</h1>
+        <p class="screen-sub">Every action, receipted. Append-only, local, exportable.</p>
 
-      <Show
-        when={queueState.applicationRuns.length > 0 || runState.events.length > 0}
-        fallback={
-          <EmptyState
-            icon={FileText}
-            title="No run history yet"
-            description="Completed, paused, blocked, and failed runs appear here after the first queue item starts."
-          />
-        }
-      >
-        <div class="queue-list" ref={listRef}>
-          <For each={queueState.applicationRuns}>
-            {(run) => (
-              <button
-                class="queue-row"
-                classList={{ active: runState.activeRunId === run.id }}
-                type="button"
-                data-list-item
-                onClick={() => void handleRowClick(run.id)}
-              >
-                <span>{run.status}</span>
-                <strong>{jobLabel(queueState.jobTargetMap[run.jobTargetId], run.id)}</strong>
-              </button>
-            )}
-          </For>
+        <div class="rule-row" style={{ 'margin-bottom': '10px' }}>
+          <span class="kicker">RUN LEDGER</span>
+          <span class="rule" />
+          <span class="kicker">{queueState.runsTotal} TOTAL</span>
         </div>
 
-        <Show when={runState.events.length > 0}>
-          <div class="event-stream">
-            <div class="panel-kicker">Recent events</div>
-            <For each={runState.events.slice(0, 12)}>
-              {(event) => (
-                <div class="event-line">
-                  <span>{event.severity}</span>
-                  <p>{event.message}</p>
-                </div>
+        <Show
+          when={queueState.applicationRuns.length > 0}
+          fallback={
+            <div class="empty-state">
+              <span>No runs yet. The ledger starts with your first mission.</span>
+            </div>
+          }
+        >
+          <div class="receipt-table">
+            <For each={queueState.applicationRuns}>
+              {(run) => (
+                <button class="receipt-row" type="button" style={{ width: '100%' }} onClick={() => void handleRowClick(run.id)}>
+                  <span class="receipt-time">{receiptTime(run.completedAt ?? run.startedAt ?? run.createdAt)}</span>
+                  <span class="receipt-title">{jobLabel(queueState.jobTargetMap[run.jobTargetId], run.id)}</span>
+                  <span class="mono-chip">RUN {run.id.slice(0, 6).toUpperCase()}</span>
+                  <span class="receipt-state" classList={{
+                    submitted: receiptState(run.status).kind === 'submitted',
+                    failed: receiptState(run.status).kind === 'failed',
+                    neutral: receiptState(run.status).kind === 'neutral',
+                  }}>
+                    {receiptState(run.status).text}
+                  </span>
+                </button>
               )}
             </For>
           </div>
         </Show>
-      </Show>
+
+        <div class="validators-note" style={{ 'margin-top': '16px' }}>
+          EVERY RUN IS AUDIT-LOGGED AND ARCHIVED ON THIS MACHINE — NOTHING LEAVES IT
+        </div>
+      </div>
     </section>
   )
 }

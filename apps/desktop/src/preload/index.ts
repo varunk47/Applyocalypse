@@ -57,6 +57,8 @@ const api = {
     }) => invoke<typeof input, ProviderConnection>(IpcContracts.providersSaveApiKey.channel, input)
   },
   documents: {
+    listGenerated: (limit = 50) =>
+      invoke<{ limit: number }, { items: GeneratedFile[] }>(IpcContracts.documentsListGenerated.channel, { limit }),
     ingestResumeSource: (input: { profileId: string | null; localPath: string }) =>
       invoke<typeof input, {
         sourceFile: UploadedFile;
@@ -128,7 +130,7 @@ const api = {
         { profileId: string; items: Array<{ sourceKind: "URL" | "TEXT"; sourceValue: string; autoSubmitEnabled?: boolean }> },
         { jobTargets: JobTarget[]; queueItems: QueueItem[] }
       >(IpcContracts.jobsEnqueue.channel, { profileId, items }),
-    list: (limit = 50, offset = 0) => invoke<{ limit: number; offset: number }, { items: QueueItem[]; total: number }>(IpcContracts.jobsList.channel, { limit, offset }),
+    list: (limit = 50, offset = 0) => invoke<{ limit: number; offset: number }, { items: QueueItem[]; total: number; jobTargets: JobTarget[] }>(IpcContracts.jobsList.channel, { limit, offset }),
     get: (runId: string) => invoke(IpcContracts.jobsGet.channel, { runId })
   },
   runs: {
@@ -136,7 +138,7 @@ const api = {
     resume: (runId: string) => invoke(IpcContracts.runsResume.channel, { runId }),
     cancel: (runId: string) => invoke(IpcContracts.runsCancel.channel, { runId }),
     list: (limit = 50, offset = 0) =>
-      invoke<{ limit: number; offset: number }, { items: ApplicationRun[]; total: number }>(IpcContracts.runsList.channel, { limit, offset }),
+      invoke<{ limit: number; offset: number }, { items: ApplicationRun[]; total: number; jobTargets: JobTarget[] }>(IpcContracts.runsList.channel, { limit, offset }),
     getDetail: (runId: string) =>
       invoke<{ runId: string }, {
         run: ApplicationRun;
@@ -229,7 +231,12 @@ const api = {
             tectonic: { available: boolean; version: string | null; path: string | null; installUrl: string };
           };
         }
-      >(IpcContracts.systemCheckConverters.channel, {})
+      >(IpcContracts.systemCheckConverters.channel, {}),
+    windowControl: (action: "minimize" | "toggle-maximize" | "close") =>
+      invoke<{ action: "minimize" | "toggle-maximize" | "close" }, { ok: true; isMaximized: boolean }>(
+        IpcContracts.systemWindowControl.channel,
+        { action }
+      )
   },
   navigation: {
     subscribe: (listener: (msg: { type: "navigate" | "focus-intake" | "close-modal"; route?: string }) => void): (() => void) => {

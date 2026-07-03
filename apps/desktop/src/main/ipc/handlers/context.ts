@@ -14,6 +14,7 @@ import {
   type QueueRepository,
   type SettingsRepository
 } from "@applyocalypse/db";
+import type { JobTarget } from "@applyocalypse/db";
 import type { IpcContract } from "@applyocalypse/ipc-contracts";
 import type { z } from "zod";
 import type { ThemeController } from "../../theme";
@@ -44,6 +45,19 @@ export const handleContract = <Request extends z.ZodTypeAny, Response extends z.
     const response = await handler(request);
     return ipcContract.response.parse(response);
   });
+};
+
+/** Resolve job targets for list responses; hard-deleted targets are skipped. */
+export const lookupJobTargets = (jobRepository: JobRepository, jobTargetIds: string[]): JobTarget[] => {
+  const targets: JobTarget[] = [];
+  for (const id of new Set(jobTargetIds)) {
+    try {
+      targets.push(jobRepository.getTargetById(id));
+    } catch {
+      // Renderer falls back to the run id when a target row is gone.
+    }
+  }
+  return targets;
 };
 
 /**

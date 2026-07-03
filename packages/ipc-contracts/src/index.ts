@@ -115,7 +115,9 @@ export const IpcChannels = {
   gmailStartOAuth: "gmail:start-oauth",
   gmailGetOAuthStatus: "gmail:get-oauth-status",
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
-  systemCheckConverters: "system:check-converters"
+  documentsListGenerated: "documents:list-generated",
+  systemCheckConverters: "system:check-converters",
+  systemWindowControl: "system:window-control"
 } as const;
 
 export const IpcContracts = {
@@ -269,7 +271,15 @@ export const IpcContracts = {
     }),
     z.object({ jobTargets: z.array(JobTargetSchema), queueItems: z.array(QueueItemSchema) })
   ),
-  jobsList: contract(IpcChannels.jobsList, PaginationSchema, z.object({ items: z.array(QueueItemSchema), total: z.number().int().nonnegative() })),
+  jobsList: contract(
+    IpcChannels.jobsList,
+    PaginationSchema,
+    z.object({
+      items: z.array(QueueItemSchema),
+      total: z.number().int().nonnegative(),
+      jobTargets: z.array(JobTargetSchema).default([])
+    })
+  ),
   jobsGet: contract(IpcChannels.jobsGet, z.object({ runId: IdSchema }).strict(), z.object({ run: RunEventSchema.nullable() })),
   runsPause: contract(IpcChannels.runsPause, z.object({ runId: IdSchema }).strict(), RunControlResponseSchema),
   runsResume: contract(IpcChannels.runsResume, z.object({ runId: IdSchema }).strict(), RunControlResponseSchema),
@@ -277,7 +287,11 @@ export const IpcContracts = {
   runsList: contract(
     IpcChannels.runsList,
     PaginationSchema,
-    z.object({ items: z.array(ApplicationRunSchema), total: z.number().int().nonnegative() })
+    z.object({
+      items: z.array(ApplicationRunSchema),
+      total: z.number().int().nonnegative(),
+      jobTargets: z.array(JobTargetSchema).default([])
+    })
   ),
   runsGetDetail: contract(
     IpcChannels.runsGetDetail,
@@ -381,6 +395,16 @@ export const IpcContracts = {
         tectonic: z.object({ available: z.boolean(), version: z.string().nullable(), path: z.string().nullable(), installUrl: z.string() })
       })
     })
+  ),
+  systemWindowControl: contract(
+    IpcChannels.systemWindowControl,
+    z.object({ action: z.enum(["minimize", "toggle-maximize", "close"]) }).strict(),
+    z.object({ ok: z.literal(true), isMaximized: z.boolean() }).strict()
+  ),
+  documentsListGenerated: contract(
+    IpcChannels.documentsListGenerated,
+    z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+    z.object({ items: z.array(GeneratedFileSchema) })
   )
 } as const;
 

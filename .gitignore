@@ -18,3 +18,6 @@ services/automation-python/*.spec
 
 # Vitest coverage output
 coverage/
+
+# Claude Design handoff export (local download, not source)
+Applyocalypse UI Design-handoff/
