@@ -21,3 +21,6 @@ coverage/
 
 # Claude Design handoff export (local download, not source)
 Applyocalypse UI Design-handoff/
+
+# Design exports (local downloads, not source)
+*Applyocalypse UI Design*.zip
