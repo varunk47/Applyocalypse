@@ -298,24 +298,35 @@ p {
   flex: none;
 }
 
-/* Reveal-on-scroll */
-[data-reveal] {
-  opacity: 0;
-  transform: translateY(26px);
-  transition: opacity 0.7s var(--ease), transform 0.7s var(--ease);
+/* Intro and reveal hidden states are set by GSAP in main.js, never in CSS, so
+   the page still renders fully if the scripts never run. */
+
+/* Top scroll-progress bar */
+.scroll-progress {
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: 3px;
+  z-index: 60;
+  pointer-events: none;
 }
-[data-reveal].is-in {
-  opacity: 1;
-  transform: none;
+.scroll-progress-fill {
+  display: block;
+  height: 100%;
+  width: 100%;
+  transform: scaleX(0);
+  transform-origin: 0 50%;
+  background: linear-gradient(90deg, var(--wax), var(--wax-sweep));
 }
-[data-reveal][data-reveal='stagger'] > * {
-  opacity: 0;
-  transform: translateY(20px);
-  transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
+
+/* Masked line rise (hero headline) */
+.rise-mask {
+  display: block;
+  overflow: hidden;
+  padding-bottom: 0.06em;
 }
-[data-reveal].is-in[data-reveal='stagger'] > * {
-  opacity: 1;
-  transform: none;
+.rise {
+  display: block;
+  will-change: transform;
 }
 
 /* ==========================================================================
@@ -505,10 +516,12 @@ p {
   position: relative;
   perspective: 1600px;
 }
+.hero-win-tilt {
+  transform-style: preserve-3d;
+  will-change: transform;
+}
 .hero-stage .app-window {
-  transform: rotateY(-9deg) rotateX(3deg) translateZ(0);
-  transform-origin: center left;
-  animation: apoFloat 7s ease-in-out infinite;
+  transform-style: preserve-3d;
 }
 .hero-stage::after {
   /* wax seal that stamps over the mock */
@@ -870,7 +883,7 @@ p {
   display: flex;
   gap: 3.2rem;
   width: max-content;
-  animation: apoMarquee 26s linear infinite;
+  will-change: transform;
 }
 .marquee-track span {
   font: italic 400 clamp(1.5rem, 1rem + 1.6vw, 2.2rem) var(--serif);
@@ -947,14 +960,15 @@ p {
 .how-steps {
   display: flex;
   flex-direction: column;
-  gap: clamp(3rem, 30vh, 9rem);
-  padding: 8vh 0;
+  padding: 6vh 0;
 }
 .how-step {
+  min-height: 62vh;
   display: grid;
   grid-template-columns: auto 1fr;
+  align-content: center;
   gap: 18px;
-  opacity: 0.4;
+  opacity: 0.35;
   transition: opacity 0.45s var(--ease);
 }
 .how-step.active {
@@ -1185,10 +1199,82 @@ p {
   max-width: 1080px;
   margin-inline: auto;
 }
-.showcase-stage .app-window {
-  transition: transform 0.4s var(--ease), box-shadow 0.4s var(--ease);
-  transform: rotateX(6deg) rotateY(0deg);
+.showcase-tilt {
+  position: relative;
+  transform-style: preserve-3d;
   will-change: transform;
+  display: flex;
+  justify-content: center;
+}
+.showcase-stage .app-window {
+  transform-style: preserve-3d;
+}
+
+/* Floating depth callouts that parallax with the cursor */
+.callout {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--hair-strong);
+  box-shadow: var(--shadow-lift);
+  font: 600 12px var(--sans);
+  color: var(--ink);
+  white-space: nowrap;
+  will-change: transform;
+}
+.callout-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--wax);
+  box-shadow: 0 0 0 3px var(--wax-wash);
+}
+.callout-dot.live {
+  background: var(--live);
+  box-shadow: 0 0 0 3px rgba(71, 113, 79, 0.14);
+  animation: apoPulse 1.6s ease-in-out infinite;
+}
+.callout-seal {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px dashed var(--wax);
+  color: var(--wax);
+  font: italic 400 11px var(--serif);
+}
+@media (max-width: 760px) {
+  .callout {
+    display: none;
+  }
+}
+
+/* How-it-works step dots */
+.how-dots {
+  display: flex;
+  gap: 7px;
+  margin-top: 26px;
+}
+.how-dot {
+  width: 34px;
+  height: 3px;
+  border-radius: 2px;
+  background: var(--hair-strong);
+  transition: background 0.4s var(--ease);
+}
+.how-dot.on {
+  background: var(--wax);
+}
+
+/* Problem statement: words start muted, GSAP fills them to ink on scroll */
+.problem-body .word {
+  color: var(--ink-3);
 }
 .showcase-stage .aw-body {
   min-height: 440px;
@@ -1575,9 +1661,8 @@ p {
   .hero-stage {
     perspective: none;
   }
-  .hero-stage .app-window {
-    transform: none;
-    animation: none;
+  .hero-win-tilt {
+    transform: none !important;
   }
   .hero-stage::after {
     right: 8px;
@@ -1640,8 +1725,10 @@ p {
     min-height: 300px;
   }
   .how-steps {
-    padding: 4vh 0 0;
-    gap: 18vh;
+    padding: 2vh 0 0;
+  }
+  .how-step {
+    min-height: 46vh;
   }
   .showcase-steps {
     grid-template-columns: 1fr;

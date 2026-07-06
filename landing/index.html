@@ -21,6 +21,7 @@
 </head>
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
+  <div class="scroll-progress" aria-hidden="true"><span class="scroll-progress-fill" data-progress></span></div>
 
   <!-- ============================ NAV ============================ -->
   <nav class="nav" id="nav" aria-label="Primary">
@@ -33,10 +34,10 @@
       <span></span>
     </button>
     <div class="nav-links" id="nav-links">
-      <a href="#how">How it works</a>
-      <a href="#privacy">Privacy</a>
-      <a href="#pricing">Pricing</a>
-      <a href="#faq">FAQ</a>
+      <a href="#how" data-nav-link="how">How it works</a>
+      <a href="#privacy" data-nav-link="privacy">Privacy</a>
+      <a href="#pricing" data-nav-link="pricing">Pricing</a>
+      <a href="#faq" data-nav-link="faq">FAQ</a>
       <a class="nav-cta" href="https://github.com/varunk47/Applyocalypse/releases/latest">Download</a>
     </div>
   </nav>
@@ -48,28 +49,32 @@
     <section class="hero">
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <span class="eyebrow" data-reveal>Local-first · For Windows · Bring your own keys</span>
-          <h1 class="display" data-reveal>An evening of drudgery, reduced to a <em>signature.</em></h1>
-          <p class="lede" data-reveal>
+          <span class="eyebrow" data-hero-fade>Local-first · For Windows · Bring your own keys</span>
+          <h1 class="display hero-headline">
+            <span class="rise-mask"><span class="rise" data-hero-rise>An evening of drudgery,</span></span>
+            <span class="rise-mask"><span class="rise" data-hero-rise>reduced to a <em>signature.</em></span></span>
+          </h1>
+          <p class="lede" data-hero-fade>
             Applyocalypse reads the posting, tailors your resume, writes the cover
             letter in your voice, and fills the portal, end to end. Then it stops,
             and waits for you to sign.
           </p>
-          <div class="hero-cta" data-reveal>
+          <div class="hero-cta" data-hero-fade>
             <a class="btn btn-wax" href="https://github.com/varunk47/Applyocalypse/releases/latest">
               Download for Windows
             </a>
             <a class="btn btn-ghost" href="#how">Watch it work</a>
           </div>
-          <div class="hero-trust" data-reveal>
+          <div class="hero-trust" data-hero-fade>
             <span class="dot" aria-hidden="true"></span>
             FREE · 64-BIT · WINDOWS 10 AND 11 · 0 BYTES LEAVE YOUR MACHINE
           </div>
         </div>
 
         <!-- Live app mock: the Missions screen -->
-        <div class="hero-stage" data-reveal aria-hidden="true">
-          <div class="app-window">
+        <div class="hero-stage" aria-hidden="true">
+          <div class="hero-win-tilt" data-hero-win-tilt>
+          <div class="app-window" data-hero-win-inner>
             <div class="aw-bar">
               <span class="mono-mark">A</span>
               <span class="aw-title">Applyocalypse</span>
@@ -140,13 +145,14 @@
               </aside>
             </div>
           </div>
+          </div>
         </div>
       </div>
     </section>
 
     <!-- ============================ MARQUEE ============================ -->
     <div class="marquee" aria-hidden="true">
-      <div class="marquee-track">
+      <div class="marquee-track" data-marquee-track>
         <span><span class="lbl">SPEAKS FLUENTLY</span> greenhouse lever ashby workday icims taleo</span>
         <span><span class="lbl">SPEAKS FLUENTLY</span> greenhouse lever ashby workday icims taleo</span>
       </div>
@@ -156,10 +162,8 @@
     <section class="problem">
       <div class="shell">
         <span class="kicker" data-reveal>The second job</span>
-        <p class="problem-body" data-reveal>
-          Read the posting. Reword the resume. Write another letter.
-          <span class="mut">Retype your whole life into another clunky portal.</span>
-          An hour, every time. And you need dozens.
+        <p class="problem-body" data-split-words>
+          Read the posting. Reword the resume. Write another letter. Retype your whole life into another clunky portal. An hour, every time. And you need dozens.
         </p>
         <p class="problem-kicker2" data-reveal>We took the hour. You keep the ten minutes that matter.</p>
       </div>
@@ -171,6 +175,13 @@
         <div class="how-head" data-reveal>
           <span class="eyebrow">The ritual · Five steps</span>
           <h2 class="display">It does the whole application. You do the last click.</h2>
+          <div class="how-dots" aria-hidden="true">
+            <span class="how-dot on" data-how-dot></span>
+            <span class="how-dot" data-how-dot></span>
+            <span class="how-dot" data-how-dot></span>
+            <span class="how-dot" data-how-dot></span>
+            <span class="how-dot" data-how-dot></span>
+          </div>
         </div>
 
         <div class="how-grid">
@@ -292,7 +303,7 @@
             <div class="how-visual" data-visual="4">
               <div class="hv-tag">READY TO SIGN <span class="live" style="color:var(--wax)">GATE</span></div>
               <div class="hv-card" style="border:1.5px solid var(--wax);box-shadow:0 3px 10px rgba(160,49,35,.12);position:relative">
-                <span class="stamp" style="position:absolute;top:12px;right:12px;width:42px;height:42px;border:1.6px solid var(--wax);border-radius:50%;color:var(--wax);display:grid;place-items:center;font:italic 400 10px var(--serif);transform:rotate(-8deg)">READY</span>
+                <span data-sign-seal class="stamp" style="position:absolute;top:12px;right:12px;width:42px;height:42px;border:1.6px solid var(--wax);border-radius:50%;color:var(--wax);display:grid;place-items:center;font:italic 400 10px var(--serif);transform:rotate(-8deg)">READY</span>
                 <div class="hv-title">Vercel, Design Engineer</div>
                 <div class="hv-meta" style="margin-top:8px">FILLED · VERIFIED · ONE PAGE</div>
                 <div class="act" style="margin-top:16px;font:600 12px var(--sans);color:var(--on-wax);background:var(--wax);border-radius:8px;padding:9px 0;text-align:center;max-width:180px">Final review, then Submit</div>
@@ -314,7 +325,8 @@
             right. Hover over it and it leans in for a closer look.</p>
         </div>
 
-        <div class="showcase-stage" id="tilt" data-reveal>
+        <div class="showcase-stage" data-showcase-stage data-reveal>
+          <div class="showcase-tilt" data-showcase-tilt>
           <div class="app-window">
             <div class="aw-bar">
               <span class="mono-mark">A</span>
@@ -381,7 +393,7 @@
                   <span class="pd live"></span>
                 </div>
                 <div class="aw-flightrow">
-                  <span class="k">0 BYTES LEAVE THIS MACHINE</span><span class="rule"></span><span class="k">11 SUBMITTED THIS WEEK</span>
+                  <span class="k">0 BYTES LEAVE THIS MACHINE</span><span class="rule"></span><span class="k"><span data-count="11">0</span> SUBMITTED THIS WEEK</span>
                 </div>
               </div>
               <aside class="aw-sign">
@@ -400,6 +412,16 @@
                 <div class="aw-quote">"Nothing ships without you."</div>
               </aside>
             </div>
+          </div>
+          <div class="callout" data-depth="24" data-z="80" style="left:1%;top:19%">
+            <span class="callout-dot"></span>0 bytes leave this machine
+          </div>
+          <div class="callout" data-depth="18" data-z="70" style="right:1%;top:47%">
+            <span class="callout-dot live"></span>keys stay on-device
+          </div>
+          <div class="callout" data-depth="26" data-z="95" style="right:5%;bottom:5%">
+            <span class="callout-seal">A</span>one page, always
+          </div>
           </div>
         </div>
 
@@ -581,6 +603,9 @@
     </section>
   </main>
 
-  <script src="./main.js" defer></script>
+  <script src="./assets/vendor/gsap.min.js"></script>
+  <script src="./assets/vendor/ScrollTrigger.min.js"></script>
+  <script src="./assets/vendor/lenis.min.js"></script>
+  <script src="./main.js"></script>
 </body>
 </html>
