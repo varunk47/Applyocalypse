@@ -1,10 +1,11 @@
-import { For, Show, createMemo, onMount } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, on } from 'solid-js'
 import { useNavigate, useParams } from '@solidjs/router'
 import type { ApplicationAnswer, ApplicationStep, Approval, ReviewRequest, SafeRendererRunEvent } from '@applyocalypse/shared-types'
 import { useRunStore } from '../contexts/RunStore'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { jobLabel, useQueueStore } from '../contexts/QueueStore'
 import { buildPortalWorkflowSummary } from '../features/run-console/portalWorkflowView'
+import { REVIEW_INSTRUCTIONS } from '../features/run-console/reviewInstructions'
 
 const artifactUrlForPath = (p: string) => `applyocalypse://artifact?path=${encodeURIComponent(p)}`
 
@@ -32,19 +33,6 @@ const approvalTypeFor = (t: string): Approval['approvalType'] => {
   if (t === 'ANSWER')   return 'ANSWER_EDIT'
   if (t === 'OTP')      return 'OTP_READ'
   return 'FINAL_SUBMIT'
-}
-
-const REVIEW_INSTRUCTIONS: Record<string, string> = {
-  OTP:                'Enter the code in the portal, then mark handled.',
-  CAPTCHA:            'Complete the challenge in the portal, then resume.',
-  MFA:                'Approve the sign-in challenge, then resume.',
-  LOGIN:              'Sign in to the portal, then resume.',
-  PORTAL_ENTRY:       'Click the apply action in the browser, then resume.',
-  PORTAL_STEP:        'Click the Next/Continue action in the browser, then resume.',
-  AMBIGUOUS_QUESTION: 'Review and edit the detected answer before continuing.',
-  ANSWER:             'Review all field answers, then approve before continuing.',
-  DOCUMENT:           'Review generated documents, then approve to continue.',
-  FINAL_SUBMIT:       'Final submission is blocked until approved.',
 }
 
 const reviewInstruction = (t: string) => REVIEW_INSTRUCTIONS[t] ?? 'Review the request before continuing.'
@@ -107,17 +95,30 @@ export default function RunConsoleScreen() {
 
   const rejectReason = 'Final submit rejected by local user.'
 
-  onMount(() => {
-    if (params.runId && params.runId !== state.activeRunId) {
-      void loadRunDetail(params.runId)
+  const [controlBusy, setControlBusy] = createSignal(false)
+  const [gateBusy, setGateBusy] = createSignal(false)
+
+  const runControl = (action: () => Promise<void>) => {
+    if (controlBusy()) return
+    setControlBusy(true)
+    void action().finally(() => setControlBusy(false))
+  }
+
+  // Reactive, not onMount: the router reuses this component instance across
+  // /run/:runId param changes, so a mount-only guard would show a stale run.
+  createEffect(on(() => params.runId, (runId) => {
+    if (runId && runId !== state.activeRunId) {
+      void loadRunDetail(runId)
     }
-  })
+  }))
 
   const run = () => state.runDetail?.run ?? null
   const events = createMemo(() => state.runDetail?.events ?? state.events)
   const portalWorkflow = createMemo(() => buildPortalWorkflowSummary(events()))
   const latestScreenshot = createMemo(() => state.screenshots[state.screenshots.length - 1])
-  const openReviews = createMemo(() => state.runDetail?.reviewRequests.filter((r) => r.status === 'OPEN') ?? [])
+  // The dedicated READY_TO_SUBMIT gate card below owns FINAL_SUBMIT reviews; including
+  // them here rendered two approve-final-submit cards for the same decision.
+  const openReviews = createMemo(() => state.runDetail?.reviewRequests.filter((r) => r.status === 'OPEN' && r.reviewType !== 'FINAL_SUBMIT') ?? [])
 
   const jobTitle = createMemo(() => {
     const detail = run()
@@ -184,11 +185,11 @@ export default function RunConsoleScreen() {
           }}>
             {statusPill().text}
           </span>
-          <button class="btn-mono" type="button" disabled={!state.runDetail} onClick={() => void pauseActiveRun()}>PAUSE</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail} onClick={() => void resumeActiveRun()}>RESUME</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail} onClick={() => void retryCurrentStep()}>RETRY</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail} onClick={() => void skipCurrentStep()}>SKIP</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail} onClick={() => void cancelActiveRun()}>CANCEL</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(pauseActiveRun)}>PAUSE</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(resumeActiveRun)}>RESUME</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(retryCurrentStep)}>RETRY</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(skipCurrentStep)}>SKIP</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(cancelActiveRun)}>CANCEL</button>
         </div>
       </div>
 
@@ -313,14 +314,32 @@ export default function RunConsoleScreen() {
           </For>
 
           <Show when={run()?.status === 'READY_TO_SUBMIT'}>
-            <div class="gate-card">
+            <div class="gate-card armed">
               <div class="gate-question">Ready to submit. <span class="quiet">One last look, then it ships.</span></div>
               <div class="house-rule">NOTHING SHIPS WITHOUT YOUR SIGNATURE</div>
               <div class="gate-actions">
-                <button class="btn-wax" type="button" onClick={() => void approveFinalSubmit()}>
-                  Approve final submit
+                <button
+                  class="btn-wax"
+                  type="button"
+                  disabled={gateBusy()}
+                  onClick={() => {
+                    if (gateBusy()) return
+                    setGateBusy(true)
+                    void approveFinalSubmit().finally(() => setGateBusy(false))
+                  }}
+                >
+                  {gateBusy() ? 'Working...' : 'Approve final submit'}
                 </button>
-                <button class="btn-quiet" type="button" onClick={() => void rejectFinalSubmit(rejectReason)}>
+                <button
+                  class="btn-quiet"
+                  type="button"
+                  disabled={gateBusy()}
+                  onClick={() => {
+                    if (gateBusy()) return
+                    setGateBusy(true)
+                    void rejectFinalSubmit(rejectReason).finally(() => setGateBusy(false))
+                  }}
+                >
                   Reject
                 </button>
               </div>
@@ -343,12 +362,9 @@ export default function RunConsoleScreen() {
                       <span class="field-label">{answer.fieldLabel}</span>
                       <input
                         aria-label={`Answer for ${answer.fieldLabel}`}
+                        class="answer-inline-input"
                         value={answer.userValue ?? answer.proposedValue ?? ''}
                         onChange={(e) => void updateAnswer(answer.id, e.currentTarget.value, 'EDITED')}
-                        style={{
-                          border: 'none', background: 'transparent', padding: '0', width: '100%',
-                          'font-size': '12.5px', 'font-weight': '600', outline: 'none',
-                        }}
                         title={`${answer.fieldType} / ${answerApplySummary(answer)}`}
                       />
                     </span>

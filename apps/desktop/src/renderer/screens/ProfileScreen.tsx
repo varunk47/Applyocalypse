@@ -8,9 +8,9 @@ const applicationPasswordIsValid = (v: string) =>
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(v)
 
 // ── Local editable snapshot of structured canonical sections ─────────────────
-type LocalExperience = { company: string; title: string; location: string; startDate: string; endDate: string; bullets: string[] }
-type LocalProject    = { name: string; summary: string; bullets: string[]; tools: string[] }
-type LocalEducation  = { institution: string; degree: string; field: string; startDate: string; endDate: string }
+type LocalExperience = { company: string; title: string; location: string; startDate: string; endDate: string; bullets: string[]; tools: string[] }
+type LocalProject    = { name: string; role: string; summary: string; bullets: string[]; tools: string[]; links: string[] }
+type LocalEducation  = { institution: string; degree: string; field: string; gpa: string; startDate: string; endDate: string; details: string[] }
 type LocalSkillGroup = { label: string; skills: string[] }
 
 const fromCanonical = (c: CanonicalProfile | null) => ({
@@ -18,15 +18,18 @@ const fromCanonical = (c: CanonicalProfile | null) => ({
     company: e.company, title: e.title,
     location: e.location ?? '', startDate: e.startDate ?? '', endDate: e.endDate ?? '',
     bullets: [...(e.bullets ?? [])],
+    tools: [...(e.tools ?? [])],
   })) as LocalExperience[],
   education: (c?.education ?? []).map((e) => ({
     institution: e.institution ?? '', degree: e.degree ?? '',
-    field: e.field ?? '', startDate: e.startDate ?? '', endDate: e.endDate ?? '',
+    field: e.field ?? '', gpa: e.gpa ?? '', startDate: e.startDate ?? '', endDate: e.endDate ?? '',
+    details: [...(e.details ?? [])],
   })) as LocalEducation[],
   projects: (c?.projects ?? []).map((p) => ({
-    name: p.name, summary: p.summary ?? '',
+    name: p.name, role: p.role ?? '', summary: p.summary ?? '',
     bullets: [...(p.bullets ?? [])],
     tools: [...(p.tools ?? [])],
+    links: [...(p.links ?? [])],
   })) as LocalProject[],
   skillGroups: (c?.skillGroups ?? []).map((g) => ({
     label: g.label, skills: [...g.skills],
@@ -124,7 +127,7 @@ export default function ProfileScreen() {
             <label class="toggle-row"><input type="checkbox" checked={form.gmailOtpEnabled} onChange={(e) => setForm('gmailOtpEnabled', e.currentTarget.checked)} /><span>Use Gmail OTP extraction</span></label>
             <p class="fine-print">Password policy: 12+ chars, uppercase, lowercase, number, symbol.</p>
             <label><span>Location</span><input value={form.location} onInput={(e) => setForm('location', e.currentTarget.value)} /></label>
-            <button class="secondary-action" type="button" disabled={!form.legalName.trim() || !form.applicationEmail.trim() || !applicationPasswordIsValid(form.applicationPassword)} onClick={submitStarterProfile}>
+            <button class="secondary-action" type="button" disabled={state.isLoading || !form.legalName.trim() || !form.applicationEmail.trim() || !applicationPasswordIsValid(form.applicationPassword)} onClick={submitStarterProfile}>
               <ShieldCheck size={17} aria-hidden="true" /><span>Save profile</span>
             </button>
           </div>
@@ -140,7 +143,7 @@ export default function ProfileScreen() {
             <label><span>Phone</span><input value={form.profilePhone} onInput={(e) => setForm('profilePhone', e.currentTarget.value)} /></label>
             <label><span>Location</span><input value={form.profileLocation} onInput={(e) => setForm('profileLocation', e.currentTarget.value)} /></label>
             <label><span>Work authorization</span><input value={form.profileWorkAuthorization} onInput={(e) => setForm('profileWorkAuthorization', e.currentTarget.value)} /></label>
-            <button class="secondary-action" type="button" onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>Save identity</span></button>
+            <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>{state.isLoading ? 'Saving...' : 'Save identity'}</span></button>
           </div>
         </details>
 
@@ -171,7 +174,7 @@ export default function ProfileScreen() {
                       <input class="entry-date-input" value={entry.endDate} placeholder="End" onInput={(e) => setStructured('experience', idx(), 'endDate', e.currentTarget.value)} />
                     </div>
                   </div>
-                  <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => setStructured('experience', produce((arr) => { arr.splice(idx(), 1) }))}><X size={14} /></button>
+                  <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => { if (!window.confirm('Remove this experience entry and all its bullets?')) return; setStructured('experience', produce((arr) => { arr.splice(idx(), 1) })) }}><X size={14} /></button>
                 </div>
                 <div class="bullet-list">
                   <For each={entry.bullets}>
@@ -192,7 +195,7 @@ export default function ProfileScreen() {
             )}
           </For>
           <button class="secondary-action" type="button" style={{ 'margin-top': '0.5rem' }}
-            onClick={() => setStructured('experience', produce((arr) => { arr.push({ company: '', title: '', location: '', startDate: '', endDate: '', bullets: [''] }) }))}>
+            onClick={() => setStructured('experience', produce((arr) => { arr.push({ company: '', title: '', location: '', startDate: '', endDate: '', bullets: [''], tools: [] }) }))}>
             <Plus size={14} /><span>Add experience</span>
           </button>
         </details>
@@ -211,13 +214,13 @@ export default function ProfileScreen() {
                     <input class="entry-sub-input" value={entry.degree} placeholder="Degree" onInput={(e) => setStructured('education', idx(), 'degree', e.currentTarget.value)} />
                     <input class="entry-sub-input" value={entry.field} placeholder="Field of study" onInput={(e) => setStructured('education', idx(), 'field', e.currentTarget.value)} />
                   </div>
-                  <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => setStructured('education', produce((arr) => { arr.splice(idx(), 1) }))}><X size={14} /></button>
+                  <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => { if (!window.confirm('Remove this education entry?')) return; setStructured('education', produce((arr) => { arr.splice(idx(), 1) })) }}><X size={14} /></button>
                 </div>
               </div>
             )}
           </For>
           <button class="secondary-action" type="button" style={{ 'margin-top': '0.5rem' }}
-            onClick={() => setStructured('education', produce((arr) => { arr.push({ institution: '', degree: '', field: '', startDate: '', endDate: '' }) }))}>
+            onClick={() => setStructured('education', produce((arr) => { arr.push({ institution: '', degree: '', field: '', gpa: '', startDate: '', endDate: '', details: [] }) }))}>
             <Plus size={14} /><span>Add education</span>
           </button>
         </details>
@@ -235,7 +238,7 @@ export default function ProfileScreen() {
                     <input class="entry-title-input" value={entry.name} placeholder="Project name" onInput={(e) => setStructured('projects', idx(), 'name', e.currentTarget.value)} />
                     <input class="entry-sub-input" value={entry.summary} placeholder="Summary" onInput={(e) => setStructured('projects', idx(), 'summary', e.currentTarget.value)} />
                   </div>
-                  <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => setStructured('projects', produce((arr) => { arr.splice(idx(), 1) }))}><X size={14} /></button>
+                  <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => { if (!window.confirm('Remove this project entry and all its bullets?')) return; setStructured('projects', produce((arr) => { arr.splice(idx(), 1) })) }}><X size={14} /></button>
                 </div>
                 <div class="bullet-list">
                   <For each={entry.bullets}>
@@ -262,7 +265,7 @@ export default function ProfileScreen() {
             )}
           </For>
           <button class="secondary-action" type="button" style={{ 'margin-top': '0.5rem' }}
-            onClick={() => setStructured('projects', produce((arr) => { arr.push({ name: '', summary: '', bullets: [''], tools: [] }) }))}>
+            onClick={() => setStructured('projects', produce((arr) => { arr.push({ name: '', role: '', summary: '', bullets: [''], tools: [], links: [] }) }))}>
             <Plus size={14} /><span>Add project</span>
           </button>
         </details>
@@ -277,7 +280,7 @@ export default function ProfileScreen() {
               <div class="structured-entry">
                 <div class="structured-entry-header">
                   <input class="entry-title-input" style={{ flex: 1 }} value={group.label} placeholder="Category (e.g. Languages)" onInput={(e) => setStructured('skillGroups', gIdx(), 'label', e.currentTarget.value)} />
-                  <button class="icon-button" type="button" aria-label="Remove group" onClick={() => setStructured('skillGroups', produce((arr) => { arr.splice(gIdx(), 1) }))}><X size={14} /></button>
+                  <button class="icon-button" type="button" aria-label="Remove group" onClick={() => { if (!window.confirm('Remove this skill group?')) return; setStructured('skillGroups', produce((arr) => { arr.splice(gIdx(), 1) })) }}><X size={14} /></button>
                 </div>
                 <div class="tool-chips">
                   <For each={group.skills}>
@@ -316,7 +319,7 @@ export default function ProfileScreen() {
             class="secondary-action"
             type="button"
             style={{ 'margin-top': '1rem' }}
-            disabled={!state.profile}
+            disabled={!state.profile || state.isLoading}
             onClick={() => {
               if (!state.profile) return
               void saveStructuredSections({
@@ -347,7 +350,7 @@ export default function ProfileScreen() {
             <label><span>Application password</span><input type="password" value={form.profileApplicationPassword} autocomplete="new-password" onInput={(e) => setForm('profileApplicationPassword', e.currentTarget.value)} /></label>
             <label class="toggle-row"><input type="checkbox" checked={form.profileGmailOtpEnabled} onChange={(e) => setForm('profileGmailOtpEnabled', e.currentTarget.checked)} /><span>Use Gmail OTP extraction</span></label>
             <p class="fine-print">12+ chars, uppercase, lowercase, number, symbol.</p>
-            <button class="secondary-action" type="button" disabled={!form.profileApplicationEmail.trim() || !applicationPasswordIsValid(form.profileApplicationPassword)} onClick={submitApplicationCredentials}>
+            <button class="secondary-action" type="button" disabled={state.isLoading || !form.profileApplicationEmail.trim() || !applicationPasswordIsValid(form.profileApplicationPassword)} onClick={submitApplicationCredentials}>
               <ShieldCheck size={17} aria-hidden="true" /><span>Save application identity</span>
             </button>
           </div>

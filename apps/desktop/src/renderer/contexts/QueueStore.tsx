@@ -1,5 +1,5 @@
 import { createContext, onCleanup, useContext, type ParentProps } from 'solid-js'
-import { createStore } from 'solid-js/store'
+import { createStore, reconcile } from 'solid-js/store'
 import type { ApplicationRun, JobTarget, QueueItem } from '@applyocalypse/shared-types'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
 import { sleep } from './storeUtils'
@@ -35,6 +35,7 @@ type QueueStoreValue = {
   ) => Promise<boolean>
   refreshQueue: () => Promise<void>
   refreshRuns: () => Promise<void>
+  cancelPausedRuns: () => Promise<number>
 }
 
 const QueueContext = createContext<QueueStoreValue>()
@@ -67,9 +68,9 @@ export const QueueStoreProvider = (props: ParentProps) => {
         window.applyocalypse.jobs.list(50, 0),
         window.applyocalypse.runs.list(50, 0),
       ])
-      setState('queueItems', queue.items)
+      setState('queueItems', reconcile(queue.items, { key: 'id' }))
       setState('queueTotal', queue.total)
-      setState('applicationRuns', runs.items)
+      setState('applicationRuns', reconcile(runs.items, { key: 'id' }))
       setState('runsTotal', runs.total)
       mergeJobTargets([...queue.jobTargets, ...runs.jobTargets])
       setState('error', null)
@@ -84,14 +85,14 @@ export const QueueStoreProvider = (props: ParentProps) => {
 
   const refreshQueue = async (): Promise<void> => {
     const queue = await window.applyocalypse.jobs.list(50, 0)
-    setState('queueItems', queue.items)
+    setState('queueItems', reconcile(queue.items, { key: 'id' }))
     mergeJobTargets(queue.jobTargets)
     setState('queueTotal', queue.total)
   }
 
   const refreshRuns = async (): Promise<void> => {
     const runs = await window.applyocalypse.runs.list(50, 0)
-    setState('applicationRuns', runs.items)
+    setState('applicationRuns', reconcile(runs.items, { key: 'id' }))
     mergeJobTargets(runs.jobTargets)
     setState('runsTotal', runs.total)
   }
@@ -100,7 +101,7 @@ export const QueueStoreProvider = (props: ParentProps) => {
     const expected = new Set(queueItemIds)
     for (let attempt = 0; attempt < 16; attempt++) {
       const runs = await window.applyocalypse.runs.list(50, 0)
-      setState('applicationRuns', runs.items)
+      setState('applicationRuns', reconcile(runs.items, { key: 'id' }))
       setState('runsTotal', runs.total)
       const run = runs.items.find((r) => expected.has(r.queueItemId))
       if (run) return run
@@ -153,6 +154,25 @@ export const QueueStoreProvider = (props: ParentProps) => {
     }
   }
 
+  const cancelPausedRuns = async (): Promise<number> => {
+    try {
+      const result = (await window.applyocalypse.runs.cancelAllPaused()) as { cancelled: number }
+      await refreshRuns()
+      await refreshQueue()
+      if (result.cancelled > 0) {
+        toast.success(`Cleared ${result.cancelled} paused ${result.cancelled === 1 ? 'run' : 'runs'}`)
+      } else {
+        toast.info('No paused runs to clear')
+      }
+      return result.cancelled
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unable to clear paused runs'
+      setState('error', msg)
+      toast.error(msg)
+      return 0
+    }
+  }
+
   const pollTimer = setInterval(() => {
     void refreshQueue()
     void refreshRuns()
@@ -160,7 +180,7 @@ export const QueueStoreProvider = (props: ParentProps) => {
   onCleanup(() => clearInterval(pollTimer))
 
   return (
-    <QueueContext.Provider value={{ state, enqueueJobText, refreshQueue, refreshRuns }}>
+    <QueueContext.Provider value={{ state, enqueueJobText, refreshQueue, refreshRuns, cancelPausedRuns }}>
       {props.children}
     </QueueContext.Provider>
   )

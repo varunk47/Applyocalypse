@@ -1,23 +1,8 @@
-/* Dossier type system — bundled locally, no network fetches (all OFL licensed). */
+/* Instrument type system, bundled locally, no network fetches (all OFL licensed).
+   Two families only: Hanken carries both display and body (separated by weight,
+   not by family), JetBrains Mono carries machine data. */
 
-/* Instrument Serif — display voice (headlines, job titles, the brand italic) */
-@font-face {
-  font-family: 'Instrument Serif';
-  src: url('./assets/fonts/InstrumentSerif-Regular.woff2') format('woff2');
-  font-weight: 400;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: 'Instrument Serif';
-  src: url('./assets/fonts/InstrumentSerif-Italic.woff2') format('woff2');
-  font-weight: 400;
-  font-style: italic;
-  font-display: swap;
-}
-
-/* Hanken Grotesk — body voice */
+/* Hanken Grotesk: display voice at 600-750, body voice at 400-550 */
 @font-face {
   font-family: 'Hanken Grotesk';
   src: url('./assets/fonts/HankenGrotesk-Variable.woff2') format('woff2-variations');

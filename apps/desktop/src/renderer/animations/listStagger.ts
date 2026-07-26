@@ -1,6 +1,8 @@
 import { gsap, dur, ease } from './gsap'
+import { prefersReducedMotion } from './motion'
 
 export const staggerEnterList = (container: Element, itemSelector = '[data-list-item]') => {
+  if (prefersReducedMotion()) return
   const items = container.querySelectorAll(itemSelector)
   gsap.from(items, {
     y: 12,
@@ -13,6 +15,7 @@ export const staggerEnterList = (container: Element, itemSelector = '[data-list-
 }
 
 export const enterSingleItem = (el: Element) => {
+  if (prefersReducedMotion()) return
   gsap.from(el, {
     height: 0,
     opacity: 0,
@@ -24,6 +27,10 @@ export const enterSingleItem = (el: Element) => {
 }
 
 export const exitSingleItem = (el: Element, done: () => void) => {
+  if (prefersReducedMotion()) {
+    done()
+    return
+  }
   gsap.to(el, {
     height: 0,
     opacity: 0,

@@ -186,7 +186,7 @@ export default function DocumentsScreen() {
               when={generated().length > 0}
               fallback={
                 <div class="empty-state">
-                  <span>Tailored copies appear here as missions run. Paste a job link on Missions to start one.</span>
+                  <span>{generated.loading ? 'Loading tailored documents...' : 'Tailored copies appear here as missions run. Paste a job link on Missions to start one.'}</span>
                 </div>
               }
             >
@@ -204,7 +204,7 @@ export default function DocumentsScreen() {
                         <span style={{ display: 'block', font: '500 11.5px var(--mono)', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>
                           {file.filename}
                         </span>
-                        <span style={{ display: 'block', font: '400 12px var(--serif)', color: 'var(--ink-2)' }}>
+                        <span style={{ display: 'block', font: '500 12px var(--sans)', color: 'var(--ink-2)' }}>
                           {generatedJobLabel(file)}
                         </span>
                       </span>

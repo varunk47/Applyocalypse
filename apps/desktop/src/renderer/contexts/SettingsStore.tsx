@@ -115,7 +115,9 @@ export const SettingsStoreProvider = (props: ParentProps) => {
       setState('settings', settings)
       setState('error', null)
     } catch (error) {
-      setState('error', error instanceof Error ? error.message : 'Unable to update automation concurrency')
+      const msg = error instanceof Error ? error.message : 'Unable to update automation concurrency'
+      setState('error', msg)
+      toast.error(msg)
     } finally {
       setState('isLoading', false)
     }
@@ -128,7 +130,9 @@ export const SettingsStoreProvider = (props: ParentProps) => {
       setState('settings', settings)
       setState('error', null)
     } catch (error) {
-      setState('error', error instanceof Error ? error.message : 'Unable to update autofill setting')
+      const msg = error instanceof Error ? error.message : 'Unable to update autofill setting'
+      setState('error', msg)
+      toast.error(msg)
     } finally {
       setState('isLoading', false)
     }

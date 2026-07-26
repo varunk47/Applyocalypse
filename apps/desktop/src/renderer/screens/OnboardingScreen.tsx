@@ -1,4 +1,5 @@
 import { For, Show, createSignal, onMount } from 'solid-js'
+import { prefersReducedMotion } from '../animations/motion'
 import { useNavigate } from '@solidjs/router'
 import { createStore } from 'solid-js/store'
 import { ChevronRight, ShieldCheck, Upload } from 'lucide-solid'
@@ -65,7 +66,7 @@ export default function OnboardingScreen() {
     pickAndRegisterSupportingDetails,
     pickAndRegisterCoverLetter,
   } = useProfileStore()
-  const { saveProviderApiKey } = useSettingsStore()
+  const { state: settingsState, saveProviderApiKey } = useSettingsStore()
   const navigate = useNavigate()
 
   const [stepIndex, setStepIndex] = createSignal(0)
@@ -125,16 +126,25 @@ export default function OnboardingScreen() {
   let progressFillRef: HTMLDivElement | undefined
 
   const step = (): OnboardingStep => STEPS[Math.min(stepIndex(), STEPS.length - 1)] ?? 'welcome'
-  const progress = () => ((stepIndex() + 1) / STEPS.length) * 100
+  const progressWidth = () => `${((stepIndex() + 1) / STEPS.length) * 100}%`
+
+  // GSAP owns the fill width exclusively; a reactive style binding would jump the
+  // DOM to the target before the tween starts and turn the animation into a no-op.
+  const syncProgressBar = (animate: boolean) => {
+    if (!progressFillRef) return
+    if (animate && !prefersReducedMotion()) {
+      gsap.to(progressFillRef, { width: progressWidth(), duration: 0.4, ease: 'power3.out' })
+    } else {
+      gsap.set(progressFillRef, { width: progressWidth() })
+    }
+  }
 
   onMount(() => {
-    if (progressFillRef) {
-      gsap.to(progressFillRef, { width: `${progress()}%`, duration: 0.4, ease: 'power3.out' })
-    }
+    syncProgressBar(true)
   })
 
   const animateToStep = (direction: 'forward' | 'back') => {
-    if (!stepRef) return
+    if (!stepRef || prefersReducedMotion()) return
     const outFn = direction === 'forward' ? exitStepToLeft : (el: Element, done: () => void) => {
       gsap.to(el, { x: 60, opacity: 0, duration: 0.18, ease: 'expo.in', onComplete: done })
     }
@@ -148,18 +158,14 @@ export default function OnboardingScreen() {
     if (stepIndex() >= STEPS.length - 1) return
     animateToStep('forward')
     setStepIndex((i) => i + 1)
-    if (progressFillRef) {
-      gsap.to(progressFillRef, { width: `${((stepIndex() + 1) / STEPS.length) * 100}%`, duration: 0.4, ease: 'power3.out' })
-    }
+    syncProgressBar(true)
   }
 
   const retreat = () => {
     if (stepIndex() <= 0) return
     animateToStep('back')
     setStepIndex((i) => i - 1)
-    if (progressFillRef) {
-      gsap.to(progressFillRef, { width: `${((stepIndex() + 1) / STEPS.length) * 100}%`, duration: 0.4, ease: 'power3.out' })
-    }
+    syncProgressBar(true)
   }
 
   // Prefill general-questions from parsed resume canonical when entering that step
@@ -283,7 +289,10 @@ export default function OnboardingScreen() {
       apiKey: form.providerApiKey,
       ...(form.providerModel ? { metadata: { defaultModel: form.providerModel } } : {}),
     })
-    advance()
+    // The store swallows save failures into state.error; never advance past a failed save.
+    if (!settingsState.error) {
+      advance()
+    }
   }
 
   const handleComplete = () => navigate('/', { replace: true })
@@ -293,10 +302,10 @@ export default function OnboardingScreen() {
   const coverFile = () => profileState.uploadedFiles.find((f) => f.fileKind === 'COVER_LETTER')
 
   return (
-    <div style={{ position: 'fixed', inset: '44px 0 0 0', display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'var(--bg)', 'z-index': '100' }}>
+    <div class="onboarding-shell" style={{ position: 'fixed', inset: '44px 0 0 0', display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'var(--bg)', 'z-index': '100' }}>
       <div style={{ width: '100%', 'max-width': '560px', padding: '2rem' }}>
         <div class="wizard-progress-bar" style={{ 'margin-bottom': '2rem' }}>
-          <div class="fill" ref={progressFillRef} style={{ width: `${progress()}%` }} />
+          <div class="fill" ref={progressFillRef} />
         </div>
 
         <div class="eyebrow" style={{ 'margin-bottom': '0.5rem' }}>

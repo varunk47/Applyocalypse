@@ -1,6 +1,8 @@
 // Smoke tests for screen-level pure logic (no DOM/store required)
 import { describe, it, expect } from 'vitest'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
+import { REVIEW_INSTRUCTIONS } from '../features/run-console/reviewInstructions'
+import { deriveLegalName } from '../features/onboarding/onboardingUtils'
 
 // ── IntakeScreen: URL chip detection ──────────────────────────────────────────
 
@@ -18,7 +20,26 @@ describe('IntakeScreen URL detection', () => {
     expect(urls).toHaveLength(2)
   })
 
-  it('detects TEXT kind for job description paste', () => {
+  it('extracts a URL with trailing text on the same line', () => {
+    const items = parseJobIntake('https://company.wd5.myworkdayjobs.com/en-US/careers/job/12345 (Remote)')
+    const urls = items.filter((i) => i.sourceKind === 'URL')
+    expect(urls).toHaveLength(1)
+    expect(urls[0]?.sourceValue).toBe('https://company.wd5.myworkdayjobs.com/en-US/careers/job/12345')
+  })
+
+  it('strips trailing punctuation pasted after a URL', () => {
+    const items = parseJobIntake('https://jobs.example.com/apply/12345),')
+    expect(items[0]?.sourceKind).toBe('URL')
+    expect(items[0]?.sourceValue).toBe('https://jobs.example.com/apply/12345')
+  })
+
+  it('keeps a mid-sentence URL mention as TEXT', () => {
+    const items = parseJobIntake('Apply on our site at https://jobs.example.com/apply/12345 today')
+    expect(items).toHaveLength(1)
+    expect(items[0]?.sourceKind).toBe('TEXT')
+  })
+
+  it('detects TEXT kind for a job description paste', () => {
     const items = parseJobIntake('We are looking for a senior engineer...')
     expect(items[0]?.sourceKind).toBe('TEXT')
   })
@@ -37,74 +58,32 @@ describe('IntakeScreen URL detection', () => {
 
 // ── RunConsoleScreen: review instruction lookup ───────────────────────────────
 
-const REVIEW_INSTRUCTIONS: Record<string, string> = {
-  OTP:                'Enter the code in the portal, then mark handled.',
-  CAPTCHA:            'Complete the challenge in the portal, then resume.',
-  MFA:                'Approve the sign-in challenge, then resume.',
-  FINAL_SUBMIT:       'Final submission is blocked until approved.',
-}
-
 describe('RunConsoleScreen review instructions', () => {
-  it('returns correct instruction for OTP', () => {
+  it('covers every review gate type the console renders', () => {
+    const expectedTypes = [
+      'OTP', 'CAPTCHA', 'MFA', 'LOGIN', 'PORTAL_ENTRY', 'PORTAL_STEP',
+      'AMBIGUOUS_QUESTION', 'ANSWER', 'DOCUMENT', 'FINAL_SUBMIT',
+    ]
+    for (const type of expectedTypes) {
+      expect(REVIEW_INSTRUCTIONS[type], `missing instruction for ${type}`).toBeTruthy()
+    }
+    expect(Object.keys(REVIEW_INSTRUCTIONS)).toHaveLength(expectedTypes.length)
+  })
+
+  it('has an OTP instruction mentioning the code', () => {
     expect(REVIEW_INSTRUCTIONS['OTP']).toContain('code')
   })
 
-  it('returns correct instruction for CAPTCHA', () => {
+  it('has a CAPTCHA instruction mentioning the challenge', () => {
     expect(REVIEW_INSTRUCTIONS['CAPTCHA']).toContain('challenge')
   })
 
-  it('returns undefined for unknown review type', () => {
+  it('returns undefined for unknown review types', () => {
     expect(REVIEW_INSTRUCTIONS['UNKNOWN_TYPE']).toBeUndefined()
   })
 })
 
-// ── OverviewScreen: stat calculation logic ────────────────────────────────────
-
-const computeStats = (
-  queueItems: { status: string }[],
-  runs: { status: string }[]
-) => ({
-  total:     queueItems.length + runs.length,
-  pending:   queueItems.filter((i) => ['QUEUED', 'PREPARING'].includes(i.status)).length,
-  completed: runs.filter((r) => r.status === 'COMPLETED').length,
-  failed:    runs.filter((r) => ['FAILED', 'CANCELLED'].includes(r.status)).length,
-})
-
-describe('OverviewScreen stat computation', () => {
-  it('totals queue + runs', () => {
-    const stats = computeStats([{ status: 'QUEUED' }], [{ status: 'COMPLETED' }])
-    expect(stats.total).toBe(2)
-  })
-
-  it('counts pending correctly', () => {
-    const stats = computeStats(
-      [{ status: 'QUEUED' }, { status: 'PREPARING' }, { status: 'RUNNING' }],
-      []
-    )
-    expect(stats.pending).toBe(2)
-  })
-
-  it('counts completed and failed separately', () => {
-    const stats = computeStats([], [
-      { status: 'COMPLETED' },
-      { status: 'FAILED' },
-      { status: 'CANCELLED' },
-      { status: 'RUNNING' },
-    ])
-    expect(stats.completed).toBe(1)
-    expect(stats.failed).toBe(2)
-  })
-
-  it('returns zeros for empty state', () => {
-    const stats = computeStats([], [])
-    expect(stats.total).toBe(0)
-    expect(stats.pending).toBe(0)
-  })
-})
-
-// ── OnboardingScreen: legalName derivation ───────────────────────────────────
-
-import { deriveLegalName } from '../features/onboarding/onboardingUtils'
+// ── OnboardingScreen: legalName derivation ────────────────────────────────────
 
 describe('OnboardingScreen deriveLegalName', () => {
   it('combines first and last name', () => {
@@ -112,34 +91,14 @@ describe('OnboardingScreen deriveLegalName', () => {
   })
 
   it('trims extra whitespace', () => {
-    expect(deriveLegalName('  Ada  ', '  Lovelace  ', '')).toBe('Ada Lovelace')
+    expect(deriveLegalName('  Ada ', ' Lovelace ', '')).toBe('Ada Lovelace')
   })
 
-  it('falls back to fallback when both are empty', () => {
+  it('falls back to the fallback name when both parts are empty', () => {
     expect(deriveLegalName('', '', 'Fallback Name')).toBe('Fallback Name')
   })
 
   it('works with first name only', () => {
     expect(deriveLegalName('Cher', '', '')).toBe('Cher')
-  })
-})
-
-// ── QueueScreen: run-for-queue-item lookup ────────────────────────────────────
-
-describe('QueueScreen run lookup', () => {
-  const runs = [
-    { id: 'run-1', queueItemId: 'qi-a', status: 'RUNNING' },
-    { id: 'run-2', queueItemId: 'qi-b', status: 'COMPLETED' },
-  ]
-
-  const runForQueueItem = (queueItemId: string) =>
-    runs.find((r) => r.queueItemId === queueItemId) ?? null
-
-  it('finds run for known queue item', () => {
-    expect(runForQueueItem('qi-a')?.id).toBe('run-1')
-  })
-
-  it('returns null for unknown queue item', () => {
-    expect(runForQueueItem('qi-unknown')).toBeNull()
   })
 })

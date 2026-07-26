@@ -56,7 +56,7 @@ const zoneForSection = (document: ParsedDocument, sectionLabel: string, index: n
 export const buildAnchorRepairEditorModel = (document: ParsedDocument): AnchorRepairEditorModel => {
   const diagnostics = buildEditableMasterDiagnostics(document);
   const sectionLabels = document.canonical.sections.map((section) => section.label).filter((label) => label.trim().length > 0);
-  const fallbackLabels = sectionLabels.length > 0 ? sectionLabels : ["Summary", "Skills", "Experience", "Projects"];
+  const fallbackLabels = sectionLabels.length > 0 ? sectionLabels : ["Summary", "Skills", "Experience", "Projects", "Education"];
   const zones = fallbackLabels
     .map((label, index) => zoneForSection(document, label, index))
     .sort((left, right) => left.priority - right.priority || right.confidence - left.confidence || left.label.localeCompare(right.label));

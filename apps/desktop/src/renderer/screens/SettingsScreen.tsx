@@ -71,13 +71,18 @@ export default function SettingsScreen() {
   }
 
   const [gmailStatus, setGmailStatus] = createSignal<{ connected: boolean; email: string | null }>({ connected: false, email: null })
+  const [gmailStatusLoading, setGmailStatusLoading] = createSignal(true)
   const [gmailOAuthForm, setGmailOAuthForm] = createStore({ clientId: '', clientSecret: '' })
   const [gmailConnecting, setGmailConnecting] = createSignal(false)
   const [gmailError, setGmailError] = createSignal<string | null>(null)
 
   onMount(async () => {
-    const status = await window.applyocalypse.gmail.getOAuthStatus()
-    setGmailStatus(status)
+    try {
+      const status = await window.applyocalypse.gmail.getOAuthStatus()
+      setGmailStatus(status)
+    } finally {
+      setGmailStatusLoading(false)
+    }
   })
 
   const connectGmail = async () => {
@@ -180,9 +185,9 @@ export default function SettingsScreen() {
             <input value={form.providerAwsRegion} placeholder="us-east-1" onInput={(e) => setForm('providerAwsRegion', e.currentTarget.value)} />
           </label>
         </Show>
-        <button class="secondary-action" type="button" onClick={submitProviderKey}>
+        <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProviderKey}>
           <ShieldCheck size={17} aria-hidden="true" />
-          <span>Save key reference</span>
+          <span>{state.isLoading ? 'Saving...' : 'Save key reference'}</span>
         </button>
       </div>
 
@@ -254,7 +259,7 @@ export default function SettingsScreen() {
           <code style={{ flex: '1', 'font-size': '0.78rem', color: 'var(--text-secondary)' }}>
             {outputDir() || 'Default downloads folder'}
           </code>
-          <button class="secondary-action" type="button" onClick={() => void chooseOutputDir()}>
+          <button class="secondary-action" type="button" disabled={state.isLoading} onClick={() => void chooseOutputDir()}>
             Change
           </button>
         </div>
@@ -288,7 +293,7 @@ export default function SettingsScreen() {
             const status = converters()![key]
             return (
               <div class="queue-row static-row" style={{ 'margin-top': '0.4rem' }}>
-                <span style={{ color: status.available ? 'var(--color-success, green)' : 'var(--color-danger, red)' }}>
+                <span style={{ color: status.available ? 'var(--success)' : 'var(--danger)' }}>
                   {status.available ? 'OK' : 'MISSING'}
                 </span>
                 <strong>{labels[key]}</strong>
@@ -330,6 +335,7 @@ export default function SettingsScreen() {
           </div>
           <Mail size={20} aria-hidden="true" />
         </div>
+        <Show when={!gmailStatusLoading()} fallback={<p class="fine-print" style={{ 'margin-top': '0.5rem' }}>Checking Gmail connection...</p>}>
         <Show
           when={gmailStatus().connected}
           fallback={
@@ -354,7 +360,7 @@ export default function SettingsScreen() {
                 />
               </label>
               <Show when={gmailError()}>
-                <p class="fine-print" style={{ color: 'var(--color-danger, red)' }}>{gmailError()}</p>
+                <p class="fine-print" style={{ color: 'var(--danger)' }}>{gmailError()}</p>
               </Show>
               <button
                 class="secondary-action"
@@ -369,12 +375,13 @@ export default function SettingsScreen() {
           }
         >
           <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
-            <span style={{ color: 'var(--color-success, green)' }}>CONNECTED</span>
+            <span style={{ color: 'var(--success)' }}>CONNECTED</span>
             <strong>{gmailStatus().email ?? 'Gmail account'}</strong>
             <button class="secondary-action" type="button" onClick={() => void disconnectGmail()}>
               Disconnect
             </button>
           </div>
+        </Show>
         </Show>
       </div>
     </section>

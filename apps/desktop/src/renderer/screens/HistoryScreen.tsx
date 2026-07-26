@@ -43,7 +43,7 @@ export default function HistoryScreen() {
           when={queueState.applicationRuns.length > 0}
           fallback={
             <div class="empty-state">
-              <span>No runs yet. The ledger starts with your first mission.</span>
+              <span>{queueState.isLoading ? 'Loading the run ledger...' : 'No runs yet. The ledger starts with your first mission.'}</span>
             </div>
           }
         >

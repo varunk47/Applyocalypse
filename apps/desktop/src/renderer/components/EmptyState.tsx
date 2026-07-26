@@ -1,5 +1,6 @@
 import { onMount, type JSX } from 'solid-js'
 import { gsap } from '../animations/gsap'
+import { prefersReducedMotion } from '../animations/motion'
 
 interface EmptyStateProps {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -13,7 +14,7 @@ export const EmptyState = (props: EmptyStateProps) => {
   let ref: HTMLDivElement | undefined
 
   onMount(() => {
-    if (ref) {
+    if (ref && !prefersReducedMotion()) {
       gsap.from(ref, { scale: 0.95, opacity: 0, duration: 0.4, ease: 'expo.out' })
     }
   })
