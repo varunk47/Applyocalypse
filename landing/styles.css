@@ -49,7 +49,7 @@
   --card: #ffffff;
   --ink: #201d17;
   --ink-2: #6c675b;
-  --ink-3: #a39d8f;
+  --ink-3: #757061; /* AA 4.74:1 on --paper; was #a39d8f (2.59:1) */
 
   --wax: #a03123;
   --wax-mid: #b5402f;
