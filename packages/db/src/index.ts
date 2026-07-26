@@ -1,5 +1,6 @@
 export * from "./migrations";
 export * from "./sqlite";
+export * from "./jdFingerprint";
 export * from "./repositories/chatRepository";
 export * from "./repositories/jobRepository";
 export * from "./repositories/profileRepository";

@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { app } from "electron";
 
@@ -14,8 +14,9 @@ export const writeWorkerControlFile = (input: {
   const runDir = join(app.getPath("userData"), "runs", input.runId);
   mkdirSync(runDir, { recursive: true });
   const controlPath = join(runDir, "control.json");
+  const stagingPath = `${controlPath}.tmp`;
   writeFileSync(
-    controlPath,
+    stagingPath,
     `${JSON.stringify(
       {
         command: input.command,
@@ -27,7 +28,24 @@ export const writeWorkerControlFile = (input: {
       null,
       2
     )}\n`,
-    "utf8"
+    // Approved answers can carry applicant PII; match worker-secrets.json permissions.
+    { encoding: "utf8", mode: 0o600 }
   );
+  // Swap into place atomically so the worker's poll never reads a torn file. Windows
+  // can briefly deny the swap while the worker holds the old file open for reading.
+  for (let attempt = 0; ; attempt += 1) {
+    try {
+      renameSync(stagingPath, controlPath);
+      break;
+    } catch (error) {
+      if (attempt >= 4) {
+        throw error;
+      }
+      const retryAt = Date.now() + 10;
+      while (Date.now() < retryAt) {
+        // brief synchronous backoff; the worker's read window is microseconds
+      }
+    }
+  }
   return controlPath;
 };

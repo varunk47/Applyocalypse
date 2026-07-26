@@ -33,6 +33,16 @@ type ActiveWorker = {
 
 const terminalRunStatuses = new Set(["COMPLETED", "FAILED", "CANCELLED", "SUBMITTED"]);
 
+const killWorkerTree = (child: ChildProcessWithoutNullStreams): void => {
+  if (process.platform === "win32" && child.pid) {
+    // TerminateProcess on the worker alone orphans its browser subprocesses; kill the tree.
+    const killer = spawn("taskkill", ["/pid", String(child.pid), "/T", "/F"], { shell: false, windowsHide: true });
+    killer.on("error", () => child.kill());
+    return;
+  }
+  child.kill();
+};
+
 export class PythonWorkerSupervisor {
   private readonly active = new Map<string, ActiveWorker>();
 
@@ -112,8 +122,15 @@ export class PythonWorkerSupervisor {
     }
     clearInterval(active.heartbeat);
     this.active.set(runId, { ...active, stopping: true });
-    active.child.kill();
+    killWorkerTree(active.child);
     return true;
+  }
+
+  /** Terminate every active worker; called on app quit before the database closes. */
+  stopAll(): void {
+    for (const runId of [...this.active.keys()]) {
+      this.stop(runId);
+    }
   }
 
   isActive(runId: string): boolean {
@@ -151,6 +168,10 @@ export class PythonWorkerSupervisor {
   }
 
   private persistSupervisorError(runId: string, error: unknown, redact: (message: string) => string = (message) => message): void {
+    if (!this.db.open) {
+      // App is quitting: the database is closed and late worker output has nowhere to go.
+      return;
+    }
     const rawMessage = error instanceof Error ? error.message : String(error);
     const message = redact(rawMessage);
     this.db.prepare(
@@ -169,6 +190,9 @@ export class PythonWorkerSupervisor {
   }
 
   private pauseRunAfterUnexpectedWorkerExit(runId: string, code: number | null, signal: NodeJS.Signals | null): void {
+    if (!this.db.open) {
+      return;
+    }
     const timestamp = new Date().toISOString();
     const failureCode = code === 0 && signal === null ? "WORKER_EXITED_WITHOUT_TERMINAL_EVENT" : "WORKER_EXITED_UNEXPECTEDLY";
     const exitDescription = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;

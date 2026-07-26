@@ -1,6 +1,6 @@
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { app } from "electron";
 import { GmailOAuthService } from "../services/gmailOAuthService";
 import { getLatestCoverLetterText } from "../services/documentIngestionService";
@@ -154,20 +154,20 @@ export class LocalQueueScheduler {
       let providerEnv: Record<string, string> | undefined;
       let secretsForRedaction: Record<string, string> | undefined;
       try {
-        providerEnv = providerSecret
+        const providerRuntime = providerSecret
           ? buildProviderRuntimeEnv({
               provider: providerSecret.provider,
               apiKey: secureSecretStore.decryptSecret(providerSecret.encryptedReference),
               metadata: providerSecret.metadata
             })
           : undefined;
+        providerEnv = providerRuntime?.env;
+        const secretPayload: Record<string, string> = { ...(providerRuntime?.secretEnv ?? {}) };
 
         const credentials = profileRepository.getApplicationCredentialReference(item.profileId);
         if (credentials?.applicationEmail && credentials.encryptedReference) {
           const applicationPassword = secureSecretStore.decryptSecret(credentials.encryptedReference);
-          const secretPayload: Record<string, string> = {
-            APPLYO_APPLICATION_PASSWORD: applicationPassword
-          };
+          secretPayload.APPLYO_APPLICATION_PASSWORD = applicationPassword;
           providerEnv = {
             ...(providerEnv ?? {}),
             APPLYO_APPLICATION_EMAIL: credentials.applicationEmail
@@ -204,12 +204,17 @@ export class LocalQueueScheduler {
             }
           }
 
+        }
+
+        if (Object.keys(secretPayload).length > 0) {
           const secretsFilePath = join(runWorkDir, "worker-secrets.json");
           writeFileSync(secretsFilePath, JSON.stringify(secretPayload), { encoding: "utf8", mode: 0o600 });
-          providerEnv = { ...providerEnv, APPLYO_SECRETS_FILE: secretsFilePath };
+          providerEnv = { ...(providerEnv ?? {}), APPLYO_SECRETS_FILE: secretsFilePath };
           secretsForRedaction = secretPayload;
         }
       } catch (error) {
+        rmSync(join(runWorkDir, "worker-secrets.json"), { force: true });
+        rmSync(join(runWorkDir, "gmail-oauth-token.json"), { force: true });
         const message = error instanceof Error ? error.message : "Sensitive local credential could not be loaded";
         runRepository.addRunEvent({
           eventType: "USER_REVIEW_REQUIRED",
@@ -256,6 +261,9 @@ export class LocalQueueScheduler {
         workDir: runWorkDir
       });
     } catch (error) {
+      const runWorkDir = join(app.getPath("userData"), "runs", runId);
+      rmSync(join(runWorkDir, "worker-secrets.json"), { force: true });
+      rmSync(join(runWorkDir, "gmail-oauth-token.json"), { force: true });
       this.markRunPreparationFailed({ runId, queueItemId: item.id, error });
     }
   }

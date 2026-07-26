@@ -14,6 +14,7 @@ import { createMainWindow } from "./window";
 let mainWindow: BrowserWindow | null = null;
 let database: ReturnType<typeof createAppDatabase> | null = null;
 let scheduler: LocalQueueScheduler | null = null;
+let workerSupervisor: PythonWorkerSupervisor | null = null;
 let cleanupTimer: NodeJS.Timeout | null = null;
 
 const getWindows = (): BrowserWindow[] => BrowserWindow.getAllWindows();
@@ -42,6 +43,7 @@ const boot = async (): Promise<void> => {
     );
   };
   const supervisor = new PythonWorkerSupervisor(database, getWindows, getSafeArtifactRoots);
+  workerSupervisor = supervisor;
   scheduler = new LocalQueueScheduler(database, queueRepository, supervisor);
   const isKnownArtifactPath = (localPath: string): boolean => {
     const row = appDatabase
@@ -475,6 +477,8 @@ app.on("window-all-closed", () => {
 app.on("before-quit", () => {
   scheduler?.stop();
   scheduler = null;
+  workerSupervisor?.stopAll();
+  workerSupervisor = null;
   if (cleanupTimer) {
     clearInterval(cleanupTimer);
     cleanupTimer = null;

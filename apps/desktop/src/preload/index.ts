@@ -137,6 +137,7 @@ const api = {
     pause: (runId: string) => invoke(IpcContracts.runsPause.channel, { runId }),
     resume: (runId: string) => invoke(IpcContracts.runsResume.channel, { runId }),
     cancel: (runId: string) => invoke(IpcContracts.runsCancel.channel, { runId }),
+    cancelAllPaused: () => invoke(IpcContracts.runsCancelPaused.channel, {}),
     list: (limit = 50, offset = 0) =>
       invoke<{ limit: number; offset: number }, { items: ApplicationRun[]; total: number; jobTargets: JobTarget[] }>(IpcContracts.runsList.channel, { limit, offset }),
     getDetail: (runId: string) =>

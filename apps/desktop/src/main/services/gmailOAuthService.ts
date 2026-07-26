@@ -105,17 +105,22 @@ export class GmailOAuthService {
       const code = url.searchParams.get("code");
       const returnedState = url.searchParams.get("state");
 
+      // Only the redirect carrying our state token may finish the flow; stray local
+      // requests (favicons, other tabs) must not close the server before Google calls back.
+      if (returnedState !== state) {
+        res.writeHead(404, { "Content-Type": "text/plain" });
+        res.end("Not found");
+        return;
+      }
+
       res.writeHead(200, { "Content-Type": "text/html" });
       res.end(
-        "<html><body><h2>Gmail connected. You can close this tab.</h2></body></html>"
+        code
+          ? "<html><body><h2>Gmail connected. You can close this tab.</h2></body></html>"
+          : "<html><body><h2>Gmail connection was not completed. You can close this tab.</h2></body></html>"
       );
       server.close();
-
-      if (returnedState === state && code) {
-        resolveCallback(code);
-      } else {
-        resolveCallback(null);
-      }
+      resolveCallback(code ?? null);
     });
 
     await new Promise<void>((resolve, reject) => {

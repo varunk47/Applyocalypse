@@ -31,7 +31,13 @@ export const registerSettingsHandlers = (ctx: IpcHandlerContext): void => {
         throw new Error("Output directory must be a string path");
       }
       const outputDir = normalizeUserPath(value);
-      if (!statSync(outputDir).isDirectory()) {
+      let outputDirStats;
+      try {
+        outputDirStats = statSync(outputDir);
+      } catch {
+        throw new Error("Output directory must exist and be a directory");
+      }
+      if (!outputDirStats.isDirectory()) {
         throw new Error("Output directory must exist and be a directory");
       }
       settingsRepository.set(key, outputDir);

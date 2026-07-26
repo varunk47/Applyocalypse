@@ -18,15 +18,24 @@ const metadataString = (metadata: Record<string, unknown> | undefined, key: stri
   return typeof value === "string" && value.trim() ? value.trim() : null;
 };
 
+export type ProviderRuntimeEnv = {
+  /** Non-secret runtime configuration, safe to pass via child-process env vars. */
+  env: Record<string, string>;
+  /** Provider credentials; must reach the worker via the 0600 secrets file, never spawn env. */
+  secretEnv: Record<string, string>;
+};
+
 export const buildProviderRuntimeEnv = (input: {
   provider: LlmProviderType;
   apiKey: string;
   metadata?: Record<string, unknown>;
-}): Record<string, string> => {
+}): ProviderRuntimeEnv => {
   const envName = PROVIDER_API_KEY_ENV[input.provider];
-  const env: Record<string, string> = {
-    LITELLM_PROVIDER: input.provider,
+  const secretEnv: Record<string, string> = {
     [envName]: input.apiKey
+  };
+  const env: Record<string, string> = {
+    LITELLM_PROVIDER: input.provider
   };
 
   const defaultModel = metadataString(input.metadata, "defaultModel");
@@ -66,5 +75,5 @@ export const buildProviderRuntimeEnv = (input: {
     }
   }
 
-  return env;
+  return { env, secretEnv };
 };

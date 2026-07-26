@@ -46,9 +46,9 @@ export const AbsoluteLocalPathSchema = z
   });
 
 const StructuredEntryIdField = { id: IdSchema.nullable().optional() };
-const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), gpa: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional() });
-const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]) });
-const StructuredProjectInputSchema = z.object({ ...StructuredEntryIdField, name: z.string().min(1), summary: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]) });
+const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), gpa: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), details: z.array(z.string()).default([]) });
+const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]) });
+const StructuredProjectInputSchema = z.object({ ...StructuredEntryIdField, name: z.string().min(1), role: z.string().nullable().optional(), summary: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]), links: z.array(z.string()).default([]) });
 const StructuredSkillGroupInputSchema = z.object({ ...StructuredEntryIdField, label: z.string().min(1), skills: z.array(z.string()).default([]) });
 
 export type IpcContract<Request extends z.ZodTypeAny, Response extends z.ZodTypeAny> = {
@@ -95,6 +95,7 @@ export const IpcChannels = {
   runsPause: "runs:pause",
   runsResume: "runs:resume",
   runsCancel: "runs:cancel",
+  runsCancelPaused: "runs:cancel-paused",
   runsList: "runs:list",
   runsGetDetail: "runs:get-detail",
   runsListAnswers: "runs:list-answers",
@@ -284,6 +285,11 @@ export const IpcContracts = {
   runsPause: contract(IpcChannels.runsPause, z.object({ runId: IdSchema }).strict(), RunControlResponseSchema),
   runsResume: contract(IpcChannels.runsResume, z.object({ runId: IdSchema }).strict(), RunControlResponseSchema),
   runsCancel: contract(IpcChannels.runsCancel, z.object({ runId: IdSchema }).strict(), RunControlResponseSchema),
+  runsCancelPaused: contract(
+    IpcChannels.runsCancelPaused,
+    z.object({}).strict(),
+    z.object({ cancelled: z.number().int().nonnegative() })
+  ),
   runsList: contract(
     IpcChannels.runsList,
     PaginationSchema,
@@ -403,7 +409,7 @@ export const IpcContracts = {
   ),
   documentsListGenerated: contract(
     IpcChannels.documentsListGenerated,
-    z.object({ limit: z.number().int().min(1).max(200).default(50) }),
+    z.object({ limit: z.number().int().min(1).max(200).default(50) }).strict(),
     z.object({ items: z.array(GeneratedFileSchema) })
   )
 } as const;

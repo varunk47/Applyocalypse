@@ -19,7 +19,8 @@ export const registerProfileHandlers = (ctx: IpcHandlerContext): void => {
       provider: input.gmailOtpEnabled ? "gmail" : "local",
       keyName: input.gmailOtpEnabled ? "gmail_otp_password" : "application_password",
       encryptedReference,
-      redactedHint: secureSecretStore.redactedHint(input.applicationPassword)
+      // Passwords are short; a prefix/suffix hint would persist most of the secret in plaintext.
+      redactedHint: "[REDACTED]"
     });
     const gmailConnection = input.gmailOtpEnabled
       ? providerRepository.upsertConnection({

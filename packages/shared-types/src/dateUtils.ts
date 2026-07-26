@@ -14,6 +14,9 @@ export const parseDateMMDDYYYY = (mmddyyyy: string | null | undefined): string |
   if (!match) return null;
   const [, month, day, year] = match;
   if (!month || !day || !year) return null;
+  const monthNum = Number(month);
+  const dayNum = Number(day);
+  if (monthNum < 1 || monthNum > 12 || dayNum < 1 || dayNum > 31) return null;
   const m = month.padStart(2, "0");
   const d = day.padStart(2, "0");
   return `${year}-${m}-${d}`;

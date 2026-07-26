@@ -421,8 +421,106 @@ const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEv
   });
 };
 
+type PreloadedEventFileData = {
+  screenshot?: { payload: ReturnType<typeof ScreenshotPayloadSchema.parse>; localPath: string; sha256: string };
+  browserArtifact?: { payload: ReturnType<typeof BrowserArtifactPayloadSchema.parse>; localPath: string };
+  generatedFile?: {
+    payload: ReturnType<typeof GeneratedFilePayloadSchema.parse>;
+    localPath: string;
+    sizeBytes: number;
+    validationReport: Record<string, unknown> | null;
+  };
+  validationFailedReport?: Record<string, unknown> | null;
+  jdSourceRawText?: string;
+  tailoringPlan?: Record<string, unknown>;
+  uploadedLocalPath?: string | null;
+};
+
+/* All file I/O (existence checks, hashing, report/plan reads) runs here, BEFORE the
+ * write transaction opens: better-sqlite3 transactions are synchronous, so disk reads
+ * inside them would stall the entire main process while holding the write lock. */
+const preloadEventFileData = (event: PythonWorkerEvent, safeArtifactRoots: string[] | undefined): PreloadedEventFileData => {
+  const preloaded: PreloadedEventFileData = {};
+
+  if (event.event_type === "SCREENSHOT_CAPTURED") {
+    const payload = ScreenshotPayloadSchema.parse(event.payload);
+    const localPath = normalizeSafeArtifactPath(payload.local_path, safeArtifactRoots, "Screenshot");
+    preloaded.screenshot = { payload, localPath, sha256: assertArtifactFileAndHash(localPath, "Screenshot", payload.sha256) };
+  }
+
+  if (event.event_type === "BROWSER_ARTIFACT_CAPTURED") {
+    const payload = BrowserArtifactPayloadSchema.parse(event.payload);
+    const localPath = normalizeSafeArtifactPath(payload.local_path, safeArtifactRoots, "Browser artifact");
+    if (!existsSync(localPath)) {
+      throw new Error("Browser artifact path does not exist");
+    }
+    if (!statSync(localPath).isFile()) {
+      throw new Error("Browser artifact path must point to a file");
+    }
+    preloaded.browserArtifact = { payload, localPath };
+  }
+
+  if (isGeneratedFileEvent(event.event_type)) {
+    const payload = GeneratedFilePayloadSchema.parse(event.payload);
+    const localPath = normalizeSafeArtifactPath(payload.local_path, safeArtifactRoots, "Generated file");
+    if (!existsSync(localPath)) {
+      throw new Error("Generated file path does not exist");
+    }
+    const stats = statSync(localPath);
+    if (!stats.isFile()) {
+      throw new Error("Generated file path must point to a file");
+    }
+    preloaded.generatedFile = {
+      payload,
+      localPath,
+      sizeBytes: payload.size_bytes ?? stats.size,
+      validationReport: readValidationReport(payload.validation_report_path)
+    };
+  }
+
+  if (event.event_type === "VALIDATION_FAILED") {
+    preloaded.validationFailedReport = readValidationReport(event.payload["validation_report_path"]);
+  }
+
+  if (event.event_type === "JD_ANALYSIS_COMPLETED") {
+    const sourceTextPath = event.payload["source_text_path"];
+    if (typeof sourceTextPath === "string" && isAbsolute(sourceTextPath) && existsSync(sourceTextPath)) {
+      preloaded.jdSourceRawText = readFileSync(sourceTextPath, "utf8");
+    }
+  }
+
+  if (event.event_type === "USER_REVIEW_REQUIRED") {
+    const tailoringPlanPath = event.payload["tailoring_plan_path"];
+    if (typeof tailoringPlanPath === "string" && isAbsolute(tailoringPlanPath) && existsSync(tailoringPlanPath)) {
+      preloaded.tailoringPlan = JSON.parse(readFileSync(tailoringPlanPath, "utf8")) as Record<string, unknown>;
+    }
+  }
+
+  if (event.event_type === "FILE_UPLOADED") {
+    const uploadedLocalPath =
+      typeof event.payload["local_path"] === "string" ? normalizeSafeArtifactPath(event.payload["local_path"], safeArtifactRoots, "Uploaded file") : null;
+    if (uploadedLocalPath !== null && !existsSync(uploadedLocalPath)) {
+      throw new Error("Uploaded file path does not exist");
+    }
+    preloaded.uploadedLocalPath = uploadedLocalPath;
+  }
+
+  return preloaded;
+};
+
 export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots }: PythonEventIngestInput): void => {
   const event = PythonWorkerEventSchema.parse(JSON.parse(rawLine));
+  const preloaded = preloadEventFileData(event, safeArtifactRoots);
+  if (event.event_type === "JD_ANALYSIS_COMPLETED" && preloaded.jdSourceRawText !== undefined) {
+    // Read-only lookup before the write transaction opens: flag repostings and
+    // cross-listings of a JD already processed under another job target. Riding
+    // in the payload puts it in the run event feed, the persisted analysis, and
+    // the renderer broadcast without any schema changes.
+    const crossListings = new JobAnalysisRepository(db).findCrossListings(preloaded.jdSourceRawText, event.run_id);
+    if (crossListings.length > 0) {
+      event.payload["cross_listings"] = crossListings;
+    }
+  }
   const applyEvent = db.transaction(() => {
     const runRepository = new RunRepository(db);
     const eventId = randomUUID();
@@ -455,10 +553,8 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
     const materializedStepId = materializeApplicationStep(db, event);
     persistOtpSessionEvent(db, event);
 
-    if (event.event_type === "SCREENSHOT_CAPTURED") {
-      const screenshot = ScreenshotPayloadSchema.parse(event.payload);
-      const localPath = normalizeSafeArtifactPath(screenshot.local_path, safeArtifactRoots, "Screenshot");
-      const sha256 = assertArtifactFileAndHash(localPath, "Screenshot", screenshot.sha256);
+    if (preloaded.screenshot) {
+      const { payload: screenshot, localPath, sha256 } = preloaded.screenshot;
       db.prepare(
         `
         INSERT INTO screenshots (
@@ -492,16 +588,8 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
       });
     }
 
-    if (event.event_type === "BROWSER_ARTIFACT_CAPTURED") {
-      const artifact = BrowserArtifactPayloadSchema.parse(event.payload);
-      const localPath = normalizeSafeArtifactPath(artifact.local_path, safeArtifactRoots, "Browser artifact");
-      if (!existsSync(localPath)) {
-        throw new Error("Browser artifact path does not exist");
-      }
-      const stats = statSync(localPath);
-      if (!stats.isFile()) {
-        throw new Error("Browser artifact path must point to a file");
-      }
+    if (preloaded.browserArtifact) {
+      const { payload: artifact, localPath } = preloaded.browserArtifact;
       db.prepare(
         `
         INSERT INTO browser_artifacts (
@@ -521,16 +609,8 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
       });
     }
 
-    if (isGeneratedFileEvent(event.event_type)) {
-      const generatedFile = GeneratedFilePayloadSchema.parse(event.payload);
-      const localPath = normalizeSafeArtifactPath(generatedFile.local_path, safeArtifactRoots, "Generated file");
-      if (!existsSync(localPath)) {
-        throw new Error("Generated file path does not exist");
-      }
-      const stats = statSync(localPath);
-      if (!stats.isFile()) {
-        throw new Error("Generated file path must point to a file");
-      }
+    if (preloaded.generatedFile) {
+      const { payload: generatedFile, localPath } = preloaded.generatedFile;
       const runRow = db.prepare("SELECT profile_id, job_target_id, tailoring_run_id FROM application_runs WHERE id = ?").get(event.run_id) as
         | { profile_id: string; job_target_id: string; tailoring_run_id: string | null }
         | undefined;
@@ -538,6 +618,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
         throw new Error(`Application run not found: ${event.run_id}`);
       }
       const persistedFile = runRepository.addGeneratedFile({
+        applicationRunId: event.run_id,
         tailoringRunId: runRow.tailoring_run_id,
         profileId: runRow.profile_id,
         jobTargetId: runRow.job_target_id,
@@ -546,14 +627,14 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
         filename: generatedFile.filename,
         localPath,
         sha256: generatedFile.sha256,
-        sizeBytes: generatedFile.size_bytes ?? stats.size,
+        sizeBytes: preloaded.generatedFile.sizeBytes,
         uploadStatus: "NOT_UPLOADED",
         uploadedAt: null,
         retentionPolicy: generatedFile.retention_policy,
         deleteAfter: generatedFile.delete_after ?? null,
         deletedAt: null
       });
-      const validationReport = readValidationReport(generatedFile.validation_report_path);
+      const validationReport = preloaded.generatedFile.validationReport;
       if (validationReport) {
         persistValidationReport({
           db,
@@ -567,7 +648,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
     }
 
     if (event.event_type === "VALIDATION_FAILED") {
-      const report = readValidationReport(event.payload["validation_report_path"]) ?? event.payload;
+      const report = preloaded.validationFailedReport ?? event.payload;
       const sourceFormat = typeof event.payload["format"] === "string" ? event.payload["format"] : "MD";
       const sourceKind =
         sourceFormat === "PDF" ? "PDF_RENDERED" : ["TXT", "MD", "DOCX", "TEX"].includes(sourceFormat) ? (sourceFormat as "TXT" | "MD" | "DOCX" | "TEX") : "MD";
@@ -582,12 +663,11 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
     }
 
     if (event.event_type === "JD_ANALYSIS_COMPLETED") {
-      const sourceTextPath = event.payload["source_text_path"];
-      if (typeof sourceTextPath === "string" && isAbsolute(sourceTextPath) && existsSync(sourceTextPath)) {
+      if (preloaded.jdSourceRawText !== undefined) {
         const jdSource = event.payload["jd_source"] === "SCRAPED" ? "SCRAPED" : "USER_TEXT";
         new JobAnalysisRepository(db).persistFromWorkerEvent({
           applicationRunId: event.run_id,
-          rawText: readFileSync(sourceTextPath, "utf8"),
+          rawText: preloaded.jdSourceRawText,
           scrapedUrl: typeof event.payload["url"] === "string" ? event.payload["url"] : null,
           source: jdSource,
           analysis: event.payload,
@@ -630,9 +710,8 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
 
     if (event.event_type === "USER_REVIEW_REQUIRED" || event.event_type === "READY_TO_SUBMIT") {
       if (event.event_type === "USER_REVIEW_REQUIRED") {
-        const tailoringPlanPath = event.payload["tailoring_plan_path"];
-        if (typeof tailoringPlanPath === "string" && isAbsolute(tailoringPlanPath) && existsSync(tailoringPlanPath)) {
-          const plan = JSON.parse(readFileSync(tailoringPlanPath, "utf8")) as Record<string, unknown>;
+        if (preloaded.tailoringPlan) {
+          const plan = preloaded.tailoringPlan;
           new TailoringRunRepository(db).createFromPlan({
             applicationRunId: event.run_id,
             resumePlan: plan,
@@ -747,11 +826,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
 
     if (event.event_type === "FILE_UPLOADED") {
       const generatedFileId = typeof event.payload["generated_file_id"] === "string" ? event.payload["generated_file_id"] : null;
-      const localPath =
-        typeof event.payload["local_path"] === "string" ? normalizeSafeArtifactPath(event.payload["local_path"], safeArtifactRoots, "Uploaded file") : null;
-      if (localPath !== null && !existsSync(localPath)) {
-        throw new Error("Uploaded file path does not exist");
-      }
+      const localPath = preloaded.uploadedLocalPath ?? null;
       if (generatedFileId !== null || localPath !== null) {
         db.prepare(
           `
@@ -769,11 +844,17 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
               FROM application_runs
               WHERE application_runs.id = @runId
                 AND (
-                  generated_files.tailoring_run_id = application_runs.tailoring_run_id
+                  generated_files.application_run_id = application_runs.id
                   OR (
-                    generated_files.tailoring_run_id IS NULL
-                    AND generated_files.profile_id = application_runs.profile_id
-                    AND generated_files.job_target_id = application_runs.job_target_id
+                    generated_files.application_run_id IS NULL
+                    AND (
+                      generated_files.tailoring_run_id = application_runs.tailoring_run_id
+                      OR (
+                        generated_files.tailoring_run_id IS NULL
+                        AND generated_files.profile_id = application_runs.profile_id
+                        AND generated_files.job_target_id = application_runs.job_target_id
+                      )
+                    )
                   )
                 )
             )

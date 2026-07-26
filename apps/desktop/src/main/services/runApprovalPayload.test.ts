@@ -5,6 +5,7 @@ import { buildControlDocumentFiles } from "./runApprovalPayload";
 
 const generatedFile = (overrides: Partial<GeneratedFile> = {}): GeneratedFile => ({
   id: "generated-resume",
+  applicationRunId: null,
   tailoringRunId: null,
   profileId: "profile-1",
   jobTargetId: "job-1",
