@@ -175,6 +175,9 @@ def extract_artifact_text(path: Path) -> ArtifactTextExtraction:
 
 _BULLET_CHAR_LIMIT_DEFAULT = 240
 
+# Em dash plus visually-equivalent variants; en dash (U+2013) stays legal for date ranges.
+_EM_DASH_VARIANTS = "—―⸺⸻﹘"
+
 
 class TextArtifactValidator:
     def validate(
@@ -193,7 +196,7 @@ class TextArtifactValidator:
             if re.search(pattern, lower):
                 blocking.append(ValidationIssue("BANNED_WORD", f"Banned wording found: {word}", "blocking"))
 
-        em_dash_count = text.count("\u2014")
+        em_dash_count = sum(text.count(char) for char in _EM_DASH_VARIANTS)
         if em_dash_count:
             blocking.append(ValidationIssue("EM_DASH", f"Em dash count must be 0. Found {em_dash_count}.", "blocking"))
 

@@ -32,7 +32,9 @@ def is_otp_field(field: BrowserField) -> bool:
     return any(hint in label for hint in OTP_FIELD_HINTS)
 
 
-def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: dict[str, object]) -> ProposedApplicationAnswer:
+def proposed_answer_for_browser_field(
+    field: BrowserField, canonical_profile: dict[str, object], jd_text: str | None = None
+) -> ProposedApplicationAnswer:
     if is_password_field(field) and get_secret("APPLYO_APPLICATION_PASSWORD"):
         return ProposedApplicationAnswer(
             field_label=field.label,
@@ -47,6 +49,7 @@ def proposed_answer_for_browser_field(field: BrowserField, canonical_profile: di
         field_type=field.field_type,
         canonical_profile=canonical_profile,
         autofill_approved_defaults=os.getenv("APPLYO_AUTOFILL_APPROVED_DEFAULTS") == "1",
+        jd_text=jd_text,
     )
 
 

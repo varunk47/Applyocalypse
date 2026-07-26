@@ -107,6 +107,49 @@ def mutate_docx_paragraphs(source_docx: Path, output_docx: Path, mutations: list
     return output_docx
 
 
+_BULLET_GLYPHS = "•◦‣▪·-–*"
+
+
+def collect_tailorable_bullets(document: Any) -> list[tuple[int, str]]:
+    """Body paragraphs that look like substantive resume bullets (list style or a bullet
+    glyph), returned as (paragraph_index, text). Indices are stable against a fresh
+    re-open of the same file, so they can drive ``mutate_docx_paragraphs`` directly."""
+    bullets: list[tuple[int, str]] = []
+    for index, paragraph in enumerate(document.paragraphs):
+        text = paragraph.text.strip()
+        if len(text) < 25:
+            continue
+        try:
+            style_name = (paragraph.style.name or "").lower()
+        except Exception:  # noqa: BLE001 - a missing style must not abort detection
+            style_name = ""
+        if "list" in style_name or text[:1] in _BULLET_GLYPHS:
+            bullets.append((index, text))
+    return bullets
+
+
+def tailor_master_docx_in_place(
+    master_docx: Path, output_docx: Path, tailored_by_index: dict[int, str]
+) -> tuple[Path, int]:
+    """Write tailored bullet text back into the master DOCX in place, preserving every
+    paragraph's font/size/bullet/indent (only run text changes). Copies the master
+    verbatim when there is nothing to change, so the user's exact layout is always kept."""
+    mutations = [
+        DocxParagraphMutation(paragraph_index=index, replacement_text=text)
+        for index, text in sorted(tailored_by_index.items())
+    ]
+    if not mutations:
+        try:
+            from docx import Document  # type: ignore
+        except ImportError as exc:
+            raise RuntimeError("python-docx is required for DOCX mutation") from exc
+        output_docx.parent.mkdir(parents=True, exist_ok=True)
+        Document(str(master_docx)).save(str(output_docx))
+        return output_docx, 0
+    mutate_docx_paragraphs(master_docx, output_docx, mutations)
+    return output_docx, len(mutations)
+
+
 def mutate_docx_placeholders(source_docx: Path, output_docx: Path, replacements: dict[str, str]) -> tuple[Path, list[str]]:
     if source_docx.suffix.lower() != ".docx":
         raise ValueError("source_docx must be a DOCX file")

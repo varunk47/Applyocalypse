@@ -126,12 +126,20 @@ DOM_FIELD_DISCOVERY_SCRIPT = r"""
       || element.getAttribute('name')
       || element.getAttribute('placeholder')
       || id
-      || 'Unlabeled field';
+      || '';
   };
   for (const element of candidates) {
     const type = fieldType(element);
-    if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) continue;
+    if (['hidden', 'submit', 'button', 'image', 'reset', 'search'].includes(type)) continue;
+    // Skip non-interactable controls: the display:none g-recaptcha-response textarea,
+    // collapsed/conditional fields, and any bot-challenge field the user cannot fill.
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
+    const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
+    if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
     const label = textForLabel(element);
+    if (!label) continue;
     const id = element.getAttribute('id');
     const name = element.getAttribute('name');
     const selector = selectorFor(element, type);
@@ -164,11 +172,47 @@ DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
   const text = (document.body && document.body.innerText ? document.body.innerText : '').toLowerCase();
   const html = document.documentElement ? document.documentElement.innerHTML.toLowerCase() : '';
   const blockers = [];
-  const hasCaptchaWidget = Boolean(
-    document.querySelector('[class*="captcha" i], [id*="captcha" i], iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i]')
-  );
-  if (hasCaptchaWidget || text.includes('captcha') || html.includes('recaptcha') || html.includes('hcaptcha')) {
-    blockers.push({ blocker_type: 'CAPTCHA', message: 'CAPTCHA challenge detected', confidence: hasCaptchaWidget ? 0.92 : 0.72 });
+  const isChallengeVisible = (element) => {
+    if (!element) { return false; }
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) { return false; }
+    const style = window.getComputedStyle(element);
+    return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || '1') > 0.1;
+  };
+  // Only a VISIBLE, interactive challenge is a real blocker. An invisible reCAPTCHA v3
+  // badge/script is embedded on most modern application forms, requires no interaction,
+  // and must never pause the run. Matching raw page text/HTML (the old behaviour) flagged
+  // every such form as a CAPTCHA and hung the run in an endless pause/resume loop.
+  const recaptchaChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="recaptcha/api2/anchor" i], iframe[src*="recaptcha/api2/bframe" i], div.g-recaptcha')
+  ).some((element) => {
+    if (element.closest && element.closest('.grecaptcha-badge')) { return false; }
+    const src = (element.getAttribute('src') || '').toLowerCase();
+    if (src.indexOf('size=invisible') !== -1) { return false; }
+    if ((element.getAttribute('data-size') || '').toLowerCase() === 'invisible') { return false; }
+    return isChallengeVisible(element);
+  });
+  const hcaptchaChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="hcaptcha.com" i], div.h-captcha')
+  ).some(isChallengeVisible);
+  const turnstileChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="challenges.cloudflare.com" i], div.cf-turnstile')
+  ).some(isChallengeVisible);
+  const datadomeChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="captcha-delivery.com" i]')
+  ).some(isChallengeVisible);
+  const docTitle = (document.title || '').toLowerCase();
+  const cloudflareInterstitial =
+    Boolean(document.querySelector('#challenge-running, #cf-challenge-running, #challenge-stage, #challenge-form'))
+    || docTitle === 'just a moment...'
+    || (docTitle.indexOf('attention required') !== -1 && html.includes('cloudflare'));
+  let captchaVendor = null;
+  if (recaptchaChallenge) { captchaVendor = 'recaptcha'; }
+  else if (hcaptchaChallenge) { captchaVendor = 'hcaptcha'; }
+  else if (turnstileChallenge || cloudflareInterstitial) { captchaVendor = 'cloudflare'; }
+  else if (datadomeChallenge) { captchaVendor = 'datadome'; }
+  if (captchaVendor) {
+    blockers.push({ blocker_type: 'CAPTCHA', message: 'Interactive CAPTCHA or bot challenge detected', confidence: 0.95, metadata: { vendor: captchaVendor } });
   }
   if (text.includes('multi-factor') || text.includes('multifactor') || text.includes('authenticator app') || text.includes('mfa')) {
     blockers.push({ blocker_type: 'MFA', message: 'Multi-factor authentication detected', confidence: 0.82 });

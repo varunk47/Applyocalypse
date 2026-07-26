@@ -174,8 +174,25 @@ def choose_entry_action_for_fixture(analysis: PortalReplayAnalysis):
 def _blockers_from_replay_text(text: str, fields: tuple[BrowserField, ...]) -> list[BrowserBlocker]:
     normalized = " ".join(text.lower().split())
     blockers: list[BrowserBlocker] = []
-    if "captcha" in normalized or "recaptcha" in normalized or "hcaptcha" in normalized:
-        blockers.append(BrowserBlocker("CAPTCHA", "CAPTCHA challenge detected", 0.72))
+    # Only an ACTIVE challenge blocks the run. A passive "protected by reCAPTCHA"
+    # notice (present on most application forms) must not pause automation — this
+    # mirrors the visibility-gated detection in DOM_BLOCKER_DISCOVERY_SCRIPT.
+    captcha_challenge_phrases = (
+        "i'm not a robot",
+        "i am not a robot",
+        "verify you are human",
+        "verify you're human",
+        "are you human",
+        "select all images",
+        "select each image",
+        "complete the captcha",
+        "solve the captcha",
+        "checking your browser before",
+        "just a moment",
+        "press and hold",
+    )
+    if any(phrase in normalized for phrase in captcha_challenge_phrases):
+        blockers.append(BrowserBlocker("CAPTCHA", "Interactive CAPTCHA or bot challenge detected", 0.9))
     if "multi-factor" in normalized or "multifactor" in normalized or "authenticator app" in normalized or " mfa " in f" {normalized} ":
         blockers.append(BrowserBlocker("MFA", "Multi-factor authentication detected", 0.82))
     if "one-time code" in normalized or "one time code" in normalized or "verification code" in normalized or " otp " in f" {normalized} ":

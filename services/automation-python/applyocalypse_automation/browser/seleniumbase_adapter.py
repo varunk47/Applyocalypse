@@ -39,6 +39,7 @@ from .field_detection import (
     parse_click_by_text_result,
     parse_final_submit_result,
 )
+from .page_readiness import PAGE_TEXT_POLL_INTERVAL_S, PAGE_TEXT_TIMEOUT_S, wait_for_page_text
 
 _CLOUDFLARE_BLOCKER_TYPE = "CLOUDFLARE_CHALLENGE"
 
@@ -110,7 +111,23 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
             await asyncio.to_thread(self._driver.get, url)
         except Exception as exc:
             return BrowserStepResult(False, "page navigation failed", {"url": url, "error": str(exc)})
-        return BrowserStepResult(True, "page navigated", {"url": url})
+        # Same readiness poll as the nodriver/playwright adapters; without it this
+        # fallback engine scraped SPA shells before real content had rendered.
+        readiness = await wait_for_page_text(
+            self._probe_visible_text_length,
+            timeout_s=PAGE_TEXT_TIMEOUT_S,
+            poll_interval_s=PAGE_TEXT_POLL_INTERVAL_S,
+        )
+        return BrowserStepResult(True, "page navigated", {"url": url, "page_text": readiness})
+
+    async def _probe_visible_text_length(self) -> int:
+        if self._driver is None:
+            return 0
+        try:
+            raw_result = await self._evaluate(DOM_VISIBLE_TEXT_SCRIPT)
+        except Exception:
+            return 0
+        return len(str(raw_result or "").strip())
 
     async def detect_fields(self) -> list[BrowserField]:
         if self._driver is None:

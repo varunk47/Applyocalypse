@@ -66,6 +66,11 @@ class NodriverBrowserAdapter(BrowserAdapter):
         except ValueError:
             return 0
 
+    async def bring_to_front(self) -> None:
+        """Raise the browser window so the user can act on a challenge (best-effort)."""
+        if self._page is not None:
+            await self._page.bring_to_front()
+
     async def detect_fields(self) -> list[BrowserField]:
         if self._page is None:
             return []

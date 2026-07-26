@@ -220,3 +220,70 @@ def test_sexual_orientation_list_joined_as_comma_separated() -> None:
     )
     assert answer.proposed_value == "Heterosexual, Prefer not to say"
     assert answer.requires_review is True
+
+
+@pytest.mark.parametrize(
+    ("label", "expected_value"),
+    [
+        ("How many years of experience do you have with Python?", None),
+        ("What is your expected salary?", None),
+        ("What are your salary requirements?", None),
+        ("Are you willing to relocate to Austin?", None),
+        ("Do you hold an active security clearance?", "N/A"),
+        ("What is your notice period?", "0"),
+        ("What is the highest level of education you have completed?", None),
+    ],
+)
+def test_knockout_questions_always_require_review(label: str, expected_value: str | None) -> None:
+    answer = propose_answer_for_detected_field(
+        field_label=label,
+        field_type="text",
+        canonical_profile=PROFILE,
+    )
+
+    assert answer.requires_review is True, f"Label '{label}': knockout must require review"
+    assert answer.proposed_value == expected_value, f"Label '{label}': default mismatch"
+
+
+def test_expected_salary_defaults_to_jd_range_midpoint() -> None:
+    jd = "Benefits: health, dental. The salary range for this role is $120,000 - $150,000 per year."
+    answer = propose_answer_for_detected_field(
+        field_label="What is your expected salary?",
+        field_type="text",
+        canonical_profile=PROFILE,
+        jd_text=jd,
+    )
+
+    assert answer.proposed_value == "$135,000"
+    assert answer.source == "JD_ANALYSIS"
+    assert answer.requires_review is True
+
+
+def test_salary_midpoint_ignores_year_ranges_without_salary_context() -> None:
+    jd = "You will maintain systems built between 2019 - 2023 across the platform."
+    answer = propose_answer_for_detected_field(
+        field_label="What is your expected salary?",
+        field_type="text",
+        canonical_profile=PROFILE,
+        jd_text=jd,
+    )
+
+    assert answer.proposed_value is None
+
+
+def test_highest_education_level_comes_from_resume() -> None:
+    profile = {
+        **PROFILE,
+        "education": [
+            {"institution": "State College", "degree": "B.Sc. Computer Science"},
+            {"institution": "Tech University", "degree": "Master of Science in Engineering"},
+        ],
+    }
+    answer = propose_answer_for_detected_field(
+        field_label="What is the highest level of education you have completed?",
+        field_type="select",
+        canonical_profile=profile,
+    )
+
+    assert answer.proposed_value == "Master's degree"
+    assert answer.requires_review is True

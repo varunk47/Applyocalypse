@@ -227,7 +227,7 @@ def test_wait_for_review_resume_reports_unsupported_control_commands(tmp_path, c
 def test_runtime_control_cancel_emits_failed_event(tmp_path, capsys):
     (tmp_path / "control.json").write_text(json.dumps({"command": "CANCEL", "reason": "local_user_cancel"}), encoding="utf-8")
 
-    should_stop = handle_runtime_control(tmp_path, "run-control", context="field application")
+    should_stop = asyncio.run(handle_runtime_control(tmp_path, "run-control", context="field application"))
 
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert should_stop is True
@@ -245,7 +245,7 @@ def test_runtime_control_pause_waits_for_fresh_resume(tmp_path, capsys):
 
     resume_thread = threading.Thread(target=write_resume)
     resume_thread.start()
-    should_stop = handle_runtime_control(tmp_path, "run-control", context="page navigation")
+    should_stop = asyncio.run(handle_runtime_control(tmp_path, "run-control", context="page navigation"))
     resume_thread.join(timeout=2)
 
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -1132,3 +1132,100 @@ def test_required_document_missing_payload_includes_existing_file_count():
     payload = required_document_missing_payload(field, generated_files=[])
 
     assert payload["existing_file_count"] == 2
+
+
+def test_pause_for_blockers_stops_after_max_cycles_when_blocker_persists(tmp_path, capsys):
+    """A detection that never clears must degrade to a terminal review, never loop forever."""
+
+    class FakeAdapter:
+        async def detect_blockers(self):
+            return [BrowserBlocker(blocker_type="CAPTCHA", message="CAPTCHA challenge detected", confidence=0.92)]
+
+    stop_writer = threading.Event()
+
+    def keep_resuming() -> None:
+        while not stop_writer.is_set():
+            control_path = tmp_path / "control.json"
+            if not control_path.exists():
+                control_path.write_text(json.dumps({"command": "RESUME", "reason": "captcha_completed"}), encoding="utf-8")
+            time.sleep(0.02)
+
+    writer = threading.Thread(target=keep_resuming, daemon=True)
+    writer.start()
+    try:
+        should_stop = asyncio.run(
+            pause_for_blockers(
+                FakeAdapter(),
+                tmp_path,
+                "run-stuck",
+                [BrowserBlocker(blocker_type="CAPTCHA", message="CAPTCHA challenge detected", confidence=0.92)],
+                context="page review",
+            )
+        )
+    finally:
+        stop_writer.set()
+        writer.join(timeout=2)
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    event_types = [event["event_type"] for event in events]
+    assert should_stop is True
+    assert event_types.count("PAUSED") == 3
+    assert event_types[-1] == "FAILED"
+    assert events[-1]["machine_state"]["reason"] == "CAPTCHA_UNRESOLVED"
+    assert events[-1]["payload"]["code"] == "CAPTCHA_UNRESOLVED"
+
+
+def test_pause_for_blockers_ignores_ambiguous_question_and_continues(tmp_path, capsys):
+    """Sensitive/EEO questions are reviewed per-field, not by halting the whole run."""
+
+    class FakeAdapter:
+        async def detect_blockers(self):
+            return []
+
+    should_stop = asyncio.run(
+        pause_for_blockers(
+            FakeAdapter(),
+            tmp_path,
+            "run-eeo",
+            [BrowserBlocker(blocker_type="AMBIGUOUS_QUESTION", message="Sensitive question detected", confidence=0.86)],
+            context="page review",
+        )
+    )
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert should_stop is False
+    assert events == []
+    assert not (tmp_path / "control.json").exists()
+
+
+def test_pause_for_blockers_still_halts_on_real_blocker_mixed_with_ambiguous(tmp_path, capsys):
+    """A genuine gate (CAPTCHA) mixed with a soft AMBIGUOUS_QUESTION still pauses."""
+
+    class FakeAdapter:
+        async def detect_blockers(self):
+            return []
+
+    def write_resume() -> None:
+        time.sleep(0.05)
+        (tmp_path / "control.json").write_text(json.dumps({"command": "RESUME", "reason": "captcha_done"}), encoding="utf-8")
+
+    resume_thread = threading.Thread(target=write_resume)
+    resume_thread.start()
+    should_stop = asyncio.run(
+        pause_for_blockers(
+            FakeAdapter(),
+            tmp_path,
+            "run-mixed",
+            [
+                BrowserBlocker(blocker_type="AMBIGUOUS_QUESTION", message="Sensitive question detected", confidence=0.86),
+                BrowserBlocker(blocker_type="CAPTCHA", message="CAPTCHA challenge detected", confidence=0.95),
+            ],
+            context="page review",
+        )
+    )
+    resume_thread.join(timeout=2)
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert should_stop is False
+    assert events[0]["event_type"] == "PAUSED"
+    assert events[0]["machine_state"]["reason"] == "CAPTCHA_DETECTED"

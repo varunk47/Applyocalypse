@@ -93,6 +93,7 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
             notes=("Unknown portal. Detect fields only after user review.",),
         )
 
+    quirk_notes = ATS_PORTAL_QUIRKS.get(portal.portal_id, ())
     if portal.portal_id in ATS_ENTRY_ACTIONS:
         return PortalWorkflow(
             portal_id=portal.portal_id,
@@ -117,6 +118,7 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
             notes=(
                 "Click only known apply/start actions.",
                 "Pause on login, CAPTCHA, MFA, OTP, ambiguous questions, and final submit.",
+                *quirk_notes,
             ),
         )
 
@@ -142,8 +144,33 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
         notes=(
             "Job board flow may redirect to ATS or require login.",
             "Use Nodriver by default for high-stealth portals and pause on uncertainty.",
+            "After the apply click, re-read the URL; fill tactics must follow the destination ATS, not the job board.",
+            *quirk_notes,
         ),
     )
+
+
+# Field-tested ATS interaction quirks, adapted from santifer/career-ops (MIT).
+# Surfaced as workflow notes in the run console so both the automation guidance
+# and the human reviewer know each portal's failure modes.
+ATS_PORTAL_QUIRKS: dict[str, tuple[str, ...]] = {
+    "workday": (
+        "Workday React fields ignore set-value; fill with real keystrokes.",
+        "Yes/No dropdowns reorder per question; select by type-ahead text, never by position.",
+    ),
+    "lever": (
+        "Lever hCaptcha intercepts checkbox/radio clicks; fill text fields only and leave checkboxes and the captcha to the user.",
+    ),
+    "workable": (
+        "Workable SPA re-renders invalidate element references; re-detect fields before every fill.",
+    ),
+    "ashby": (
+        "Ashby dedupes applications by email per company; a repeat application needs an email alias.",
+    ),
+    "greenhouse": (
+        "After the apply click, re-check the URL: boards often hand off to a different ATS host.",
+    ),
+}
 
 
 def workflow_for_url(url: str) -> PortalWorkflow:

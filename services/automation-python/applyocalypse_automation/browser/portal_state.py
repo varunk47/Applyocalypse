@@ -98,7 +98,10 @@ def classify_portal_page_state(
         + (0.2 if field_count is not None and field_count >= 3 else 0)
         + min(0.2, len(matched_terms) * 0.05),
     )
-    requires_review = workflow.requires_external_redirect_watch and not host_changed and not likely_application_surface
+    landed_on_unrecognized_host = host_changed and current_portal_id is None
+    requires_review = workflow.requires_external_redirect_watch and (
+        landed_on_unrecognized_host or (not host_changed and not likely_application_surface)
+    )
 
     return PortalPageState(
         original_url=original_url,

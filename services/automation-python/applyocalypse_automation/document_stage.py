@@ -555,17 +555,36 @@ def generate_application_documents(
                             },
                         ).emit()
             else:
-                # Anchor-free fallback: build a fresh DOCX from canonical profile
+                # No anchors in the master: preserve the user's EXACT formatting by editing
+                # the master DOCX in place (only bullet text is rewritten) instead of
+                # regenerating a plain document from the canonical profile.
                 output_path.unlink(missing_ok=True)
                 try:
-                    from .documents.font_detection import detect_resume_font_size
-                    fallback_font_size = detect_resume_font_size(master_path)
-                    build_resume_docx(
-                        canonical_profile=canonical_profile,
-                        tailoring_plan=tailoring_plan,
-                        output_path=output_path,
-                        font_size=fallback_font_size,
-                    )
+                    from docx import Document as _MasterDocument  # type: ignore
+                    from .documents.docx_mutation import collect_tailorable_bullets, tailor_master_docx_in_place
+                    from .resume_tailoring import tailor_bullets_1to1
+
+                    inplace_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
+                    master_bullets = collect_tailorable_bullets(_MasterDocument(str(master_path)))
+                    tailored_by_index: dict[int, str] = {}
+                    if master_bullets and inplace_model and job_text:
+                        rewritten_bullets = asyncio.run(
+                            tailor_bullets_1to1(
+                                [text for _, text in master_bullets],
+                                job_description=job_text,
+                                llm_client=LiteLlmClient(model=inplace_model),
+                            )
+                        )
+                        if rewritten_bullets and len(rewritten_bullets) == len(master_bullets):
+                            for (index, original), rewritten in zip(master_bullets, rewritten_bullets):
+                                rewritten = rewritten.strip()
+                                if (
+                                    rewritten
+                                    and rewritten != original
+                                    and TextArtifactValidator().validate(rewritten, artifact_kind="resume").passed
+                                ):
+                                    tailored_by_index[index] = rewritten
+                    _, bullets_tailored = tailor_master_docx_in_place(master_path, output_path, tailored_by_index)
                     fallback_artifact = metadata_for_existing_file(
                         path=output_path,
                         file_kind="RESUME",
@@ -576,9 +595,18 @@ def generate_application_documents(
                         event_type=EventType.RESUME_RENDERED,
                         run_id=run_id,
                         step_id=None,
-                        severity=Severity.WARN,
-                        message="Anchor-free DOCX fallback generated from canonical profile (no master anchors found)",
-                        machine_state={"source_format": "DOCX", "fallback": True, "review_only": True},
+                        severity=Severity.INFO,
+                        message=(
+                            f"Tailored {bullets_tailored} bullet(s) in place, keeping your original resume formatting"
+                            if bullets_tailored
+                            else "Kept your original resume formatting (no bullets needed changes)"
+                        ),
+                        machine_state={
+                            "source_format": "DOCX",
+                            "in_place": True,
+                            "bullets_tailored": bullets_tailored,
+                            "review_only": True,
+                        },
                         ui_state={"current_step": "document_review", "requires_user_review": True},
                         payload=fallback_artifact.to_payload(),
                     ).emit()
@@ -600,7 +628,7 @@ def generate_application_documents(
                             ui_state={"current_step": "document_review", "requires_user_review": True},
                             payload=fallback_pdf_artifact.to_payload(),
                         ).emit()
-                except Exception as _fallback_exc:
+                except Exception as fallback_exc:
                     WorkerEvent(
                         event_type=EventType.USER_REVIEW_REQUIRED,
                         run_id=run_id,
@@ -609,7 +637,11 @@ def generate_application_documents(
                         message="Verified DOCX master has no explicit Applyocalypse anchors for safe mutation",
                         machine_state={"source_format": "DOCX", "source_master_path": str(master_path)},
                         ui_state={"requires_user_review": True},
-                        payload={"code": "MISSING_DOCX_ANCHORS", "source_master_path": str(master_path)},
+                        payload={
+                            "code": "MISSING_DOCX_ANCHORS",
+                            "source_master_path": str(master_path),
+                            "error": f"{type(fallback_exc).__name__}: {fallback_exc}",
+                        },
                     ).emit()
         elif master_format == "TEX":
             output_path = choose_collision_safe_path(

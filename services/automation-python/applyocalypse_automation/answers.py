@@ -1,7 +1,97 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
+
+# Standard "highest level of education" ladder; matched against resume degree text.
+_EDUCATION_LEVELS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
+    (5, "Doctorate", ("phd", "ph.d", "doctor", "dphil")),
+    (4, "Master's degree", ("master", "msc", "m.sc", "m.s.", "mba", "meng", "m.eng", "m.a.")),
+    (3, "Bachelor's degree", ("bachelor", "bsc", "b.sc", "b.s.", "btech", "b.tech", "beng", "b.eng", "b.a.")),
+    (2, "Associate degree", ("associate",)),
+    (1, "High school or equivalent", ("high school", "ged", "secondary school")),
+)
+
+_SALARY_CONTEXT_HINTS = ("salary", "compensation", "pay", "remuneration", "annual", "per year", "base")
+
+# "$80,000 - $100,000", "80k-100k", "80.000 to 100.000" (bare 4-digit years never match).
+_SALARY_RANGE_PATTERN = re.compile(
+    r"(?P<cur>[$€£])?\s*(?P<min>\d{1,3}(?:[,.]\d{3})+|\d{2,3})\s*(?P<mink>k)?\s*"
+    r"(?:-|–|—|to)\s*"
+    r"(?P<cur2>[$€£])?\s*(?P<max>\d{1,3}(?:[,.]\d{3})+|\d{2,3})\s*(?P<maxk>k)?",
+    re.IGNORECASE,
+)
+
+
+def _salary_number(raw: str, k_scale: bool) -> int | None:
+    digits = re.sub(r"[,.]", "", raw)
+    if not digits.isdigit():
+        return None
+    value = int(digits)
+    if k_scale and value < 1000:
+        value *= 1000
+    return value
+
+
+def jd_salary_midpoint(jd_text: str | None) -> str | None:
+    """Midpoint of the salary range advertised in the JD, formatted for a form answer."""
+    if not jd_text:
+        return None
+    for match in _SALARY_RANGE_PATTERN.finditer(jd_text):
+        has_currency = bool(match.group("cur") or match.group("cur2"))
+        context = jd_text[max(0, match.start() - 80) : match.start()].lower()
+        if not has_currency and not any(hint in context for hint in _SALARY_CONTEXT_HINTS):
+            continue
+        k_scale = bool(match.group("mink") or match.group("maxk"))
+        low = _salary_number(match.group("min"), k_scale)
+        high = _salary_number(match.group("max"), k_scale)
+        if low is None or high is None or not 10000 <= low <= high <= 2000000:
+            continue
+        currency = match.group("cur") or match.group("cur2") or ""
+        return f"{currency}{round((low + high) / 2):,}"
+    return None
+
+
+def _highest_education_level(canonical_profile: dict[str, Any]) -> str | None:
+    entries = canonical_profile.get("education")
+    if not isinstance(entries, list):
+        return None
+    best_rank = 0
+    best_label: str | None = None
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        degree = str(entry.get("degree") or "").lower()
+        for rank, level_label, hints in _EDUCATION_LEVELS:
+            if rank > best_rank and any(hint in degree for hint in hints):
+                best_rank = rank
+                best_label = level_label
+                break
+    return best_label
+
+
+# Screening questions whose wrong answer commonly hard-rejects the application
+# (knockout questions). Adapted from santifer/career-ops (MIT). Visa/sponsorship/
+# work-authorization knockouts are handled by the dedicated work-auth branches.
+_KNOCKOUT_KEYWORDS: tuple[str, ...] = (
+    "years of experience",
+    "how many years",
+    "minimum experience",
+    "salary expectation",
+    "expected salary",
+    "desired salary",
+    "salary requirement",
+    "compensation expectation",
+    "willing to relocate",
+    "relocation",
+    "security clearance",
+    "highest level of education",
+    "degree required",
+    "notice period",
+    "driver's license",
+    "driving license",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,6 +207,7 @@ def propose_answer_for_detected_field(
     field_type: str,
     canonical_profile: dict[str, Any],
     autofill_approved_defaults: bool = False,
+    jd_text: str | None = None,
 ) -> ProposedApplicationAnswer:
     profile = _profile(canonical_profile)
     label = field_label.lower()
@@ -187,6 +278,32 @@ def propose_answer_for_detected_field(
         return ProposedApplicationAnswer(
             field_label=field_label, field_type=field_type,
             proposed_value="No", confidence=0.90, source="PROFILE", requires_review=True,
+        )
+
+    # ── Knockout-class screening questions — proposed but always review-gated ──
+    # A wrong answer here commonly triggers immediate automatic ATS rejection,
+    # so a sensible default is proposed where one exists but is never auto-filled.
+    if any(kw in label for kw in _KNOCKOUT_KEYWORDS):
+        knockout_value: str | None = None
+        knockout_source = "UNKNOWN"
+        if any(kw in label for kw in ("salary", "compensation")):
+            knockout_value = jd_salary_midpoint(jd_text)
+            knockout_source = "JD_ANALYSIS" if knockout_value else "UNKNOWN"
+        elif "security clearance" in label:
+            knockout_value = "N/A"
+            knockout_source = "PROFILE"
+        elif "notice period" in label:
+            knockout_value = "0"
+            knockout_source = "PROFILE"
+        elif any(kw in label for kw in ("highest level of education", "degree required")):
+            knockout_value = _highest_education_level(canonical_profile)
+            knockout_source = "PROFILE" if knockout_value else "UNKNOWN"
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type,
+            proposed_value=knockout_value,
+            confidence=0.55 if knockout_value else 0.2,
+            source=knockout_source,
+            requires_review=True,
         )
 
     # ── Standard profile candidates ────────────────────────────────────────────
