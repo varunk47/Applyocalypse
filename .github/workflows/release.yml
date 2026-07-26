@@ -72,7 +72,9 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
         shell: pwsh
         run: |
-          $files = Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object { $_.FullName }
-          gh release create "${{ github.ref_name }}" @files --draft --title "Applyocalypse ${{ github.ref_name }}" --generate-notes
+          # @() forces array context: a single match would otherwise bind as [string] and splat char-by-char.
+          $files = @(Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object { $_.FullName })
+          gh release create "$env:RELEASE_TAG" @files --draft --title "Applyocalypse $env:RELEASE_TAG" --generate-notes

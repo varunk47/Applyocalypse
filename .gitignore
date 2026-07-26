@@ -24,3 +24,8 @@ Applyocalypse UI Design-handoff/
 
 # Design exports (local downloads, not source)
 *Applyocalypse UI Design*.zip
+
+# Local tooling state (Claude Code, tokensave, native rebuild temp)
+.claude/
+.tokensave/
+.tmp-electron-rebuild/
