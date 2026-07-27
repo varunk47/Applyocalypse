@@ -339,7 +339,7 @@ def test_pause_for_blockers_fills_gmail_otp_without_logging_code(tmp_path, capsy
     monkeypatch.setattr(
         runner_module,
         "read_gmail_otp_from_env",
-        lambda: GmailOtpResult(True, "493821", "Gmail OTP code extracted", metadata={"message_id_sha256": "hash"}),
+        lambda **_: GmailOtpResult(True, "493821", "Gmail OTP code extracted", metadata={"message_id_sha256": "hash"}),
     )
 
     should_stop = asyncio.run(

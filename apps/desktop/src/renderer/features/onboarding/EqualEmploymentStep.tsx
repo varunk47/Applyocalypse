@@ -1,3 +1,4 @@
+import { Show } from 'solid-js'
 import { ChevronRight } from 'lucide-solid'
 
 export type EeoFields = {
@@ -16,7 +17,8 @@ export type EeoFields = {
 type Props = {
   fields: EeoFields
   setField: <K extends keyof EeoFields>(key: K, value: EeoFields[K]) => void
-  onNext: () => void
+  /** Omitted when the fields are embedded in a larger screen that owns the advance. */
+  onNext?: () => void
 }
 
 const YesNo = (props: { label: string; value: string | null; onChange: (v: string) => void }) => (
@@ -48,10 +50,12 @@ export function EqualEmploymentStep(props: Props) {
 
   return (
     <div>
-      <h2 style={{ 'margin-bottom': '0.5rem' }}>Equal employment defaults</h2>
-      <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-        These are your default answers for EEO questions on job portals. You will always review them before submission.
-      </p>
+      <Show when={props.onNext}>
+        <h2 style={{ 'margin-bottom': '0.5rem' }}>Equal employment defaults</h2>
+        <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
+          These are your default answers for EEO questions on job portals. You will always review them before submission.
+        </p>
+      </Show>
 
       <YesNo
         label="Authorized to work in the US?"
@@ -102,10 +106,14 @@ export function EqualEmploymentStep(props: Props) {
         onChange={(v) => set('eeoLgbtq')(v || null)}
       />
 
-      <button class="primary-action" type="button" style={{ 'margin-top': '1.5rem' }} onClick={props.onNext}>
-        <ChevronRight size={17} aria-hidden="true" />
-        <span>Continue</span>
-      </button>
+      <Show when={props.onNext}>
+        {(next) => (
+          <button class="primary-action" type="button" style={{ 'margin-top': '1.5rem' }} onClick={next()}>
+            <ChevronRight size={17} aria-hidden="true" />
+            <span>Continue</span>
+          </button>
+        )}
+      </Show>
     </div>
   )
 }

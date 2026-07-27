@@ -9,6 +9,7 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
@@ -24,7 +25,7 @@ from .field_resolution import (
     proposed_answer_for_browser_field,
     resolve_secret_reviewed_value,
 )
-from .otp import read_gmail_otp_from_env
+from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
 from .secret_env import apply_provider_secrets_to_env
 
 
@@ -384,45 +385,183 @@ async def apply_otp_code_to_detected_field(adapter: object, run_id: str, code: s
     return True
 
 
-async def try_resolve_otp_with_gmail(adapter: object, run_id: str, *, context: str) -> bool:
-    if os.getenv("APPLYO_GMAIL_OTP_ENABLED") != "1":
-        return False
+def gmail_inbox_reader_configured() -> bool:
+    """True when either Gmail path is wired up for this run.
 
+    The OAuth flow only ever sets the token path, so checking the legacy
+    app-password flag alone would leave OAuth users with no automatic retrieval.
+    """
+    return bool(os.getenv("APPLYO_GMAIL_OAUTH_TOKEN_PATH")) or os.getenv("APPLYO_GMAIL_OTP_ENABLED") == "1"
+
+
+# NAVIGATED: a code was applied or an approved link was opened, so page state
+#   must be rechecked.
+# CANCELLED: the user cancelled at the approval gate; the run is over.
+# SKIPPED: nothing usable was found, so fall through to the normal manual pause.
+EmailVerificationOutcome = Literal["NAVIGATED", "CANCELLED", "SKIPPED"]
+
+# Blockers the inbox can answer, either with a code or with a confirmation link.
+# LOGIN is excluded: that is a password prompt, which is the user's alone.
+INBOX_RESOLVABLE_BLOCKER_TYPES = frozenset({"OTP", "MFA"})
+
+
+async def _current_page_url(adapter: object) -> str | None:
+    """Read the live URL, which is what a candidate link has to be trusted against."""
+    try:
+        result = await adapter.extract_visible_text()  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    return str(result.payload.get("url") or "") or None
+
+
+async def _read_gmail_verification(run_id: str, *, context: str) -> GmailOtpResult | None:
+    """Poll Gmail once for either a code or a confirmation link.
+
+    One read serves both paths: polling twice would double the wait and re-read
+    the same message.
+    """
     WorkerEvent(
         event_type=EventType.OTP_RETRIEVAL_STARTED,
         run_id=run_id,
         step_id=None,
         severity=Severity.INFO,
-        message="Gmail OTP retrieval started",
+        message="Gmail verification retrieval started",
         machine_state={"provider": "gmail", "context": context},
         ui_state={"current_step": "otp"},
         payload={"provider": "gmail"},
     ).emit()
-    result = await asyncio.to_thread(read_gmail_otp_from_env)
-    if not result.ok or not result.code:
+    result = await asyncio.to_thread(read_gmail_otp_from_env, accept="code_or_link")
+    if result.ok and (result.code or result.links):
+        return result
+    WorkerEvent(
+        event_type=EventType.OTP_RETRIEVAL_FAILED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.WARN,
+        message=result.message,
+        machine_state={"provider": "gmail", "context": context},
+        ui_state={"requires_user_review": True, "current_step": "otp"},
+        payload=result.safe_payload(),
+    ).emit()
+    return None
+
+
+async def try_resolve_verification_from_gmail(
+    adapter: object, work_dir: Path, run_id: str, *, context: str
+) -> EmailVerificationOutcome:
+    """Answer an OTP or MFA challenge from the user's inbox.
+
+    A numeric code is typed into the page as before. A confirmation link is
+    treated as the credential it is: it stays in worker memory, only its redacted
+    form reaches an event, and it is opened solely after the user approves at the
+    existing review gate, rather than routing around that gate.
+    """
+    if not gmail_inbox_reader_configured():
+        return "SKIPPED"
+
+    result = await _read_gmail_verification(run_id, context=context)
+    if result is None:
+        return "SKIPPED"
+
+    if result.code:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_COMPLETED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.INFO,
+            message="Gmail OTP retrieved without exposing the code",
+            machine_state={"provider": "gmail", "otp_kind": "CODE", "context": context},
+            ui_state={"current_step": "otp"},
+            payload=result.safe_payload(),
+        ).emit()
+        applied = await apply_otp_code_to_detected_field(adapter, run_id, result.code)
+        return "NAVIGATED" if applied else "SKIPPED"
+
+    portal_url = await _current_page_url(adapter)
+    target = select_trusted_verification_link(result.links, portal_url) if portal_url else None
+    if target is None:
+        # An inbox is untrusted input, so a link that cannot be tied to this
+        # portal is never offered: approving an unknown destination mid-run is
+        # exactly what an injected email would be angling for.
         WorkerEvent(
             event_type=EventType.OTP_RETRIEVAL_FAILED,
             run_id=run_id,
             step_id=None,
             severity=Severity.WARN,
-            message=result.message,
-            machine_state={"provider": "gmail", "context": context},
+            message="A verification email was found, but no link belonged to this portal, so none was offered",
+            machine_state={
+                "provider": "gmail",
+                "otp_kind": "LINK",
+                "reason": "LINK_NOT_TRUSTED_FOR_PORTAL",
+                "context": context,
+            },
             ui_state={"requires_user_review": True, "current_step": "otp"},
             payload=result.safe_payload(),
         ).emit()
-        return False
+        return "SKIPPED"
+
+    approval_payload = {
+        **result.safe_payload(),
+        "otp_kind": "LINK",
+        # The redacted form only: the query string is where the token lives.
+        "redacted_target": redact_link(target),
+    }
+    WorkerEvent(
+        event_type=EventType.PAUSED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.WARN,
+        message=(
+            f"A verification link for {redact_link(target)} arrived in Gmail during {context}. "
+            "Approve to open it in the automation browser."
+        ),
+        machine_state={
+            "reason": "EMAIL_VERIFICATION_LINK_APPROVAL_REQUIRED",
+            "otp_kind": "LINK",
+            "context": context,
+        },
+        ui_state={"requires_user_review": True, "current_step": "blocked"},
+        payload=approval_payload,
+    ).emit()
+
+    control = await asyncio.to_thread(
+        wait_for_review_resume,
+        work_dir,
+        run_id=run_id,
+        current_step="email_verification_link_review",
+        context=context,
+    )
+    if control.command == "CANCEL":
+        emit_worker_cancelled(
+            run_id, control, message=f"Worker cancelled by local user at the verification link approval during {context}"
+        )
+        return "CANCELLED"
+
+    open_result = await adapter.open_url(target)  # type: ignore[attr-defined]
+    if not open_result.ok:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message="The approved verification link could not be opened",
+            machine_state={"provider": "gmail", "otp_kind": "LINK", "reason": "LINK_OPEN_FAILED", "context": context},
+            ui_state={"requires_user_review": True, "current_step": "otp"},
+            payload=approval_payload,
+        ).emit()
+        return "SKIPPED"
 
     WorkerEvent(
         event_type=EventType.OTP_RETRIEVAL_COMPLETED,
         run_id=run_id,
-        step_id=None,
+        step_id=control.step_id,
         severity=Severity.INFO,
-        message="Gmail OTP retrieved without exposing the code",
-        machine_state={"provider": "gmail", "context": context},
-        ui_state={"current_step": "otp"},
-        payload=result.safe_payload(),
+        message="Opened the approved verification link without exposing it",
+        machine_state={"provider": "gmail", "otp_kind": "LINK", "context": context},
+        ui_state={"current_step": "automation"},
+        payload=approval_payload,
     ).emit()
-    return await apply_otp_code_to_detected_field(adapter, run_id, result.code)
+    return "NAVIGATED"
 
 
 MAX_BLOCKER_PAUSE_CYCLES = 3
@@ -457,9 +596,13 @@ async def pause_for_blockers(adapter: object, work_dir: Path, run_id: str, block
     while active_blockers:
         blocker_payload = blocker_payload_from(active_blockers)
         primary_blocker = active_blockers[0]
-        if any(blocker.blocker_type == "OTP" for blocker in active_blockers) and await try_resolve_otp_with_gmail(
-            adapter, run_id, context=context
-        ):
+        resolved_from_inbox = False
+        if any(blocker.blocker_type in INBOX_RESOLVABLE_BLOCKER_TYPES for blocker in active_blockers):
+            outcome = await try_resolve_verification_from_gmail(adapter, work_dir, run_id, context=context)
+            if outcome == "CANCELLED":
+                return True
+            resolved_from_inbox = outcome == "NAVIGATED"
+        if resolved_from_inbox:
             active_blockers = _halting_blockers(await adapter.detect_blockers())  # type: ignore[attr-defined]
             if not active_blockers:
                 return False

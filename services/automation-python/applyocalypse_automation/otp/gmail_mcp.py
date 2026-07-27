@@ -9,11 +9,17 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from email import policy
 from email.parser import BytesParser
-from typing import Any
+from typing import Any, Literal
 
 from ..secret_env import get_secret
+from .verification_link import extract_verification_links
 
 OTP_PATTERN = re.compile(r"(?<!\d)(\d{4,8})(?!\d)")
+
+# What counts as a match. "code" keeps the historical behaviour exactly: a
+# message with only a confirmation link is no match at all. "code_or_link" also
+# accepts a link-only message, for portals that never mail a number.
+OtpAccept = Literal["code", "code_or_link"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,12 +29,25 @@ class GmailOtpResult:
     message: str
     provider: str = "gmail"
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Populated only when the caller asked for links. Each one authenticates the
+    # holder, so treat this exactly like `code`: never log it, never emit it.
+    links: tuple[str, ...] = ()
 
     def safe_payload(self) -> dict[str, Any]:
+        """The only shape of this result that may be emitted or persisted.
+
+        Deliberately reports a link *count* rather than the links themselves.
+        A matched message can carry links to anywhere, and the caller has no way
+        to know an unrelated email did not slip through the search, so no inbox
+        hostname is written into the run record. The one link the caller acts on
+        is the one it already proved belongs to the portal, and it surfaces that
+        itself.
+        """
         return {
             "provider": self.provider,
             "ok": self.ok,
             "code_length": len(self.code) if self.code else None,
+            "link_count": len(self.links),
             "metadata": self.metadata,
         }
 
@@ -84,11 +103,20 @@ def _safe_message_metadata(message: Any) -> dict[str, Any]:
 
 
 class GmailMcpOtpExtractor:
-    def __init__(self, *, email_address: str, password: str, timeout_seconds: float = 45, poll_seconds: float = 5) -> None:
+    def __init__(
+        self,
+        *,
+        email_address: str,
+        password: str,
+        timeout_seconds: float = 45,
+        poll_seconds: float = 5,
+        accept: OtpAccept = "code",
+    ) -> None:
         self.email_address = email_address
         self.password = password
         self.timeout_seconds = timeout_seconds
         self.poll_seconds = poll_seconds
+        self.accept = accept
 
     def wait_for_latest_code(self) -> GmailOtpResult:
         if not self.email_address or not self.password:
@@ -124,16 +152,20 @@ class GmailMcpOtpExtractor:
                         message = BytesParser(policy=policy.default).parsebytes(raw_payload)
                         searchable = f"{message.get('Subject') or ''}\n{_message_text(message)}"
                         code = extract_otp_code(searchable)
-                        if code:
+                        links = (
+                            extract_verification_links(searchable) if self.accept == "code_or_link" else ()
+                        )
+                        if code or links:
                             return GmailOtpResult(
                                 True,
                                 code,
-                                "Gmail OTP code extracted",
+                                "Gmail OTP code extracted" if code else "Gmail verification link extracted",
                                 metadata={
                                     **_safe_message_metadata(message),
                                     "searched_at": datetime.now(UTC).isoformat(),
                                     "search_query": search_query,
                                 },
+                                links=links,
                             )
                 return GmailOtpResult(False, None, "No Gmail OTP message matched")
         except imaplib.IMAP4.error:
@@ -188,10 +220,12 @@ class GmailApiOtpExtractor:
         token_json_path: str,
         timeout_seconds: float = 45,
         poll_seconds: float = 5,
+        accept: OtpAccept = "code",
     ) -> None:
         self.token_json_path = token_json_path
         self.timeout_seconds = timeout_seconds
         self.poll_seconds = poll_seconds
+        self.accept = accept
 
     def wait_for_latest_code(self) -> GmailOtpResult:
         try:
@@ -254,21 +288,28 @@ class GmailApiOtpExtractor:
                 )
                 payload = msg.get("payload", {})
                 text = _extract_text_from_message_payload(payload)
-                subject = next(
-                    (h["value"] for h in payload.get("headers", []) if h["name"].lower() == "subject"),
-                    "",
-                )
-                code = extract_otp_code(f"{subject}\n{text}")
-                if code:
+                headers = payload.get("headers", [])
+                subject = next((h["value"] for h in headers if h["name"].lower() == "subject"), "")
+                # The sender domain is what a human weighs when approving a link,
+                # so surface it here the way the IMAP path already does.
+                sender = next((h["value"] for h in headers if h["name"].lower() == "from"), "")
+                searchable = f"{subject}\n{text}"
+                code = extract_otp_code(searchable)
+                links = extract_verification_links(searchable) if self.accept == "code_or_link" else ()
+                if code or links:
                     return GmailOtpResult(
                         True,
                         code,
-                        "Gmail OTP code extracted via API",
+                        "Gmail OTP code extracted via API" if code else "Gmail verification link extracted via API",
                         provider="gmail_oauth",
                         metadata={
                             "message_id_sha256": hashlib.sha256(msg_stub["id"].encode()).hexdigest(),
+                            "from_domain": (
+                                sender.split("@")[-1].split(">")[0].strip().lower() if "@" in sender else None
+                            ),
                             "searched_at": datetime.now(UTC).isoformat(),
                         },
+                        links=links,
                     )
             return GmailOtpResult(False, None, "No Gmail OTP message matched")
         except Exception as exc:
@@ -280,7 +321,7 @@ class GmailApiOtpExtractor:
             )
 
 
-def read_gmail_otp_from_env() -> GmailOtpResult:
+def read_gmail_otp_from_env(*, accept: OtpAccept = "code") -> GmailOtpResult:
     # OAuth path (preferred when token file is available)
     token_path = os.getenv("APPLYO_GMAIL_OAUTH_TOKEN_PATH", "")
     if token_path:
@@ -290,6 +331,7 @@ def read_gmail_otp_from_env() -> GmailOtpResult:
             token_json_path=token_path,
             timeout_seconds=timeout,
             poll_seconds=poll,
+            accept=accept,
         ).wait_for_latest_code()
 
     # IMAP fallback (legacy app password flow)
@@ -302,4 +344,5 @@ def read_gmail_otp_from_env() -> GmailOtpResult:
         password=get_secret("APPLYO_GMAIL_OTP_PASSWORD") or "",
         timeout_seconds=timeout,
         poll_seconds=poll,
+        accept=accept,
     ).wait_for_latest_code()

@@ -37,6 +37,17 @@ const approvalTypeFor = (t: string): Approval['approvalType'] => {
 
 const reviewInstruction = (t: string) => REVIEW_INSTRUCTIONS[t] ?? 'Review the request before continuing.'
 
+/**
+ * An emailed confirmation link arrives as an OTP review, but the ask is the
+ * opposite of the usual one: the app waits for permission to click, rather than
+ * waiting for the user to type a code. The redacted target is what distinguishes
+ * the two, so it drives the wording.
+ */
+const linkApprovalTarget = (r: ReviewRequest): string | null => {
+  const target = r.payload['redacted_target']
+  return typeof target === 'string' && target.length > 0 ? target : null
+}
+
 const reviewCandidateLabels = (r: ReviewRequest): string[] => {
   const arr = r.payload['candidate_labels'] ?? r.payload['attempted_labels']
   return Array.isArray(arr) ? arr.filter((l): l is string => typeof l === 'string').slice(0, 6) : []
@@ -300,15 +311,30 @@ export default function RunConsoleScreen() {
                     <For each={reviewCandidateLabels(request)}>{(l) => <span class="mono-chip">{l}</span>}</For>
                   </div>
                 </Show>
+                <Show when={linkApprovalTarget(request)}>
+                  {(target) => (
+                    <div class="mono-chip" style={{ display: 'block', margin: '0 0 8px', 'word-break': 'break-all' }}>
+                      {target()}
+                    </div>
+                  )}
+                </Show>
                 <div class="gate-actions">
                   <button class="btn-wax" type="button" onClick={() => void approveReview(request)}>
-                    {isManualBlocker(request.reviewType) ? 'I handled it myself' : 'Approve'}
+                    {linkApprovalTarget(request)
+                      ? 'Open this link'
+                      : isManualBlocker(request.reviewType)
+                        ? 'I handled it myself'
+                        : 'Approve'}
                   </button>
                   <button class="btn-quiet" type="button" onClick={() => void rejectReview(request)}>
                     Reject
                   </button>
                 </div>
-                <div class="provenance-tag" style={{ 'margin-top': '8px' }}>{reviewInstruction(request.reviewType)}</div>
+                <div class="provenance-tag" style={{ 'margin-top': '8px' }}>
+                  {linkApprovalTarget(request)
+                    ? 'The token is hidden. Approving lets the automation browser open this destination.'
+                    : reviewInstruction(request.reviewType)}
+                </div>
               </div>
             )}
           </For>

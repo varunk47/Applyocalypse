@@ -216,6 +216,10 @@ const blockerReviewTypeForPause = (machineState: Record<string, unknown>): Block
   if (reason === "CAPTCHA_DETECTED") return "CAPTCHA";
   if (reason === "MFA_DETECTED") return "MFA";
   if (reason === "OTP_DETECTED") return "OTP";
+  // An emailed confirmation link is the same challenge as an emailed code, so it
+  // reuses the OTP review. Without this the worker would block on a review that
+  // never surfaced.
+  if (reason === "EMAIL_VERIFICATION_LINK_APPROVAL_REQUIRED") return "OTP";
   if (reason === "LOGIN_DETECTED") return "LOGIN";
   if (reason === "PORTAL_ENTRY_ACTION_REQUIRED") return "PORTAL_ENTRY";
   if (reason === "PORTAL_REDIRECT_REVIEW_REQUIRED") return "PORTAL_ENTRY";
@@ -256,7 +260,16 @@ const createBlockerReviewRequest = (input: {
     uiState: input.event.ui_state,
     payload: input.event.payload
   };
-  for (const key of ["attempted_labels", "candidate_labels", "candidate_count", "ambiguity_code", "portal_id", "workflow_kind"]) {
+  for (const key of [
+    "attempted_labels",
+    "candidate_labels",
+    "candidate_count",
+    "ambiguity_code",
+    "portal_id",
+    "workflow_kind",
+    // Host and path only: the worker strips the token before emitting.
+    "redacted_target"
+  ]) {
     if (input.event.payload[key] !== undefined) {
       reviewPayload[key] = input.event.payload[key];
     }

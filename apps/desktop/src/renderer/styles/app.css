@@ -1766,39 +1766,6 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* ── Onboarding ────────────────────────────────────────────────────────────── */
-.onboarding-stage {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  justify-content: center;
-  padding: 40px 28px;
-}
-
-.onboarding-card {
-  width: min(680px, 100%);
-  align-self: flex-start;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.step-dots {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.step-dots .dot {
-  width: 22px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--hairline-strong);
-}
-
-.step-dots .dot.done { background: var(--ink); }
-.step-dots .dot.current { background: var(--wax); }
-
 .dropzone {
   border: 1.5px dashed var(--hairline-strong);
   border-radius: 12px;
@@ -1812,14 +1779,6 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .dropzone:hover { border-color: var(--wax); }
-
-.confidence-meter {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.confidence-meter .progress-track { max-width: none; height: 3px; }
 
 /* ── Onboarding form fields (bare step inputs, themed like the rest of the app) ── */
 .onboarding-shell input:not([type='checkbox']):not([type='radio']),
@@ -1866,4 +1825,468 @@ h1, h2, h3, p { margin: 0; }
 .answer-inline-input:focus-visible {
   outline: none;
   border-bottom-color: var(--wax);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONBOARDING - four moments, not thirteen steps
+   Resume first: the app reads the file, then shows its work and asks you to
+   correct it. So this surface is editorial rather than form-shaped - one huge
+   claim per screen, a lot of air around the single decision, and the ledger
+   using scale contrast (a 44px fact count over 9.5px mono labels) to say "here
+   is what we learned" before it says "here are twenty inputs".
+   Semantic colour, not decoration: --wax is anything you can press, --edited
+   marks a parse we are unsure of, --live means nothing needs a second look.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.onboarding-shell {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(120% 80% at 50% -20%, var(--wax-wash), transparent 62%),
+    var(--paper);
+}
+
+.ob-frame {
+  width: min(760px, 100%);
+  padding: 34px 30px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+/* ── The rail: four stops, so the length of the flow is never a mystery ────── */
+.ob-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.ob-rail-stops {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ob-rail-stop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 9.5px var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color 0.25s ease;
+}
+
+.ob-rail-stop.done { color: var(--ink-2); }
+.ob-rail-stop.active { color: var(--wax); }
+
+.ob-rail-num {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 8.5px;
+  line-height: 1;
+}
+
+.ob-rail-stop.active .ob-rail-num {
+  background: var(--wax);
+  border-color: var(--wax);
+  color: var(--on-wax);
+}
+
+.ob-stage { display: flex; flex-direction: column; }
+
+/* ── Moment 1 + 4: the full-bleed claim ────────────────────────────────────── */
+.ob-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  padding-top: 22px;
+}
+
+.ob-hero-title {
+  font: 800 clamp(2.1rem, 1.2rem + 3.4vw, 3.4rem) / 1.02 var(--display);
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.ob-hero-sub {
+  max-width: 46ch;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+/* Deliberately a button, not a drop zone: the main process only accepts paths
+   it vetted through its own dialog, so a drop target here would be a lie. */
+.ob-target {
+  width: 100%;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 40px 26px;
+  border: 1.5px dashed var(--hairline-strong);
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--card-shadow);
+  transition: border-color 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+
+.ob-target:hover {
+  border-color: var(--wax);
+  border-style: solid;
+  transform: translateY(-2px);
+  box-shadow: var(--gate-shadow);
+}
+
+.ob-target:active { transform: translateY(0); }
+.ob-target:focus-visible { outline: 2px solid var(--wax); outline-offset: 3px; }
+.ob-target svg { color: var(--wax); }
+.ob-target-main { font-size: 15px; font-weight: 700; }
+.ob-target-sub { font: 400 9.5px var(--mono); letter-spacing: 0.11em; color: var(--ink-3); text-transform: uppercase; }
+
+.ob-picked { margin: 0; }
+
+.ob-privacy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.ob-privacy svg { color: var(--live); flex: none; }
+
+.ob-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+  border-bottom: 1px solid transparent;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.ob-ghost:hover { color: var(--wax); border-bottom-color: var(--wax-border); }
+
+/* ── Moment 2: the app reading, out loud ───────────────────────────────────── */
+.ob-ledger { display: flex; flex-direction: column; gap: 24px; }
+
+.ob-reading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 30px 24px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.ob-reading-pulse {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--wax);
+  animation: apoPulse 1.1s ease-in-out infinite;
+}
+
+.ob-reading-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+
+.ob-ledger-head { display: flex; flex-direction: column; gap: 12px; }
+
+/* The one number worth shouting: how much the file saved you typing. */
+.ob-count {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  margin: 0;
+}
+
+.ob-count strong {
+  font: 800 44px/1 var(--display);
+  letter-spacing: -0.04em;
+  color: var(--ink);
+}
+
+.ob-count span {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.ob-flagbar,
+.ob-allclear {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 9px 13px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.ob-flagbar {
+  background: var(--edited-wash);
+  color: var(--edited);
+  border: 1px solid var(--edited-wash);
+}
+
+.ob-flagbar strong { font-weight: 700; }
+.ob-flagbar svg { flex: none; }
+
+.ob-allclear {
+  background: var(--live-wash);
+  color: var(--live);
+  border: 1px solid var(--live-wash);
+}
+
+.ob-allclear svg { flex: none; }
+
+/* ── Moment 3: confirm and correct ─────────────────────────────────────────── */
+.ob-groups { display: flex; flex-direction: column; gap: 14px; }
+
+.ob-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.ob-group > .fine-print { margin: -6px 0 0; }
+
+.ob-group-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font: 600 10px var(--mono);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ob-group-head svg { color: var(--wax); }
+
+.ob-group-count {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 20px;
+  background: var(--wax-wash);
+  color: var(--wax);
+}
+
+.ob-identity-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+
+/* Our form fields put the caption in a span, so restate `.form-field label`. */
+.ob-frame .form-field > span {
+  font: 500 9.5px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+
+.ob-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 11px;
+  background: var(--chrome);
+}
+
+.ob-entry .fine-print { margin: 0; }
+
+.ob-entry-top { display: flex; align-items: center; gap: 9px; }
+
+.ob-entry-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px !important;
+  font-weight: 700;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 3px 5px !important;
+}
+
+.ob-entry-title:hover { background: var(--card) !important; }
+.ob-entry-title:focus-visible { background: var(--card) !important; border-color: var(--wax) !important; }
+
+.ob-entry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ob-row-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ob-row-remove:hover { background: var(--wax-wash); color: var(--wax); }
+
+/* Below the merge gate the profile would silently drop it, so say so here. */
+.ob-flag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--edited-wash);
+  color: var(--edited);
+  font: 600 9px var(--mono);
+  letter-spacing: 0.06em;
+}
+
+.ob-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.ob-add:hover { border-color: var(--wax); color: var(--wax); border-style: solid; }
+
+.ob-skill-group { display: flex; flex-direction: column; gap: 7px; }
+
+.ob-skill-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ob-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.ob-fact-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.ob-fact-line .fine-print { margin-left: auto; }
+
+/* ── Moment 4: only what a resume cannot say ───────────────────────────────── */
+.ob-tail { display: flex; flex-direction: column; gap: 16px; }
+
+.ob-tail-title {
+  margin: 0 0 6px;
+  font: 800 clamp(1.5rem, 1.1rem + 1.5vw, 2rem) / 1.1 var(--display);
+  letter-spacing: -0.028em;
+}
+
+.ob-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.ob-detail-card > .fine-print { margin: -6px 0 0; }
+
+.ob-disclosure {
+  border-top: 1px solid var(--hairline-soft);
+  padding-top: 12px;
+}
+
+.ob-disclosure summary {
+  cursor: pointer;
+  font: 600 10px var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ob-disclosure summary:hover { color: var(--wax); }
+.ob-disclosure > * + * { margin-top: 10px; }
+
+/* This paragraph is a promise, not a micro-label, so it gets readable size. */
+.ob-disclosure .review-always {
+  display: block;
+  font: 500 11.5px/1.45 var(--sans);
+  letter-spacing: 0;
+}
+
+.ob-disclosure label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ── Advance / retreat ─────────────────────────────────────────────────────── */
+.ob-advance {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 12px 22px;
+  font-size: 13.5px;
+}
+
+.ob-back {
+  align-self: flex-start;
+  font: 500 10px var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color 0.16s ease;
+}
+
+.ob-back:hover { color: var(--wax); }
+
+@media (max-width: 620px) {
+  .ob-identity-grid,
+  .ob-entry-grid { grid-template-columns: 1fr; }
+  .ob-rail-stops { gap: 13px; }
 }

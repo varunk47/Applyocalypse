@@ -2,7 +2,8 @@ import { IpcContracts } from "@applyocalypse/ipc-contracts";
 import { handleContract, type IpcHandlerContext } from "./context";
 
 export const registerProfileHandlers = (ctx: IpcHandlerContext): void => {
-  const { profileRepository, providerRepository, auditRepository, secureSecretStore } = ctx;
+  const { profileRepository, providerRepository, auditRepository, secureSecretStore, uploadRepository, parsedDocumentRepository } =
+    ctx;
 
   const configureApplicationCredentials = (input: {
     profileId: string;
@@ -78,6 +79,20 @@ export const registerProfileHandlers = (ctx: IpcHandlerContext): void => {
     });
     if (input.workAuthorization) {
       profile = profileRepository.upsert({ ...profile, workAuthorization: input.workAuthorization });
+    }
+    // Onboarding takes the resume before it asks for anything else, so on a fresh
+    // install those uploads exist with no owner yet. Claim them and merge their
+    // parses now, otherwise the profile stays empty despite a resume being read.
+    for (const adopted of uploadRepository.adoptOrphanedFiles(profile.id)) {
+      for (const parsedDocument of parsedDocumentRepository.list({ uploadedFileId: adopted.id })) {
+        parsedDocumentRepository.mergeIntoProfile(parsedDocument);
+      }
+      auditRepository.append({
+        action: "profile.orphaned_upload_adopted",
+        entityType: "uploaded_file",
+        entityId: adopted.id,
+        metadata: { profileId: profile.id, fileKind: adopted.fileKind }
+      });
     }
     return configureApplicationCredentials({
       profileId: profile.id,
