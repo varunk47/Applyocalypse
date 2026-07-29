@@ -333,7 +333,17 @@ _FIELD_DISCOVERY_BODY_JS = r"""
     // collapsed/conditional fields, and any bot-challenge field the user cannot fill.
     const rect = element.getBoundingClientRect();
     const style = window.getComputedStyle(element);
-    if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
+    const visuallyHidden = (rect.width === 0 && rect.height === 0)
+      || style.display === 'none'
+      || style.visibility === 'hidden';
+    // A file input is the one control that is *meant* to be invisible. Every styled
+    // dropzone worth the name (Greenhouse, Lever, Workable, Ashby, and anything built
+    // on react-dropzone) renders a real <input type="file"> at zero size behind the
+    // drop target. Dropping it loses the resume silently: the run would report a
+    // filled form carrying no attachment. Files are set through the driver's file
+    // API, which does not need the element on screen. A disabled one still goes,
+    // because nothing can write to it either way (audit row 15).
+    if (visuallyHidden && (type !== 'file' || element.disabled === true)) continue;
     const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
     if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
     // An <input role="combobox"> is a picker wearing an input's clothes: typing into
@@ -361,6 +371,10 @@ _FIELD_DISCOVERY_BODY_JS = r"""
         id,
         name,
         placeholder: element.getAttribute('placeholder'),
+        // Only ever true for a file input, since nothing else gets past the gate.
+        // The reviewer needs it: "upload target is not on screen" is the difference
+        // between a dropzone working as designed and a control that vanished.
+        visually_hidden: visuallyHidden,
         file_count: type === 'file' && element.files ? element.files.length : null,
         value: ['checkbox', 'radio'].includes(type) ? element.getAttribute('value') : null,
         checked: ['checkbox', 'radio'].includes(type) ? element.checked === true : null,

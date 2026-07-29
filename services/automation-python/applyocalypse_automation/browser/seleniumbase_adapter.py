@@ -123,6 +123,31 @@ def _visible_text_length(raw_result: Any) -> int:
     return len(str(payload).strip())
 
 
+# Force a hidden file input on screen just long enough for Selenium to write a path
+# into it, returning whatever inline style was there so it can be put back. Nothing
+# else about the element is touched.
+_REVEAL_FILE_INPUT_JS = """
+const el = arguments[0];
+const previous = el.getAttribute('style');
+el.style.setProperty('display', 'block', 'important');
+el.style.setProperty('visibility', 'visible', 'important');
+el.style.setProperty('opacity', '1', 'important');
+el.style.setProperty('width', '1px', 'important');
+el.style.setProperty('height', '1px', 'important');
+return previous;
+"""
+
+_RESTORE_INLINE_STYLE_JS = """
+const el = arguments[0];
+const previous = arguments[1];
+if (previous === null || previous === undefined) {
+  el.removeAttribute('style');
+} else {
+  el.setAttribute('style', previous);
+}
+"""
+
+
 class SeleniumBaseBrowserAdapter(BrowserAdapter):
     name = "seleniumbase"
 
@@ -370,13 +395,42 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
         if self._driver is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
         try:
-            def _upload() -> None:
-                el = self._driver.find_element("css selector", field.selector)
-                el.send_keys(str(path))
-            await asyncio.to_thread(_upload)
+            revealed = await asyncio.to_thread(self._upload_sync, field.selector, path)
         except Exception as exc:
             return BrowserStepResult(False, "file upload failed", {"field_id": field.field_id, "error": str(exc)})
-        return BrowserStepResult(True, "file uploaded", {"field_id": field.field_id, "path": str(path)})
+        return BrowserStepResult(
+            True,
+            "file uploaded",
+            {"field_id": field.field_id, "path": str(path), "revealed_hidden_input": revealed},
+        )
+
+    def _upload_sync(self, selector: str, path: Path) -> bool:
+        """Write the path into the file input, revealing it first if Selenium refuses.
+
+        Every styled dropzone (Greenhouse, Lever, Workable, Ashby, and anything on
+        react-dropzone) keeps its real <input type="file"> off screen behind the drop
+        target. Playwright and nodriver set files through a driver API that does not
+        care whether the element is visible; Selenium's send_keys raises "element not
+        interactable", and the resume silently never attaches (audit row 15).
+
+        So try the ordinary write first and only neutralise the hiding styles if it
+        is refused. Returns whether the reveal was needed, for the run log.
+        """
+        el = self._driver.find_element("css selector", selector)
+        try:
+            el.send_keys(str(path))
+            return False
+        except Exception:
+            pass
+        previous_style = self._driver.execute_script(_REVEAL_FILE_INPUT_JS, el)
+        try:
+            el.send_keys(str(path))
+        finally:
+            # Restore on the failure path too. If an ancestor is display:none the
+            # reveal cannot work and the retry raises again, and leaving the input
+            # forced visible would show the reviewer a form the portal never rendered.
+            self._driver.execute_script(_RESTORE_INLINE_STYLE_JS, el, previous_style)
+        return True
 
     async def screenshot(self, output_path: Path) -> BrowserStepResult:
         if self._driver is None:
