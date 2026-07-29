@@ -30,11 +30,12 @@
     "cert:providers": "node scripts/certification/byok-provider-matrix.mjs",
     "release:preflight": "node scripts/release/preflight.mjs",
     "verify": "pnpm verify:functional && pnpm audit --audit-level high",
-    "verify:functional": "pnpm typecheck && pnpm lint:js && pnpm lint:python && pnpm test && pnpm test:python && pnpm python:audit",
+    "verify:functional": "pnpm typecheck && pnpm lint:js && pnpm lint:python && pnpm landing:check && pnpm test && pnpm test:python && pnpm python:audit",
     "verify:packaged": "pnpm desktop:package && pnpm test:worker-smoke && pnpm test:desktop-smoke && pnpm test:desktop-user-flow && pnpm test:desktop-e2e",
     "lint": "pnpm -r lint",
     "lint:js": "eslint .",
     "lint:python": "node scripts/test/python-lint.mjs",
+    "landing:check": "node scripts/landing/check-assets.mjs",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "db:migrate": "pnpm --filter @applyocalypse/db migrate"
