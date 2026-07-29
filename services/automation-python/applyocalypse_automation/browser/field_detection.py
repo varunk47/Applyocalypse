@@ -203,6 +203,16 @@ const labelSourcesFor = (element) => {
 """
 
 
+# Field types whose value cannot simply be typed. These must go through the injected
+# write script, which knows how to choose an option and check the choice actually took.
+# ARIA pickers are here for a sharp reason: an <input role="combobox"> accepts a plain
+# fill() and reads the typed text straight back, so a naive write would report a
+# success the portal never saw (audit finding F9).
+SCRIPTED_WRITE_FIELD_TYPES: frozenset[str] = frozenset(
+    {"select", "checkbox", "radio", "aria_combobox", "aria_listbox", "aria_radiogroup"}
+)
+
+
 _FIELD_DISCOVERY_BODY_JS = r"""
   const fields = [];
   const candidates = Array.from(document.querySelectorAll('input, textarea, select'));
