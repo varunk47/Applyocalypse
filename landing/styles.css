@@ -848,6 +848,11 @@ p {
 .aw-card .t {
   font: 400 12.5px var(--serif);
 }
+/* The stamp is absolutely positioned, so it does not push the title out of its
+   way; without this the two overlap and neither one reads. */
+.aw-card.ready .t {
+  padding-right: 32px;
+}
 .aw-card .s {
   font-size: 9px;
   color: var(--ink-2);
