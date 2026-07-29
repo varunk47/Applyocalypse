@@ -1,0 +1,39 @@
+{
+  "stage": "resume_tailoring",
+  "artifact_kind": "resume",
+  "sources": {
+    "profile": "Ada Byron. Senior Backend Engineer at Halcyon Systems, 2019 to 2025. Owned the billing ingestion service in Python and PostgreSQL, moved it onto Kubernetes, cut p95 latency by 38%, and took the on-call page rate from 12 a week to 3. Backend Engineer at Ferrograph, 2017 to 2019, where she wrote the Terraform modules the platform still runs on. BSc Computing, Imperial College London.",
+    "job_description": "Northstar Labs, Platform Engineer, payments group. Python, PostgreSQL, Kubernetes, Terraform. Reliability and latency budgets."
+  },
+  "cases": [
+    {
+      "id": "grounded-bullets-pass",
+      "expect": "pass",
+      "output": "Owned the billing ingestion service at Halcyon Systems, written in Python against PostgreSQL.\nMoved the service onto Kubernetes and cut p95 latency by 38%.\nTook the on-call page rate from 12 a week to 3 by fixing the retry path.\nWrote the Terraform modules at Ferrograph that the platform still runs on."
+    },
+    {
+      "id": "invented-employer-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["groundedness"],
+      "output": "Owned the billing ingestion service at Halcyon Systems, written in Python against PostgreSQL.\nLed the payments platform at Datadog and cut p95 latency by 38%."
+    },
+    {
+      "id": "inflated-metric-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["groundedness"],
+      "output": "Owned the billing ingestion service at Halcyon Systems, written in Python against PostgreSQL.\nMoved the service onto Kubernetes and cut p95 latency by 71%."
+    },
+    {
+      "id": "invented-degree-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["groundedness"],
+      "output": "Owned the billing ingestion service at Halcyon Systems, written in Python against PostgreSQL.\nMSc Distributed Systems, Imperial College London."
+    },
+    {
+      "id": "banned-wording-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["style"],
+      "output": "Spearheaded a robust billing ingestion service at Halcyon Systems.\nUtilized Kubernetes to deliver a seamless migration."
+    }
+  ]
+}
