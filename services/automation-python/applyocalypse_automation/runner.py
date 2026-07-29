@@ -2033,6 +2033,31 @@ async def run_browser_apply_after_review(
                     ).emit()
                 continue
 
+            if field.metadata.get("requires_human_label_review"):
+                # The page never gave this control a label; detection invented one
+                # so the field would not silently vanish. Matching an approved
+                # answer against an invented label is a guess, and a wrong guess
+                # writes a real value into a box nobody has identified.
+                WorkerEvent(
+                    event_type=EventType.USER_REVIEW_REQUIRED,
+                    run_id=run_id,
+                    step_id=None,
+                    severity=Severity.WARN,
+                    message="A field on this page has no label the page provided; it needs a person to identify it",
+                    machine_state={"selector": field.selector, "field_type": field.field_type},
+                    ui_state={"requires_user_review": True, "current_step": "field_review"},
+                    payload={
+                        "field_label": field.label,
+                        "field_type": field.field_type,
+                        "selector": field.selector,
+                        "reason": "SYNTHETIC_FIELD_LABEL",
+                        "label_source": field.metadata.get("label_source"),
+                    },
+                ).emit()
+                if field.required:
+                    missing_required_answers.append(required_answer_missing_payload(field))
+                continue
+
             answer_match = match_approved_answer(field, approved_answers)
             if answer_match.outcome == MATCH_OUTCOME_AMBIGUOUS:
                 # Two approved answers claim this field equally well. Picking one
