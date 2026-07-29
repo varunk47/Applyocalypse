@@ -231,6 +231,54 @@ _FIELD_DISCOVERY_BODY_JS = r"""
     }
     return `${tag}[name=${attrValue(name)}]`;
   };
+  // Workday, Ashby and most React portals render every picker as a div or input
+  // carrying role=combobox|listbox|radiogroup and never emit a <select>, so the
+  // native sweep above is blind to them. A question we cannot see is worse than one
+  // we cannot fill: the run would reach the submit gate believing a required field
+  // was answered (audit finding F9).
+  const ariaWidgetRoleFor = (element) => {
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    if (role === 'combobox' || role === 'listbox' || role === 'radiogroup') return role;
+    // Workday wires its pickers to a popup listbox instead of declaring a role.
+    if (element.hasAttribute('aria-haspopup') && element.hasAttribute('data-automation-id')) return 'combobox';
+    return null;
+  };
+  const ariaOptionsFor = (element, role) => {
+    const containers = [];
+    const owned = ((element.getAttribute('aria-controls') || '') + ' ' + (element.getAttribute('aria-owns') || '')).trim();
+    for (const ownedId of owned.split(/\s+/).filter(Boolean)) {
+      const container = document.getElementById(ownedId);
+      if (container) containers.push(container);
+    }
+    // A listbox or radiogroup owns its options directly; a closed combobox owns none
+    // until it is opened, which is exactly the case we must hand to a human.
+    containers.push(element);
+    const optionSelector = role === 'radiogroup' ? '[role="radio"]' : '[role="option"]';
+    const seen = new Set();
+    const options = [];
+    for (const container of containers) {
+      for (const option of Array.from(container.querySelectorAll(optionSelector))) {
+        if (seen.has(option)) continue;
+        seen.add(option);
+        options.push({
+          value: option.getAttribute('data-value') || option.getAttribute('value') || '',
+          label: (option.textContent || '').trim(),
+          selected: option.getAttribute('aria-selected') === 'true' || option.getAttribute('aria-checked') === 'true',
+          disabled: option.getAttribute('aria-disabled') === 'true'
+        });
+      }
+    }
+    return options;
+  };
+  const ariaSelectorFor = (element) => {
+    const id = element.getAttribute('id');
+    if (id) return `#${CSS.escape(id)}`;
+    const automationId = element.getAttribute('data-automation-id');
+    if (automationId) return `[data-automation-id=${attrValue(automationId)}]`;
+    const name = element.getAttribute('name');
+    if (!name) return null;
+    return `${element.tagName.toLowerCase()}[name=${attrValue(name)}]`;
+  };
   for (const element of candidates) {
     const type = fieldType(element);
     if (['hidden', 'submit', 'button', 'image', 'reset', 'search'].includes(type)) continue;
@@ -241,6 +289,11 @@ _FIELD_DISCOVERY_BODY_JS = r"""
     if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
     const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
     if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
+    // An <input role="combobox"> is a picker wearing an input's clothes: typing into
+    // it leaves the widget's real state untouched while element.value reads back the
+    // text we just wrote, so the generic text path would report a false success. Let
+    // the ARIA sweep below claim it instead (audit finding F9).
+    if (ariaWidgetRoleFor(element)) continue;
     // A field we cannot label is NEVER dropped: it is surfaced with a synthetic
     // label and a flag so the run can pause for a human (audit finding F6).
     const resolved = resolveLabelFromSources(labelSourcesFor(element));
@@ -265,6 +318,41 @@ _FIELD_DISCOVERY_BODY_JS = r"""
         value: ['checkbox', 'radio'].includes(type) ? element.getAttribute('value') : null,
         checked: ['checkbox', 'radio'].includes(type) ? element.checked === true : null,
         options: optionsFor(element)
+      }
+    });
+  }
+  const ariaCandidates = Array.from(document.querySelectorAll(
+    '[role="combobox"], [role="listbox"], [role="radiogroup"], [aria-haspopup][data-automation-id]'
+  ));
+  for (const element of ariaCandidates) {
+    const role = ariaWidgetRoleFor(element);
+    if (!role) continue;
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
+    const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
+    if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
+    const resolved = resolveLabelFromSources(labelSourcesFor(element));
+    const options = ariaOptionsFor(element, role);
+    fields.push({
+      label: resolved.label,
+      label_source: resolved.label_source,
+      label_synthetic: resolved.label_synthetic,
+      field_type: `aria_${role}`,
+      selector: ariaSelectorFor(element),
+      required: element.getAttribute('aria-required') === 'true' || element.hasAttribute('required'),
+      metadata: {
+        tag_name: element.tagName.toLowerCase(),
+        aria_role: role,
+        aria_expanded: element.getAttribute('aria-expanded'),
+        automation_id: element.getAttribute('data-automation-id'),
+        id: element.getAttribute('id'),
+        name: element.getAttribute('name'),
+        placeholder: element.getAttribute('placeholder'),
+        // A combobox that was never opened owns no options yet. Recording that
+        // honestly is what lets the write path pause instead of guessing.
+        options_rendered: options.length > 0,
+        options: options
       }
     });
   }
@@ -755,6 +843,65 @@ _FIELD_WRITE_BODY_JS = r"""
       checked: winner.option.checked === true,
       selected_label: winner.label,
       selected_value_length: String(winner.value || '').length
+    }));
+  }
+
+  // ARIA widget pickers (audit finding F9). The browser owns no value for these, so
+  // falling through to element.value would write text the form never sees and then
+  // read that same text back as proof it worked.
+  const widgetRole = (() => {
+    const role = (element.getAttribute('role') || '').toLowerCase();
+    if (role === 'combobox' || role === 'listbox' || role === 'radiogroup') return role;
+    if (element.hasAttribute('aria-haspopup') && element.hasAttribute('data-automation-id')) return 'combobox';
+    return null;
+  })();
+  if (widgetRole) {
+    const containers = [];
+    const owned = ((element.getAttribute('aria-controls') || '') + ' ' + (element.getAttribute('aria-owns') || '')).trim();
+    for (const ownedId of owned.split(/\s+/).filter(Boolean)) {
+      const container = document.getElementById(ownedId);
+      if (container) containers.push(container);
+    }
+    containers.push(element);
+    const optionSelector = widgetRole === 'radiogroup' ? '[role="radio"]' : '[role="option"]';
+    const seen = new Set();
+    const entries = [];
+    for (const container of containers) {
+      for (const candidate of Array.from(container.querySelectorAll(optionSelector))) {
+        if (seen.has(candidate) || candidate.getAttribute('aria-disabled') === 'true') continue;
+        seen.add(candidate);
+        entries.push({
+          option: candidate,
+          label: String(candidate.textContent || '').trim(),
+          value: candidate.getAttribute('data-value') || candidate.getAttribute('value') || ''
+        });
+      }
+    }
+    if (!entries.length) {
+      // A closed combobox renders its list only after a real user gesture. We do not
+      // fake one and we do not guess: the run pauses and a human opens it.
+      return JSON.stringify({
+        ok: false, action: 'aria_select_option', field_type: 'aria_' + widgetRole,
+        verified: false, value_matched: false, requires_human: true,
+        message: widgetRole + ' exposes no options until it is opened'
+      });
+    }
+    const ranked = rankCandidates(entries, reviewedValue);
+    if (ranked.status !== 'unique') {
+      return JSON.stringify(
+        refuseChoice('aria_select_option', 'aria_' + widgetRole, ranked, reviewedValue, '', entries.length)
+      );
+    }
+    const winner = ranked.winners[0];
+    winner.option.click();
+    const chosen = winner.option.getAttribute('aria-selected') === 'true'
+      || winner.option.getAttribute('aria-checked') === 'true';
+    return JSON.stringify(verdict(winner.label, chosen ? winner.label : '', {
+      action: 'aria_select_option',
+      field_type: 'aria_' + widgetRole,
+      match_tier: ranked.tier,
+      option_count: entries.length,
+      selected_label: winner.label
     }));
   }
 
