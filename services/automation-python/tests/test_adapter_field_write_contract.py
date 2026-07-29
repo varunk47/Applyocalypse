@@ -20,7 +20,11 @@ from collections.abc import Callable
 import pytest
 
 from applyocalypse_automation.browser.adapter import BrowserField, BrowserStepResult
-from applyocalypse_automation.browser.field_detection import VERIFY_SCRIPT_MARKER, WRITE_SCRIPT_MARKER
+from applyocalypse_automation.browser.field_detection import (
+    SCRIPTED_WRITE_FIELD_TYPES,
+    VERIFY_SCRIPT_MARKER,
+    WRITE_SCRIPT_MARKER,
+)
 from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
 from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 from applyocalypse_automation.browser.seleniumbase_adapter import SeleniumBaseBrowserAdapter
@@ -328,13 +332,21 @@ def test_apply_field_value_reports_failure_when_the_repair_also_fails(
 
 
 @pytest.mark.parametrize("adapter_name,builder", ADAPTER_BUILDERS)
-@pytest.mark.parametrize("field_type", ["select", "checkbox", "radio"])
+@pytest.mark.parametrize("field_type", sorted(SCRIPTED_WRITE_FIELD_TYPES))
 def test_apply_field_value_routes_non_text_types_through_the_dom_script(
     adapter_name: str,
     builder: Callable[[str], AdapterHarness],
     field_type: str,
 ) -> None:
-    """select/checkbox/radio must not be typed into; they go through the DOM script."""
+    """A choice control must not be typed into; it goes through the DOM script.
+
+    Parametrized off the constant rather than a hand-written list, so a field type
+    added to ``SCRIPTED_WRITE_FIELD_TYPES`` without a matching adapter route fails
+    here instead of in a portal. That drift is exactly how the ARIA types shipped
+    discoverable but unroutable: an ``<input role="combobox">`` has a ``value``
+    property, so ``fill()`` writes into it and reads the same text back as proof,
+    and the run reports a success the portal never saw.
+    """
     harness = builder("Yes")
     result = asyncio.run(harness.adapter.apply_field_value(make_field(field_type=field_type), "No"))
 

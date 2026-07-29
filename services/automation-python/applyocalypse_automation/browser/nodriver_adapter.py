@@ -11,6 +11,7 @@ from .field_detection import (
     DOM_FIELD_DISCOVERY_SCRIPT,
     DOM_METADATA_CAPTURE_SCRIPT,
     DOM_VISIBLE_TEXT_SCRIPT,
+    SCRIPTED_WRITE_FIELD_TYPES,
     blockers_from_dom_snapshot,
     build_apply_field_value_script,
     build_click_by_text_script,
@@ -227,7 +228,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         return await self._page.evaluate(script)
 
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
-        if field.field_type not in {"select", "checkbox", "radio"}:
+        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES:
             filled = await self.fill_field(field, value)
             if not filled.ok:
                 return filled
