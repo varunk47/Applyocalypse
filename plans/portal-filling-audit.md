@@ -644,16 +644,31 @@ and driving `PlaywrightAdapter` end to end would close the largest gap for modes
 
 Ordered by expected reduction in real-application failures per unit of effort.
 
+> **Status as of 2026-07-29.** 17 of the 19 rows are struck through, each naming the test
+> that pins it. What is genuinely still open is small and deliberately so:
+>
+> - **Row 9, open shadow roots.** ARIA widgets and cross-origin iframes shipped; shadow
+>   roots did not, because no major ATS is known to put form fields in one. Building for
+>   that would be speculative.
+> - **Row 15, the synthetic `DataTransfer` drop.** Only needed for a dropzone with no
+>   backing `<input type="file">` at all, and react-dropzone always renders one.
+> - **Row 16, a Playwright fixture-page E2E suite.** The saved-HTML replay suite and the
+>   Node DOM-stub harness cover what they can offline; a real headless browser against
+>   local fixture pages is the remaining gap.
+>
+> Struck rows are covered by unit and replay tests, not by a live application to a real
+> employer. Nothing here moves a portal off `FILL_CAPABILITY_UNPROVEN`.
+
 | # | Fix | Severity | Effort | Files to touch | Test to write first |
 |---|---|---|---|---|---|
-| 1 | Clear before typing in the default adapter (stop appending to prefilled fields) | CRITICAL | XS | `browser/nodriver_adapter.py` | Cross-adapter contract test: given a field prefilled with `"old"`, applying `"new"` yields exactly `"new"` — parametrized over all three adapters |
-| 2 | Pass `final_submit_labels_for_workflow(workflow)` at the submit call and add a scored fallback with user confirmation | CRITICAL | S | `runner.py`, `browser/field_detection.py` | `perform_final_submit_*` requests iCIMS's `"Submit Profile"` when the workflow is iCIMS; exact-match miss falls back to a single unique submit-verb candidate and surfaces it for confirmation |
-| 3 | Stop jumping to the submit gate from an unfinished wizard page; separate page-complete from form-complete | CRITICAL | M | `runner.py` | Loop test: page with one unfillable required field + a "Next" button progresses (or pauses) but never emits `READY_TO_SUBMIT` |
-| 4 | Read values back and verify after every write; return `ok:false` with expected/actual | HIGH | S | `browser/field_detection.py`, `runner.py` | Playwright-driven fixture test: a React-controlled input reports `ok:false` when state did not update |
-| 5 | Write through native prototype setters + focus/blur; set `option.selected` | CRITICAL | S | `browser/field_detection.py` | Same Playwright fixture: React controlled `<select>` and consent `<input type=checkbox>` register in component state |
-| 6 | Stop dropping unlabeled fields; extend the label chain (`aria-labelledby`, `legend`, `title`) | CRITICAL | S | `browser/field_detection.py`, `browser/html_replay.py` (keep chains identical) | Replay test on saved real HTML: an `aria-labelledby`-only required input is discovered with a usable label |
-| 7 | Verify progression clicks actually advanced; surface portal validation errors | HIGH | M | `runner.py`, `browser/field_detection.py` | Fixture test: a "Next" click that the page rejects returns `"blocked"` with the extracted error text, and does not increment the step index |
-| 8 | Uploads first → settle via `wait_for_page_text` → re-detect → then text fields | HIGH | M | `runner.py` | Fixture test emulating Workday: values written after a resume-parse repopulation survive |
+| 1 | ~~Clear before typing in the default adapter (stop appending to prefilled fields)~~ **(done: `tests/test_adapter_field_write_contract.py`)** | CRITICAL | XS | `browser/nodriver_adapter.py` | Cross-adapter contract test: given a field prefilled with `"old"`, applying `"new"` yields exactly `"new"` — parametrized over all three adapters |
+| 2 | ~~Pass `final_submit_labels_for_workflow(workflow)` at the submit call and add a scored fallback with user confirmation~~ **(done: `tests/test_final_submit_gate.py`)** | CRITICAL | S | `runner.py`, `browser/field_detection.py` | `perform_final_submit_*` requests iCIMS's `"Submit Profile"` when the workflow is iCIMS; exact-match miss falls back to a single unique submit-verb candidate and surfaces it for confirmation |
+| 3 | ~~Stop jumping to the submit gate from an unfinished wizard page; separate page-complete from form-complete~~ **(done: `tests/test_portal_step_progression.py`)** | CRITICAL | M | `runner.py` | Loop test: page with one unfillable required field + a "Next" button progresses (or pauses) but never emits `READY_TO_SUBMIT` |
+| 4 | ~~Read values back and verify after every write; return `ok:false` with expected/actual~~ **(done: `tests/test_field_read_back.py`)** | HIGH | S | `browser/field_detection.py`, `runner.py` | Playwright-driven fixture test: a React-controlled input reports `ok:false` when state did not update |
+| 5 | ~~Write through native prototype setters + focus/blur; set `option.selected`~~ **(done: `tests/test_field_write_verification.py`)** | CRITICAL | S | `browser/field_detection.py` | Same Playwright fixture: React controlled `<select>` and consent `<input type=checkbox>` register in component state |
+| 6 | ~~Stop dropping unlabeled fields; extend the label chain (`aria-labelledby`, `legend`, `title`)~~ **(done: `tests/test_label_resolution.py`)** | CRITICAL | S | `browser/field_detection.py`, `browser/html_replay.py` (keep chains identical) | Replay test on saved real HTML: an `aria-labelledby`-only required input is discovered with a usable label |
+| 7 | ~~Verify progression clicks actually advanced; surface portal validation errors~~ **(done: `tests/test_portal_step_progression.py`)** | HIGH | M | `runner.py`, `browser/field_detection.py` | Fixture test: a "Next" click that the page rejects returns `"blocked"` with the extracted error text, and does not increment the step index |
+| 8 | ~~Uploads first → settle via `wait_for_page_text` → re-detect → then text fields~~ **(done: `tests/test_upload_before_typing.py`)** | HIGH | M | `runner.py` | Fixture test emulating Workday: values written after a resume-parse repopulation survive |
 | 9 | ARIA widget roles **(done, 69c898f)** / cross-origin iframes **(done, Playwright)** / shadow roots **still open** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
 
 > **F9 status (2026-07-29).** The ARIA half shipped in `69c898f`: `role=combobox|listbox|radiogroup`
@@ -685,16 +700,16 @@ Ordered by expected reduction in real-application failures per unit of effort.
 >
 > **Still open:** open shadow roots.
 
-| 10 | Rank option/answer matching, require a unique winner, pause on ties | HIGH | M | `browser/field_detection.py`, `runner.py`, `answers.py` | Table-driven test: `"India"` does not select `"Indiana"`; `"No, I do not require sponsorship"` does not select the first `"No"`-adjacent option; ambiguous cases return `ok:false` |
-| 11 | Replace fixed post-click sleeps with `wait_for_page_text` + change detection | MEDIUM | S | all three adapters, `runner.py` | Existing `tests/test_page_readiness.py` pattern, extended to the click paths with an injected clock |
-| 12 | Fix the SeleniumBase readiness probe to use `text_length` | MEDIUM | XS | `browser/seleniumbase_adapter.py` | Fake-driver test: a page whose visible text is 10 chars is *not* declared ready despite a long JSON envelope |
-| 13 | Make the Cloudflare auto-solve path reachable | MEDIUM | XS | `browser/seleniumbase_adapter.py` or `browser/field_detection.py` | Test that a Cloudflare-vendor blocker satisfies `_is_cloudflare_blocker` |
-| 14 | Wire up or delete inert plan metadata (`review_text_detected`, per-portal `max_automated_steps`) | MEDIUM | M | `browser/portal_adapters.py`, `runner.py` | Test that `READY_TO_SUBMIT` is not emitted unless a review/confirmation signal was observed |
+| 10 | ~~Rank option/answer matching, require a unique winner, pause on ties~~ **(done: `tests/test_select_option_matching.py`)** | HIGH | M | `browser/field_detection.py`, `runner.py`, `answers.py` | Table-driven test: `"India"` does not select `"Indiana"`; `"No, I do not require sponsorship"` does not select the first `"No"`-adjacent option; ambiguous cases return `ok:false` |
+| 11 | ~~Replace fixed post-click sleeps with `wait_for_page_text` + change detection~~ **(done: `tests/test_post_click_readiness.py`)** | MEDIUM | S | all three adapters, `runner.py` | Existing `tests/test_page_readiness.py` pattern, extended to the click paths with an injected clock |
+| 12 | ~~Fix the SeleniumBase readiness probe to use `text_length`~~ **(done: `tests/test_seleniumbase_readiness_and_cloudflare.py`)** | MEDIUM | XS | `browser/seleniumbase_adapter.py` | Fake-driver test: a page whose visible text is 10 chars is *not* declared ready despite a long JSON envelope |
+| 13 | ~~Make the Cloudflare auto-solve path reachable~~ **(done: `tests/test_seleniumbase_readiness_and_cloudflare.py`)** | MEDIUM | XS | `browser/seleniumbase_adapter.py` or `browser/field_detection.py` | Test that a Cloudflare-vendor blocker satisfies `_is_cloudflare_blocker` |
+| 14 | ~~Wire up or delete inert plan metadata (`review_text_detected`, per-portal `max_automated_steps`)~~ **(done: `tests/test_portal_plan_metadata.py, tests/test_final_submit_gate.py`)** | MEDIUM | M | `browser/portal_adapters.py`, `runner.py` | Test that `READY_TO_SUBMIT` is not emitted unless a review/confirmation signal was observed |
 | 15 | ~~Relax the visibility gate for file inputs~~ **(done: gate exempts file inputs, SeleniumBase reveals before `send_keys`, tests added)**; a true drag-drop event fallback is still open | HIGH | M | `browser/field_detection.py`, `browser/seleniumbase_adapter.py` | Fixture test: an `opacity:0` file input behind a styled dropzone is discovered and receives the file |
-| 16 | Build a real fixture suite: saved HTML from the 6 ATSes + a Playwright fixture-page E2E suite | MEDIUM | L | `tests/` (new `browser_e2e/`), `browser/html_replay.py` (align label chain) | The suite itself — it is what makes fixes 1-15 verifiable and non-regressing |
-| 17 | Rename `live_certification` to a reachability probe; define a real fill-only certification | MEDIUM | S | `browser/live_certification.py`, `browser/portal_adapters.py` | Test that a 200 OK alone cannot produce a "certified" status |
+| 16 | ~~Build a real fixture suite: saved HTML from the 6 ATSes~~ **(done: `tests/test_portal_replay_fixtures.py`; the injected JS is also executed for real against a Node DOM stub, `tests/js_bridge.py`)** + a Playwright fixture-page E2E suite **still open** | MEDIUM | L | `tests/` (new `browser_e2e/`), `browser/html_replay.py` (align label chain) | The suite itself — it is what makes fixes 1-15 verifiable and non-regressing |
+| 17 | ~~Rename `live_certification` to a reachability probe; define a real fill-only certification~~ **(done: `tests/test_live_certification.py`)** | MEDIUM | S | `browser/live_certification.py`, `browser/portal_adapters.py` | Test that a 200 OK alone cannot produce a "certified" status |
 | 18 | ~~Prune or implement: drop `workable` quirk (unregistered) or register Workable~~ **(done: registered, test added)** | LOW | XS | `browser/portal_workflows.py`, `browser/portal_registry.py` | Registry consistency test: every key in `ATS_PORTAL_QUIRKS` and `ATS_ENTRY_ACTIONS` is a registered `portal_id` |
-| 19 | Confirm `APPLYO_AUTOFILL_APPROVED_DEFAULTS` cannot bypass the EEO/criminal/prior-employer review gates | LOW | XS | `field_resolution.py`, `answers.py` | Parametrized test asserting `requires_review=True` for all three categories with the env var set |
+| 19 | ~~Confirm `APPLYO_AUTOFILL_APPROVED_DEFAULTS` cannot bypass the EEO/criminal/prior-employer review gates~~ **(done: `tests/test_runner_autofill_env.py`)** | LOW | XS | `field_resolution.py`, `answers.py` | Parametrized test asserting `requires_review=True` for all three categories with the env var set |
 
 ## What I could not verify, and what would prove it
 
