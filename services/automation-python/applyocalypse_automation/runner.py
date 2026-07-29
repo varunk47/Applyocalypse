@@ -13,7 +13,11 @@ from typing import Literal
 
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
-from .browser.portal_adapters import COMMON_STEP_PROGRESSION_LABELS, progression_labels_for_workflow
+from .browser.portal_adapters import (
+    COMMON_STEP_PROGRESSION_LABELS,
+    final_submit_labels_for_workflow,
+    progression_labels_for_workflow,
+)
 from .browser.portal_state import PortalPageState, classify_portal_page_state
 from .browser.portal_workflows import PortalWorkflow, workflow_for_url
 from .control import WorkerControl, read_worker_control
@@ -47,6 +51,7 @@ FINAL_SUBMIT_LABELS = (
 SAFE_STEP_PROGRESSION_LABELS = COMMON_STEP_PROGRESSION_LABELS
 
 MAX_AUTOMATED_PORTAL_STEPS = 20
+MAX_BLOCKED_PROGRESSION_ATTEMPTS = 3
 
 SUBMISSION_CONFIRMATION_PATTERNS = (
     "application submitted",
@@ -186,13 +191,33 @@ def wait_for_document_approval(work_dir: Path, run_id: str, *, poll_seconds: flo
         ).emit()
 
 
-async def perform_final_submit_with_control(adapter: BrowserAdapter, work_dir: Path, run_id: str, final_submit_control: WorkerControl) -> bool:
+def final_submit_labels_for(workflow: PortalWorkflow | None) -> list[str]:
+    """Portal-specific submit labels first, then the generic ones.
+
+    The click matcher demands an exact normalized match, so a portal whose button
+    reads "Submit Profile" (iCIMS) is unreachable from the generic list alone.
+    Order is preserved and duplicates dropped so the portal's own wording wins.
+    """
+    labels = list(final_submit_labels_for_workflow(workflow)) if workflow is not None else []
+    labels.extend(FINAL_SUBMIT_LABELS)
+    return list(dict.fromkeys(labels))
+
+
+async def perform_final_submit_with_control(
+    adapter: BrowserAdapter,
+    work_dir: Path,
+    run_id: str,
+    final_submit_control: WorkerControl,
+    *,
+    workflow: PortalWorkflow | None = None,
+) -> bool:
     blockers = await adapter.detect_blockers()
     if blockers:
         if await pause_for_blockers(adapter, work_dir, run_id, blockers, context="final submission"):
             return False
 
-    result = await adapter.click_final_submit(list(FINAL_SUBMIT_LABELS))
+    labels = final_submit_labels_for(workflow)
+    result = await adapter.click_final_submit(labels)
     if not result.ok:
         WorkerEvent(
             event_type=EventType.USER_REVIEW_REQUIRED,
@@ -200,9 +225,13 @@ async def perform_final_submit_with_control(adapter: BrowserAdapter, work_dir: P
             step_id=final_submit_control.step_id,
             severity=Severity.WARN,
             message="Final submit approval was received, but no exact final submit control could be clicked",
-            machine_state={"reason": "FINAL_SUBMIT_CONTROL_NOT_FOUND"},
+            machine_state={
+                "reason": "FINAL_SUBMIT_CONTROL_NOT_FOUND",
+                "portal_id": workflow.portal_id if workflow is not None else None,
+                "attempted_labels": labels,
+            },
             ui_state={"requires_user_review": True, "current_step": "final_submit"},
-            payload=result.payload,
+            payload={**result.payload, "attempted_labels": labels},
         ).emit()
         return False
 
@@ -253,11 +282,17 @@ async def perform_final_submit_with_control(adapter: BrowserAdapter, work_dir: P
     return False
 
 
-async def perform_final_submit_after_approval(adapter: BrowserAdapter, work_dir: Path, run_id: str) -> bool:
+async def perform_final_submit_after_approval(
+    adapter: BrowserAdapter,
+    work_dir: Path,
+    run_id: str,
+    *,
+    workflow: PortalWorkflow | None = None,
+) -> bool:
     final_submit_control = await asyncio.to_thread(wait_for_final_submit_decision, work_dir, run_id)
     if final_submit_control is None:
         return False
-    return await perform_final_submit_with_control(adapter, work_dir, run_id, final_submit_control)
+    return await perform_final_submit_with_control(adapter, work_dir, run_id, final_submit_control, workflow=workflow)
 
 
 def emit_worker_cancelled(run_id: str, control: WorkerControl, *, message: str) -> None:
@@ -1145,6 +1180,98 @@ async def execute_portal_entry_action(
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class PortalPageFingerprint:
+    """Enough page identity to tell "we moved on" from "the click did nothing"."""
+
+    url: str
+    title: str
+    text: str
+    text_digest: str
+    selectors: frozenset[str]
+
+
+async def capture_portal_page_fingerprint(adapter: object) -> PortalPageFingerprint | None:
+    """Reads the current page identity, or None when the page cannot be read.
+
+    None means "cannot tell" and must never be read as "unchanged" - a wrong
+    blocked verdict would stall a run that is actually progressing fine.
+    """
+    try:
+        result = await adapter.extract_visible_text()  # type: ignore[attr-defined]
+        fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    if not result.ok:
+        return None
+    text = str(result.payload.get("text") or "")
+    return PortalPageFingerprint(
+        url=str(result.payload.get("url") or ""),
+        title=str(result.payload.get("title") or ""),
+        text=text,
+        text_digest=hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest(),
+        selectors=frozenset(str(field.selector or field.field_id) for field in fields),
+    )
+
+
+def portal_page_changed(before: PortalPageFingerprint | None, after: PortalPageFingerprint | None) -> bool:
+    """True unless we can positively show the page stayed put.
+
+    URL, title and the set of field selectors are the stable signals: a real
+    wizard step carries different inputs. Visible text alone is too noisy to
+    judge on (timers, toasts, character counters), so it only decides when the
+    page has no fields at all to compare.
+    """
+    if before is None or after is None:
+        return True
+    if before.url != after.url or before.title != after.title:
+        return True
+    if before.selectors != after.selectors:
+        return True
+    if not before.selectors and not after.selectors:
+        return before.text_digest != after.text_digest
+    return False
+
+
+PAGE_CHANGE_TIMEOUT_S = 8.0
+PAGE_CHANGE_POLL_INTERVAL_S = 0.5
+
+
+async def wait_for_portal_page_change(
+    adapter: object,
+    before: PortalPageFingerprint | None,
+    *,
+    timeout_s: float = PAGE_CHANGE_TIMEOUT_S,
+    poll_interval_s: float = PAGE_CHANGE_POLL_INTERVAL_S,
+    sleep: object = asyncio.sleep,
+    clock: object = time.monotonic,
+) -> PortalPageFingerprint | None:
+    """Polls until the page differs from `before`, or the timeout elapses.
+
+    Returns the last fingerprint read either way, so the caller can diff the
+    text of a page that never moved and surface the portal's own error copy.
+    """
+    started = clock()
+    after = await capture_portal_page_fingerprint(adapter)
+    while portal_page_changed(before, after) is False and clock() - started < timeout_s:
+        await sleep(poll_interval_s)
+        after = await capture_portal_page_fingerprint(adapter)
+    return after
+
+
+MAX_VALIDATION_EXCERPT_LINES = 8
+MAX_VALIDATION_EXCERPT_CHARS = 200
+
+
+def new_visible_lines(before: PortalPageFingerprint | None, after: PortalPageFingerprint | None) -> list[str]:
+    """Lines present after the click but not before - usually the validation copy."""
+    if before is None or after is None:
+        return []
+    previous = {line.strip() for line in before.text.splitlines() if line.strip()}
+    fresh = [line.strip() for line in after.text.splitlines() if line.strip() and line.strip() not in previous]
+    return [line[:MAX_VALIDATION_EXCERPT_CHARS] for line in fresh[:MAX_VALIDATION_EXCERPT_LINES]]
+
+
 async def attempt_safe_step_progression(
     *,
     adapter: object,
@@ -1153,9 +1280,11 @@ async def attempt_safe_step_progression(
     workflow: PortalWorkflow,
     context: str,
     step_index: int,
+    page_change_timeout_s: float = PAGE_CHANGE_TIMEOUT_S,
 ) -> str:
     click_by_text = adapter.click_by_text
     labels = list(progression_labels_for_workflow(workflow))
+    before_click = await capture_portal_page_fingerprint(adapter)
     result = await click_by_text(labels)
     message = str(result.payload.get("message") or getattr(result, "message", ""))
     if not result.ok and message == "no matching safe portal action was found":
@@ -1191,6 +1320,41 @@ async def attempt_safe_step_progression(
         blockers = await adapter.detect_blockers()  # type: ignore[attr-defined]
         if blockers and await pause_for_blockers(adapter, work_dir, run_id, blockers, context=f"{context} step progression"):
             return "cancelled"
+
+        # A successful click is not a successful step. Portals answer an invalid
+        # form by re-rendering the same page with error copy, and treating that
+        # as progress makes the worker march through phantom steps and then ask
+        # for a submit button that was never there.
+        after_click = await wait_for_portal_page_change(adapter, before_click, timeout_s=page_change_timeout_s)
+        if not portal_page_changed(before_click, after_click):
+            validation_lines = new_visible_lines(before_click, after_click)
+            WorkerEvent(
+                event_type=EventType.PAUSED,
+                run_id=run_id,
+                step_id=None,
+                severity=Severity.WARN,
+                message="The portal stayed on the same step after the progression click",
+                machine_state={
+                    "reason": "PORTAL_STEP_DID_NOT_ADVANCE",
+                    "portal_id": workflow.portal_id,
+                    "workflow_kind": workflow.workflow_kind,
+                    "context": context,
+                    "action_role": "STEP_PROGRESSION",
+                    "step_index": step_index,
+                    "validation_line_count": len(validation_lines),
+                },
+                ui_state={"requires_user_review": True, "current_step": "portal_step"},
+                payload={
+                    "portal_id": workflow.portal_id,
+                    "workflow_kind": workflow.workflow_kind,
+                    "action_role": "STEP_PROGRESSION",
+                    "step_index": step_index,
+                    "attempted_labels": labels,
+                    "validation_messages": validation_lines,
+                    "instructions": "The portal rejected this step. Resolve the highlighted fields in the browser, then resume.",
+                },
+            ).emit()
+            return "blocked"
         return "advanced"
 
     WorkerEvent(
@@ -1677,11 +1841,12 @@ async def run_browser_apply_after_review(
         fields = await adapter.detect_fields()
     upload_attempt = 0
     progression_step_index = 0
+    blocked_progression_attempts = 0
     # Track which required-but-unanswered fields the user has already been shown, so we
     # present them ONCE. If a resume surfaces no NEW missing field, we stop re-pausing and
-    # fall through to the final submit gate — the user fills any leftover blanks in the
-    # visible browser and approves submit there. This prevents the infinite FIELD_REVIEW loop
-    # on fields that have no profile value (Country, LinkedIn, work-auth, EEO, ...).
+    # try to advance the wizard instead; the user fills any leftover blanks in the visible
+    # browser. This prevents the infinite FIELD_REVIEW loop on fields that have no profile
+    # value (Country, LinkedIn, work-auth, EEO, ...).
     presented_missing_answer_keys: set[str] = set()
     while True:
         if upload_attempt > 0:
@@ -1830,7 +1995,18 @@ async def run_browser_apply_after_review(
                     payload={"field_label": field.label, "field_type": field.field_type, **result.payload},
                 ).emit()
 
-        if not missing_required_documents and not missing_required_answers:
+        current_missing_answer_keys = {
+            str(missing.get("selector") or missing.get("field_label") or "") for missing in missing_required_answers
+        }
+        has_new_missing_answers = bool(current_missing_answer_keys - presented_missing_answer_keys)
+
+        # Required answers that are still blank after being presented once have no
+        # saved profile value, so pausing again would loop forever. At that point
+        # the page is as complete as automation can make it and the wizard should
+        # still be advanced: breaking straight to the submit gate instead, as this
+        # used to, strands every page after the first on a multi-step portal and
+        # then asks for a submit button that only exists on the last one.
+        if not missing_required_documents and not (missing_required_answers and has_new_missing_answers):
             await capture_timeline_screenshot_if_available(
                 adapter=adapter,
                 work_dir=work_dir,
@@ -1875,6 +2051,41 @@ async def run_browser_apply_after_review(
             if progression_result == "cancelled":
                 await adapter.close()
                 return
+            if progression_result == "blocked":
+                # The portal rejected the step and already told the user why. Give the
+                # human a bounded number of chances to clear it in the visible browser
+                # rather than clicking the same rejected button until the step budget
+                # runs out.
+                blocked_progression_attempts += 1
+                if blocked_progression_attempts > MAX_BLOCKED_PROGRESSION_ATTEMPTS:
+                    await adapter.close()
+                    return
+                if os.getenv("APPLYO_WORKER_WAIT_FOR_REVIEW") != "1":
+                    await adapter.close()
+                    return
+                control = await asyncio.to_thread(
+                    wait_for_review_resume,
+                    work_dir,
+                    run_id=run_id,
+                    current_step="portal_step",
+                    context="blocked step progression review",
+                )
+                if control.command == "CANCEL":
+                    WorkerEvent(
+                        event_type=EventType.FAILED,
+                        run_id=run_id,
+                        step_id=control.step_id,
+                        severity=Severity.WARN,
+                        message="Worker cancelled while the portal step was blocked",
+                        machine_state={"reason": control.reason or "USER_CANCELLED"},
+                        ui_state={"cancelled": True},
+                        payload={"code": "USER_CANCELLED"},
+                    ).emit()
+                    await adapter.close()
+                    return
+                fields = await adapter.detect_fields()
+                upload_attempt += 1
+                continue
             if progression_result == "advanced":
                 progression_step_index += 1
                 await capture_timeline_screenshot_if_available(
@@ -1905,10 +2116,6 @@ async def run_browser_apply_after_review(
                 continue
             break
 
-        current_missing_answer_keys = {
-            str(missing.get("selector") or missing.get("field_label") or "") for missing in missing_required_answers
-        }
-        has_new_missing_answers = bool(current_missing_answer_keys - presented_missing_answer_keys)
         if missing_required_answers and has_new_missing_answers:
             presented_missing_answer_keys |= current_missing_answer_keys
             WorkerEvent(
@@ -1953,12 +2160,6 @@ async def run_browser_apply_after_review(
             auto_submit_enabled = control_auto_submit_enabled(control) or auto_submit_enabled
             upload_attempt += 1
             continue
-
-        # Required answers remain blank but were already presented once (they have no saved
-        # profile value). Do not re-pause forever — fall through to the final submit gate,
-        # where the visible browser lets the user fill any leftover fields before approving.
-        if missing_required_answers and not missing_required_documents:
-            break
 
         WorkerEvent(
             event_type=EventType.PAUSED,
@@ -2035,9 +2236,9 @@ async def run_browser_apply_after_review(
             ui_state={"current_step": "final_submit"},
             payload={"approval_type": "AUTO_SUBMIT"},
         ).emit()
-        await perform_final_submit_with_control(adapter, work_dir, run_id, auto_submit_control)
+        await perform_final_submit_with_control(adapter, work_dir, run_id, auto_submit_control, workflow=workflow)
     else:
-        await perform_final_submit_after_approval(adapter, work_dir, run_id)
+        await perform_final_submit_after_approval(adapter, work_dir, run_id, workflow=workflow)
     await adapter.close()
 
 
