@@ -1,5 +1,6 @@
 const { existsSync } = require("node:fs");
-const { join } = require("node:path");
+const { join, resolve } = require("node:path");
+const { brandWindowsExecutable } = require("./brand-windows-executable.cjs");
 
 exports.default = async function afterPack(context) {
   const resourcesDir = join(context.appOutDir, "resources", "automation-python");
@@ -20,4 +21,35 @@ exports.default = async function afterPack(context) {
   if (!existsSync(initialMigrationPath)) {
     throw new Error(`Applyocalypse SQLite migrations are missing from packaged resources: ${migrationsDir}`);
   }
+
+  if (context.electronPlatformName !== "win32") {
+    return;
+  }
+
+  // electron-builder skips its own rcedit pass because signAndEditExecutable is
+  // off; see scripts/build/brand-windows-executable.cjs for why. Without this
+  // the app wears Electron's logo and calls itself Electron everywhere Windows
+  // shows a program to a person.
+  const { appInfo } = context.packager;
+  const executablePath = join(context.appOutDir, `${appInfo.productFilename}.exe`);
+  if (!existsSync(executablePath)) {
+    throw new Error(`Applyocalypse executable is missing from the packaged output: ${executablePath}`);
+  }
+
+  const iconPath = resolve(__dirname, "..", "..", "apps", "desktop", "electron-builder", "icon.ico");
+  if (!existsSync(iconPath)) {
+    throw new Error(
+      `Application icon is missing: ${iconPath}. Rebuild it with scripts/build/generate-app-icon.mjs.`
+    );
+  }
+
+  await brandWindowsExecutable({
+    executablePath,
+    iconPath,
+    productName: appInfo.productName,
+    version: appInfo.version,
+    description: appInfo.description || appInfo.productName,
+    copyright: appInfo.copyright,
+    companyName: appInfo.companyName || undefined
+  });
 };

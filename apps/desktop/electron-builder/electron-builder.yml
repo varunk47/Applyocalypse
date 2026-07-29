@@ -2,6 +2,11 @@ appId: com.applyocalypse.desktop
 productName: Applyocalypse
 directories:
   output: release
+  # Where electron-builder looks for build-time assets it does not package,
+  # icon.ico among them. It defaults to `build/`, which this app does not have,
+  # so pointing it at the folder that already holds this config lets the icon
+  # keys below stay bare filenames.
+  buildResources: electron-builder
 asar: true
 # Native rebuilds are handled by scripts/dev/rebuild-native.mjs (prebuild-install
 # on better-sqlite3@12 only). electron-builder's own rebuild walks the workspace
@@ -21,6 +26,10 @@ extraResources:
     filter:
       - "**/*.sql"
 win:
+  # The brand mark, built from landing/assets/favicon.svg by
+  # scripts/build/generate-app-icon.mjs. Without it every build printed
+  # "default Electron icon is used" and shipped Electron's logo everywhere.
+  icon: icon.ico
   target:
     - target: dir
       arch:
@@ -28,6 +37,13 @@ win:
     - target: nsis
       arch:
         - x64
+  # This flag gates signing and executable resource editing together, and there
+  # is no code signing certificate yet. Turning it on makes electron-builder
+  # fetch a toolchain whose archive holds macOS dylib symlinks; creating those
+  # needs a privilege Windows withholds outside Developer Mode, so the download
+  # fails and takes the build with it. scripts/build/after-pack.cjs writes the
+  # icon and version strings into the exe instead. Revisit once a certificate
+  # exists and the signing half is actually wanted.
   signAndEditExecutable: false
   verifyUpdateCodeSignature: false
 nsis:
@@ -36,5 +52,7 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}.${ext}
   shortcutName: Applyocalypse
+  installerIcon: icon.ico
+  uninstallerIcon: icon.ico
 afterPack: ../../scripts/build/after-pack.cjs
 afterSign: ../../scripts/build/after-sign.cjs
