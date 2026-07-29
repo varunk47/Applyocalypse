@@ -1,104 +1,92 @@
-import { For, Show, createSignal, onMount } from 'solid-js'
+import { For, Show, createEffect, createMemo, createSignal, on } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import { createStore } from 'solid-js/store'
-import { ChevronRight, ShieldCheck, Upload } from 'lucide-solid'
+import { ArrowRight, Check } from 'lucide-solid'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { useSettingsStore } from '../contexts/SettingsStore'
-import { gsap } from '../animations/gsap'
-import { enterStepFromRight, exitStepToLeft } from '../animations/screenTransition'
-import { PROVIDER_OPTIONS } from '../utils/providerOptions'
-import { GeneralQuestionsStep } from '../features/onboarding/GeneralQuestionsStep'
-import { EducationStep } from '../features/onboarding/EducationStep'
-import { WorkExperienceStep } from '../features/onboarding/WorkExperienceStep'
-import { EqualEmploymentStep } from '../features/onboarding/EqualEmploymentStep'
+import { prefersReducedMotion } from '../animations/motion'
+import { enterStepFromRight } from '../animations/screenTransition'
+import { ResumeDrop } from '../features/onboarding/ResumeDrop'
+import {
+  ConfirmLedger,
+  type EducationRow,
+  type ExperienceRow,
+  type IdentityFields,
+} from '../features/onboarding/ConfirmLedger'
+import { FinalDetails, type CredentialFields, type ProviderFields } from '../features/onboarding/FinalDetails'
 import { deriveLegalName } from '../features/onboarding/onboardingUtils'
 import { formatDateMMDDYYYY, parseDateMMDDYYYY, deriveFirstName, deriveLastName } from '@applyocalypse/shared-types'
 import { EQUAL_EMPLOYMENT_SEED_DEFAULTS } from '@applyocalypse/shared-schemas'
 
-type OnboardingStep =
-  | 'welcome'
-  | 'upload'
-  | 'upload-supporting'
-  | 'upload-cover'
-  | 'parse-review'
-  | 'general-questions'
-  | 'education'
-  | 'work-experience'
-  | 'equal-employment'
-  | 'work-auth'
-  | 'credentials'
-  | 'provider'
-  | 'done'
+/**
+ * Onboarding is four moments, not thirteen steps: hand over a resume, confirm
+ * what we read out of it, answer the handful of things a resume cannot say, go.
+ */
+type Moment = 'resume' | 'review' | 'details' | 'ready'
 
-const STEPS: OnboardingStep[] = [
-  'welcome', 'upload', 'upload-supporting', 'upload-cover', 'parse-review',
-  'general-questions', 'education', 'work-experience', 'equal-employment',
-  'work-auth', 'credentials', 'provider', 'done',
-]
-
-const STEP_LABELS: Record<OnboardingStep, string> = {
-  'welcome':           'Welcome',
-  'upload':            'Upload Resume',
-  'upload-supporting': 'Supporting Details',
-  'upload-cover':      'Cover Letter',
-  'parse-review':      'Review Profile',
-  'general-questions': 'Contact Info',
-  'education':         'Education',
-  'work-experience':   'Work Experience',
-  'equal-employment':  'Equal Employment',
-  'work-auth':         'Work Authorization',
-  'credentials':       'App Credentials',
-  'provider':          'LLM Provider',
-  'done':              'Ready',
+const MOMENTS: Moment[] = ['resume', 'review', 'details', 'ready']
+const MOMENT_LABELS: Record<Moment, string> = {
+  resume: 'Resume',
+  review: 'Review',
+  details: 'Details',
+  ready: 'Ready',
 }
 
 const applicationPasswordIsValid = (value: string): boolean =>
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(value)
 
-export default function OnboardingScreen() {
-  const {
-    state: profileState,
-    createStarterProfile,
-    saveProfile,
-    saveStructuredSections,
-    pickAndRegisterResume,
-    pickAndRegisterSupportingDetails,
-    pickAndRegisterCoverLetter,
-  } = useProfileStore()
-  const { saveProviderApiKey } = useSettingsStore()
+const emptyExperience = (): ExperienceRow => ({
+  company: '',
+  title: '',
+  location: '',
+  startDate: '',
+  endDate: '',
+  bullets: [],
+})
+
+const emptyEducation = (): EducationRow => ({
+  institution: '',
+  degree: '',
+  field: '',
+  gpa: '',
+  startDate: '',
+  endDate: '',
+})
+
+function OnboardingScreen() {
   const navigate = useNavigate()
+  const { state: profileState, createStarterProfile, saveStructuredSections, saveProfile, pickAndRegisterResume } =
+    useProfileStore()
+  const { state: settingsState, saveProviderApiKey } = useSettingsStore()
 
-  const [stepIndex, setStepIndex] = createSignal(0)
+  const [momentIndex, setMomentIndex] = createSignal(0)
+  const [isSaving, setIsSaving] = createSignal(false)
+  const [isPicking, setIsPicking] = createSignal(false)
+  const [prefilled, setPrefilled] = createSignal(false)
+  let stageRef: HTMLDivElement | undefined
+
   const [form, setForm] = createStore({
-    // Credentials (required for profile creation)
     legalName: '',
-    email: '',
-    location: '',
-    applicationEmail: '',
-    applicationPassword: '',
-    gmailOtpEnabled: false,
 
-    // General questions
+    // Identity and address, seeded from the resume then corrected in the ledger
     firstName: '',
     lastName: '',
+    email: '',
     phone: '',
-    country: '',
-    city: '',
-    state: '',
-    addressLine1: '',
-    addressLine2: '',
-    postalCode: '',
-    county: '',
     linkedinUrl: '',
     githubUrl: '',
+    addressLine1: '',
+    addressLine2: '',
+    city: '',
+    state: '',
+    postalCode: '',
+    county: '',
+    country: '',
 
-    // Education (prefilled from parsed resume on education step mount)
-    education: [] as Array<{ institution: string; degree: string; field: string; gpa: string; startDate: string; endDate: string }>,
+    education: [] as EducationRow[],
+    experience: [] as ExperienceRow[],
 
-    // Work experience (prefilled from parsed resume on work-experience step mount)
-    experience: [] as Array<{ company: string; title: string; location: string; startDate: string; endDate: string; bullets: string[] }>,
-
-    // Equal employment defaults (seeded with owner's defaults)
+    // Equal employment defaults (seeded, always held for review before submission)
     eeoAuthorizedToWorkUS: EQUAL_EMPLOYMENT_SEED_DEFAULTS.authorizedToWorkUS as string | null,
     eeoRequiresSponsorship: EQUAL_EMPLOYMENT_SEED_DEFAULTS.requiresSponsorship as string | null,
     eeoSponsorshipDetailText: EQUAL_EMPLOYMENT_SEED_DEFAULTS.sponsorshipDetailText ?? '',
@@ -110,138 +98,162 @@ export default function OnboardingScreen() {
     eeoHispanicOrLatino: EQUAL_EMPLOYMENT_SEED_DEFAULTS.hispanicOrLatino as string | null,
     eeoSexualOrientation: EQUAL_EMPLOYMENT_SEED_DEFAULTS.sexualOrientation as string[] | null,
 
-    // Work authorization
     workAuthSummary: '',
     sponsorshipRequired: false,
 
-    // Provider
+    applicationEmail: '',
+    applicationPassword: '',
+    gmailOtpEnabled: true,
+
     provider: 'openai',
     providerDisplayName: 'OpenAI',
-    providerModel: '',
     providerApiKey: '',
+    providerModel: '',
   })
 
-  let stepRef: HTMLDivElement | undefined
-  let progressFillRef: HTMLDivElement | undefined
+  const moment = (): Moment => MOMENTS[Math.min(momentIndex(), MOMENTS.length - 1)] as Moment
+  const progressPct = () => `${(momentIndex() / (MOMENTS.length - 1)) * 100}%`
 
-  const step = (): OnboardingStep => STEPS[Math.min(stepIndex(), STEPS.length - 1)] ?? 'welcome'
-  const progress = () => ((stepIndex() + 1) / STEPS.length) * 100
+  const resumeFile = () => profileState.uploadedFiles.find((file) => file.fileKind === 'RESUME')
+  const parsed = () => profileState.parsedDocuments[0] ?? null
+  const canonical = createMemo(() => parsed()?.canonical ?? null)
+  const isReading = () => Boolean(resumeFile()) && !parsed()
 
-  onMount(() => {
-    if (progressFillRef) {
-      gsap.to(progressFillRef, { width: `${progress()}%`, duration: 0.4, ease: 'power3.out' })
-    }
-  })
+  const go = (next: Moment) => setMomentIndex(MOMENTS.indexOf(next))
 
-  const animateToStep = (direction: 'forward' | 'back') => {
-    if (!stepRef) return
-    const outFn = direction === 'forward' ? exitStepToLeft : (el: Element, done: () => void) => {
-      gsap.to(el, { x: 60, opacity: 0, duration: 0.18, ease: 'expo.in', onComplete: done })
-    }
-    const inFn = direction === 'forward' ? enterStepFromRight : (el: Element, done: () => void) => {
-      gsap.fromTo(el, { x: -60, opacity: 0 }, { x: 0, opacity: 1, duration: 0.35, ease: 'expo.out', onComplete: done })
-    }
-    outFn(stepRef, () => { inFn(stepRef!, () => {}) })
-  }
+  createEffect(
+    on(momentIndex, () => {
+      if (stageRef && !prefersReducedMotion()) enterStepFromRight(stageRef, () => {})
+    }, { defer: true }),
+  )
 
-  const advance = () => {
-    if (stepIndex() >= STEPS.length - 1) return
-    animateToStep('forward')
-    setStepIndex((i) => i + 1)
-    if (progressFillRef) {
-      gsap.to(progressFillRef, { width: `${((stepIndex() + 1) / STEPS.length) * 100}%`, duration: 0.4, ease: 'power3.out' })
-    }
-  }
+  /**
+   * Seed the ledger from the parse the moment it lands. The parse is async, so
+   * the user can already be sitting on the review screen when it arrives. Runs
+   * once: after that the store holds the user's corrections, not the parser's
+   * guesses, and re-seeding would throw them away.
+   */
+  createEffect(() => {
+    const doc = canonical()
+    if (!doc || prefilled()) return
+    setPrefilled(true)
 
-  const retreat = () => {
-    if (stepIndex() <= 0) return
-    animateToStep('back')
-    setStepIndex((i) => i - 1)
-    if (progressFillRef) {
-      gsap.to(progressFillRef, { width: `${((stepIndex() + 1) / STEPS.length) * 100}%`, duration: 0.4, ease: 'power3.out' })
-    }
-  }
-
-  // Prefill general-questions from parsed resume canonical when entering that step
-  const prefillGeneralFromParsed = () => {
-    const canonical = profileState.parsedDocuments[0]?.canonical
-    if (!canonical) return
-    const name = canonical.identity.legalName ?? ''
-    if (name && !form.firstName) {
+    const name = doc.identity.legalName ?? ''
+    if (name) {
       setForm('firstName', deriveFirstName(name))
       setForm('lastName', deriveLastName(name))
     }
-    if (canonical.identity.email && !form.email) setForm('email', canonical.identity.email)
-    if (canonical.identity.phone && !form.phone) setForm('phone', canonical.identity.phone)
-    if (canonical.identity.location && !form.city) setForm('city', canonical.identity.location)
+    if (doc.identity.email) setForm('email', doc.identity.email)
+    if (doc.identity.phone) setForm('phone', doc.identity.phone)
+    if (doc.identity.location) setForm('city', doc.identity.location)
+    for (const link of doc.identity.links) {
+      if (/linkedin/i.test(link.url) && !form.linkedinUrl) setForm('linkedinUrl', link.url)
+      if (/github/i.test(link.url) && !form.githubUrl) setForm('githubUrl', link.url)
+    }
+
+    setForm(
+      'experience',
+      doc.experience.map((entry) => ({
+        company: entry.company,
+        title: entry.title,
+        location: entry.location ?? '',
+        startDate: formatDateMMDDYYYY(entry.startDate) ?? '',
+        endDate: formatDateMMDDYYYY(entry.endDate) ?? '',
+        bullets: entry.bullets,
+      })),
+    )
+    setForm(
+      'education',
+      doc.education.map((entry) => ({
+        institution: entry.institution,
+        degree: entry.degree ?? '',
+        field: entry.field ?? '',
+        gpa: '',
+        startDate: formatDateMMDDYYYY(entry.startDate) ?? '',
+        endDate: formatDateMMDDYYYY(entry.endDate) ?? '',
+      })),
+    )
+  })
+
+  const startManualEntry = () => {
+    setPrefilled(true)
+    if (form.experience.length === 0) setForm('experience', [emptyExperience()])
+    if (form.education.length === 0) setForm('education', [emptyEducation()])
+    go('review')
   }
 
-  // Prefill education from parsed resume canonical
-  const prefillEducation = () => {
-    if (form.education.length > 0) return
-    const entries = profileState.parsedDocuments[0]?.canonical.education ?? []
-    setForm('education', entries.map((e) => ({
-      institution: e.institution,
-      degree: e.degree ?? '',
-      field: e.field ?? '',
-      gpa: '',
-      startDate: formatDateMMDDYYYY(e.startDate) ?? '',
-      endDate: formatDateMMDDYYYY(e.endDate) ?? '',
-    })))
+  const handleChooseResume = async () => {
+    setIsPicking(true)
+    try {
+      await pickAndRegisterResume()
+    } finally {
+      setIsPicking(false)
+    }
+    if (profileState.uploadedFiles.some((file) => file.fileKind === 'RESUME')) go('review')
   }
 
-  // Prefill work experience from parsed resume canonical
-  const prefillExperience = () => {
-    if (form.experience.length > 0) return
-    const entries = profileState.parsedDocuments[0]?.canonical.experience ?? []
-    setForm('experience', entries.map((e) => ({
-      company: e.company,
-      title: e.title,
-      location: e.location ?? '',
-      startDate: formatDateMMDDYYYY(e.startDate) ?? '',
-      endDate: formatDateMMDDYYYY(e.endDate) ?? '',
-      bullets: e.bullets ?? [],
-    })))
-  }
+  /**
+   * One save for the whole tail. The provider key is saved last and separately:
+   * it is optional, and a rejected key must not cost the user their profile.
+   */
+  const handleFinish = async () => {
+    setIsSaving(true)
+    try {
+      await createStarterProfile({
+        legalName: deriveLegalName(form.firstName, form.lastName, form.legalName),
+        email: form.email || null,
+        location: [form.city, form.state, form.country].filter(Boolean).join(', ') || null,
+        applicationEmail: form.applicationEmail,
+        applicationPassword: form.applicationPassword,
+        gmailOtpEnabled: form.gmailOtpEnabled,
+        workAuthorization: { summary: form.workAuthSummary, sponsorshipRequired: form.sponsorshipRequired },
+      })
+      if (profileState.error) return
 
-  const handleCreateProfile = async () => {
-    const legalName = deriveLegalName(form.firstName, form.lastName, form.legalName)
-    await createStarterProfile({
-      legalName,
-      email: form.email || null,
-      location: [form.city, form.state, form.country].filter(Boolean).join(', ') || form.location || null,
-      applicationEmail: form.applicationEmail,
-      applicationPassword: form.applicationPassword,
-      gmailOtpEnabled: form.gmailOtpEnabled,
-      workAuthorization: { summary: form.workAuthSummary, sponsorshipRequired: form.sponsorshipRequired },
-    })
-    if (profileState.error) return
-    const profileId = profileState.profile?.id
-    if (profileId) {
+      const profileId = profileState.profile?.id
+      if (!profileId) return
+
       await saveStructuredSections({
         profileId,
-        education: form.education.map((e) => ({
-          institution: e.institution,
-          degree: e.degree || null,
-          field: e.field || null,
-          gpa: e.gpa || null,
-          startDate: parseDateMMDDYYYY(e.startDate),
-          endDate: parseDateMMDDYYYY(e.endDate),
+        education: form.education
+          .filter((entry) => entry.institution.trim())
+          .map((entry) => ({
+            institution: entry.institution,
+            degree: entry.degree || null,
+            field: entry.field || null,
+            gpa: entry.gpa || null,
+            startDate: parseDateMMDDYYYY(entry.startDate),
+            endDate: parseDateMMDDYYYY(entry.endDate),
+          })),
+        experience: form.experience
+          .filter((entry) => entry.company.trim() || entry.title.trim())
+          .map((entry) => ({
+            company: entry.company,
+            title: entry.title,
+            location: entry.location || null,
+            startDate: parseDateMMDDYYYY(entry.startDate),
+            endDate: parseDateMMDDYYYY(entry.endDate),
+            bullets: entry.bullets,
+          })),
+        projects: (canonical()?.projects ?? []).map((entry) => ({
+          name: entry.name,
+          role: entry.role,
+          summary: entry.summary,
+          bullets: entry.bullets,
+          tools: entry.tools,
+          links: entry.links,
         })),
-        experience: form.experience.map((e) => ({
-          company: e.company,
-          title: e.title,
-          location: e.location || null,
-          startDate: parseDateMMDDYYYY(e.startDate),
-          endDate: parseDateMMDDYYYY(e.endDate),
-          bullets: e.bullets,
+        skillGroups: (canonical()?.skillGroups ?? []).map((group) => ({
+          label: group.label,
+          skills: group.skills,
         })),
-        projects: [],
-        skillGroups: [],
       })
-      if (profileState.profile) {
+      if (profileState.error) return
+
+      const profile = profileState.profile
+      if (profile) {
         await saveProfile({
-          ...profileState.profile,
+          ...profile,
           firstName: form.firstName || null,
           lastName: form.lastName || null,
           phone: form.phone || null,
@@ -271,195 +283,134 @@ export default function OnboardingScreen() {
             criminalRecordDefault: 'No',
           },
         })
+        if (profileState.error) return
       }
+
+      if (form.providerApiKey.trim()) {
+        await saveProviderApiKey({
+          provider: form.provider as 'openai',
+          displayName: form.providerDisplayName,
+          apiKey: form.providerApiKey,
+          ...(form.providerModel ? { metadata: { defaultModel: form.providerModel } } : {}),
+        })
+      }
+
+      go('ready')
+    } finally {
+      setIsSaving(false)
     }
-    if (!profileState.error) advance()
   }
 
-  const handleSaveProvider = async () => {
-    await saveProviderApiKey({
-      provider: form.provider as 'openai',
-      displayName: form.providerDisplayName,
-      apiKey: form.providerApiKey,
-      ...(form.providerModel ? { metadata: { defaultModel: form.providerModel } } : {}),
-    })
-    advance()
-  }
+  const identity = (): IdentityFields => ({
+    firstName: form.firstName,
+    lastName: form.lastName,
+    email: form.email,
+    phone: form.phone,
+    linkedinUrl: form.linkedinUrl,
+    githubUrl: form.githubUrl,
+    addressLine1: form.addressLine1,
+    addressLine2: form.addressLine2,
+    city: form.city,
+    state: form.state,
+    postalCode: form.postalCode,
+    county: form.county,
+    country: form.country,
+  })
 
-  const handleComplete = () => navigate('/', { replace: true })
+  const credentials = (): CredentialFields => ({
+    applicationEmail: form.applicationEmail,
+    applicationPassword: form.applicationPassword,
+    gmailOtpEnabled: form.gmailOtpEnabled,
+  })
 
-  const resumeFile = () => profileState.uploadedFiles.find((f) => f.fileKind === 'RESUME')
-  const supportingFile = () => profileState.uploadedFiles.find((f) => f.fileKind === 'SUPPORTING_DETAILS')
-  const coverFile = () => profileState.uploadedFiles.find((f) => f.fileKind === 'COVER_LETTER')
+  const providerFields = (): ProviderFields => ({
+    provider: form.provider,
+    providerDisplayName: form.providerDisplayName,
+    providerApiKey: form.providerApiKey,
+    providerModel: form.providerModel,
+  })
 
   return (
-    <div style={{ position: 'fixed', inset: '44px 0 0 0', display: 'flex', 'align-items': 'center', 'justify-content': 'center', background: 'var(--bg)', 'z-index': '100' }}>
-      <div style={{ width: '100%', 'max-width': '560px', padding: '2rem' }}>
-        <div class="wizard-progress-bar" style={{ 'margin-bottom': '2rem' }}>
-          <div class="fill" ref={progressFillRef} style={{ width: `${progress()}%` }} />
-        </div>
+    <div class="onboarding-shell" data-gsap="panel" data-view-panel>
+      <div class="ob-frame">
+        <nav class="ob-rail" aria-label="Onboarding progress">
+          <div class="ob-rail-head">
+            <span class="ob-rail-count">
+              {String(momentIndex() + 1).padStart(2, '0')}
+              <em>/</em>
+              {String(MOMENTS.length).padStart(2, '0')}
+            </span>
+            <span class="ob-rail-now">{MOMENT_LABELS[moment()]}</span>
+          </div>
+          <div
+            class="wizard-progress-bar"
+            role="progressbar"
+            aria-valuemin={1}
+            aria-valuemax={MOMENTS.length}
+            aria-valuenow={momentIndex() + 1}
+            aria-valuetext={`Step ${momentIndex() + 1} of ${MOMENTS.length}: ${MOMENT_LABELS[moment()]}`}
+          >
+            <div class="fill" style={{ width: progressPct() }} />
+          </div>
+          <ol class="ob-rail-stops">
+            <For each={MOMENTS}>
+              {(stop, index) => (
+                <li
+                  class="ob-rail-stop"
+                  classList={{ done: index() < momentIndex(), active: index() === momentIndex() }}
+                  aria-current={index() === momentIndex() ? 'step' : undefined}
+                >
+                  <Show when={index() < momentIndex()} fallback={<span class="ob-rail-num">{index() + 1}</span>}>
+                    <Check size={11} aria-hidden="true" />
+                  </Show>
+                  <span>{MOMENT_LABELS[stop]}</span>
+                </li>
+              )}
+            </For>
+          </ol>
+        </nav>
 
-        <div class="eyebrow" style={{ 'margin-bottom': '0.5rem' }}>
-          Step {stepIndex() + 1} of {STEPS.length} — {STEP_LABELS[step()]}
-        </div>
-
-        <div ref={stepRef}>
-
-          {/* ── Welcome ─────────────────────────────────────────────────────── */}
-          <Show when={step() === 'welcome'}>
-            <h1 style={{ 'font-size': '2rem', 'margin-bottom': '1rem' }}>Welcome to Applyocalypse</h1>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '2rem' }}>
-              Local-first job application automation. Your data stays on your machine. Set up once, apply everywhere.
-            </p>
-            <button class="primary-action" type="button" onClick={advance}>
-              <ChevronRight size={18} aria-hidden="true" />
-              <span>Get started</span>
-            </button>
+        <div ref={stageRef} class="ob-stage">
+          <Show when={moment() === 'resume'}>
+            <ResumeDrop
+              fileName={resumeFile()?.originalName ?? null}
+              isBusy={isPicking()}
+              onChoose={() => void handleChooseResume()}
+              onContinue={() => go('review')}
+              onManual={startManualEntry}
+            />
           </Show>
 
-          {/* ── Upload resume ────────────────────────────────────────────────── */}
-          <Show when={step() === 'upload'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>Upload your resume</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '2rem' }}>
-              Supports PDF, DOCX, and TEX. This becomes your master template.
-            </p>
-            <Show
-              when={resumeFile()}
-              fallback={
-                <button class="primary-action" type="button" onClick={() => void pickAndRegisterResume()}>
-                  <Upload size={18} aria-hidden="true" />
-                  <span>Browse or drop resume</span>
-                </button>
+          <Show when={moment() === 'review'}>
+            <ConfirmLedger
+              fileName={resumeFile()?.originalName ?? null}
+              isReading={isReading()}
+              canonical={canonical()}
+              identity={identity()}
+              setIdentity={(key, value) => setForm(key, value)}
+              education={form.education}
+              setEducation={(index, key, value) => setForm('education', index, key, value)}
+              addEducation={() => setForm('education', form.education.length, emptyEducation())}
+              removeEducation={(index) =>
+                setForm('education', (rows) => rows.filter((_, position) => position !== index))
               }
-            >
-              {(file) => (
-                <>
-                  <div class="queue-row static-row" style={{ 'margin-bottom': '1rem' }}>
-                    <span>Uploaded</span>
-                    <strong>{file().originalName}</strong>
-                  </div>
-                  <button class="secondary-action" type="button" onClick={advance}>
-                    <ChevronRight size={17} aria-hidden="true" />
-                    <span>Continue</span>
-                  </button>
-                </>
-              )}
-            </Show>
-          </Show>
-
-          {/* ── Upload supporting details (optional) ─────────────────────────── */}
-          <Show when={step() === 'upload-supporting'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>Supporting details (optional)</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-              Projects writeup, portfolio, or extra context. More detail means better-tailored bullets in your resume.
-            </p>
-            <Show when={supportingFile()}>
-              {(file) => (
-                <div class="queue-row static-row" style={{ 'margin-bottom': '1rem' }}>
-                  <span>Uploaded</span>
-                  <strong>{file().originalName}</strong>
-                </div>
-              )}
-            </Show>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button class="secondary-action" type="button" onClick={() => void pickAndRegisterSupportingDetails()}>
-                <Upload size={16} aria-hidden="true" />
-                <span>{supportingFile() ? 'Replace' : 'Upload'}</span>
-              </button>
-              <button class="secondary-action" type="button" onClick={advance}>
-                {supportingFile() ? 'Continue' : 'Skip'}
-              </button>
-            </div>
-          </Show>
-
-          {/* ── Upload sample cover letter (optional) ────────────────────────── */}
-          <Show when={step() === 'upload-cover'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>Sample cover letter (optional)</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-              Upload a cover letter you have written. It will be used as a style reference. Without one, a generic template is used.
-            </p>
-            <Show when={coverFile()}>
-              {(file) => (
-                <div class="queue-row static-row" style={{ 'margin-bottom': '1rem' }}>
-                  <span>Uploaded</span>
-                  <strong>{file().originalName}</strong>
-                </div>
-              )}
-            </Show>
-            <div style={{ display: 'flex', gap: '0.75rem' }}>
-              <button class="secondary-action" type="button" onClick={() => void pickAndRegisterCoverLetter()}>
-                <Upload size={16} aria-hidden="true" />
-                <span>{coverFile() ? 'Replace' : 'Upload'}</span>
-              </button>
-              <button class="secondary-action" type="button" onClick={advance}>
-                {coverFile() ? 'Continue' : 'Skip'}
-              </button>
-            </div>
-          </Show>
-
-          {/* ── Parse review ─────────────────────────────────────────────────── */}
-          <Show when={step() === 'parse-review'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>Review parsed profile</h2>
-            <Show
-              when={profileState.parsedDocuments[0]}
-              fallback={<p style={{ color: 'var(--text-secondary)' }}>Parsing your resume…</p>}
-            >
-              {(doc) => (
-                <>
-                  <div class="portal-workflow-grid" style={{ 'margin-bottom': '1.5rem' }}>
-                    <span>Experience</span><strong>{doc().canonical.experience.length}</strong>
-                    <span>Education</span><strong>{doc().canonical.education.length}</strong>
-                    <span>Projects</span><strong>{doc().canonical.projects.length}</strong>
-                    <span>Skill groups</span><strong>{doc().canonical.skillGroups.length}</strong>
-                  </div>
-                  <button class="primary-action" type="button" onClick={() => { prefillGeneralFromParsed(); advance() }}>
-                    <ChevronRight size={17} aria-hidden="true" />
-                    <span>Looks good, continue</span>
-                  </button>
-                </>
-              )}
-            </Show>
-          </Show>
-
-          {/* ── General questions ────────────────────────────────────────────── */}
-          <Show when={step() === 'general-questions'}>
-            <GeneralQuestionsStep
-              fields={{
-                firstName: form.firstName, lastName: form.lastName, email: form.email, phone: form.phone,
-                country: form.country, city: form.city, state: form.state,
-                addressLine1: form.addressLine1, addressLine2: form.addressLine2,
-                postalCode: form.postalCode, county: form.county,
-                linkedinUrl: form.linkedinUrl, githubUrl: form.githubUrl,
-              }}
-              setField={(k, v) => setForm(k as never, v as never)}
-              onNext={advance}
+              experience={form.experience}
+              setExperience={(index, key, value) => setForm('experience', index, key, value)}
+              addExperience={() => setForm('experience', form.experience.length, emptyExperience())}
+              removeExperience={(index) =>
+                setForm('experience', (rows) => rows.filter((_, position) => position !== index))
+              }
+              onConfirm={() => go('details')}
             />
           </Show>
 
-          {/* ── Education ────────────────────────────────────────────────────── */}
-          <Show when={step() === 'education'}>
-            {(() => { prefillEducation(); return null })()}
-            <EducationStep
-              entries={form.education}
-              setEntry={(idx, key, value) => setForm('education', idx, key, value)}
-              onNext={advance}
-            />
-          </Show>
-
-          {/* ── Work experience ──────────────────────────────────────────────── */}
-          <Show when={step() === 'work-experience'}>
-            {(() => { prefillExperience(); return null })()}
-            <WorkExperienceStep
-              entries={form.experience}
-              setEntry={(idx, key, value) => setForm('experience', idx, key, value as never)}
-              onNext={advance}
-            />
-          </Show>
-
-          {/* ── Equal employment ─────────────────────────────────────────────── */}
-          <Show when={step() === 'equal-employment'}>
-            <EqualEmploymentStep
-              fields={{
+          <Show when={moment() === 'details'}>
+            <FinalDetails
+              workAuthSummary={form.workAuthSummary}
+              setWorkAuthSummary={(value) => setForm('workAuthSummary', value)}
+              sponsorshipRequired={form.sponsorshipRequired}
+              setSponsorshipRequired={(value) => setForm('sponsorshipRequired', value)}
+              eeo={{
                 eeoAuthorizedToWorkUS: form.eeoAuthorizedToWorkUS,
                 eeoRequiresSponsorship: form.eeoRequiresSponsorship,
                 eeoSponsorshipDetailText: form.eeoSponsorshipDetailText,
@@ -471,114 +422,45 @@ export default function OnboardingScreen() {
                 eeoHispanicOrLatino: form.eeoHispanicOrLatino,
                 eeoSexualOrientation: form.eeoSexualOrientation,
               }}
-              setField={(k, v) => setForm(k as never, v as never)}
-              onNext={advance}
+              setEeoField={(key, value) => setForm(key as never, value as never)}
+              credentials={credentials()}
+              setCredential={(key, value) => setForm(key as never, value as never)}
+              passwordIsValid={applicationPasswordIsValid(form.applicationPassword)}
+              provider={providerFields()}
+              setProviderField={(key, value) => setForm(key, value)}
+              error={profileState.error ?? settingsState.error ?? null}
+              isSaving={isSaving()}
+              onFinish={() => void handleFinish()}
             />
           </Show>
 
-          {/* ── Work authorization ───────────────────────────────────────────── */}
-          <Show when={step() === 'work-auth'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>Work authorization</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-              Used to fill work authorization fields on job portals.
-            </p>
-            <label>
-              <span>Summary (e.g. US Citizen, H1B, OPT)</span>
-              <input value={form.workAuthSummary} onInput={(e) => setForm('workAuthSummary', e.currentTarget.value)} placeholder="Authorized to work in the US without sponsorship" />
-            </label>
-            <label class="toggle-row" style={{ 'margin-top': '1rem' }}>
-              <input type="checkbox" checked={form.sponsorshipRequired} onChange={(e) => setForm('sponsorshipRequired', e.currentTarget.checked)} />
-              <span>Require visa sponsorship</span>
-            </label>
-            <button class="secondary-action" type="button" style={{ 'margin-top': '1.5rem' }} onClick={advance}>
-              <ChevronRight size={17} aria-hidden="true" />
-              <span>Continue</span>
-            </button>
-          </Show>
-
-          {/* ── Credentials ──────────────────────────────────────────────────── */}
-          <Show when={step() === 'credentials'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>Application credentials</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-              The email and password used to log in to job portals. Stored locally, encrypted by Electron.
-            </p>
-            <label>
-              <span>Application email</span>
-              <input type="email" value={form.applicationEmail} autocomplete="username" onInput={(e) => setForm('applicationEmail', e.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Application password</span>
-              <input type="password" value={form.applicationPassword} autocomplete="new-password" onInput={(e) => setForm('applicationPassword', e.currentTarget.value)} />
-            </label>
-            <p class="fine-print">12+ chars, uppercase, lowercase, number, symbol.</p>
-            <label class="toggle-row">
-              <input type="checkbox" checked={form.gmailOtpEnabled} onChange={(e) => setForm('gmailOtpEnabled', e.currentTarget.checked)} />
-              <span>Use Gmail OTP extraction</span>
-            </label>
-            {profileState.error && <div class="error-box">{profileState.error}</div>}
-            <button
-              class="primary-action"
-              type="button"
-              style={{ 'margin-top': '1.5rem' }}
-              disabled={!form.applicationEmail.trim() || !applicationPasswordIsValid(form.applicationPassword)}
-              onClick={() => void handleCreateProfile()}
-            >
-              <ShieldCheck size={17} aria-hidden="true" />
-              <span>Create profile</span>
-            </button>
-          </Show>
-
-          {/* ── Provider ─────────────────────────────────────────────────────── */}
-          <Show when={step() === 'provider'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>LLM provider</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-              Paste your API key. Used for resume tailoring and JD analysis.
-            </p>
-            <label>
-              <span>Provider</span>
-              <select value={form.provider} onChange={(e) => {
-                const p = e.currentTarget.value
-                setForm('provider', p)
-                setForm('providerDisplayName', PROVIDER_OPTIONS.find((o) => o.value === p)?.label ?? p)
-              }}>
-                <For each={PROVIDER_OPTIONS}>
-                  {(p) => <option value={p.value}>{p.label}</option>}
-                </For>
-              </select>
-            </label>
-            <label>
-              <span>API key</span>
-              <input type="password" value={form.providerApiKey} autocomplete="off" onInput={(e) => setForm('providerApiKey', e.currentTarget.value)} />
-            </label>
-            <label>
-              <span>Model (optional)</span>
-              <input value={form.providerModel} placeholder="e.g. gpt-4o" onInput={(e) => setForm('providerModel', e.currentTarget.value)} />
-            </label>
-            <div style={{ display: 'flex', gap: '0.75rem', 'margin-top': '1.5rem' }}>
-              <button class="primary-action" type="button" style={{ flex: '1' }} disabled={!form.providerApiKey.trim()} onClick={() => void handleSaveProvider()}>
-                <ShieldCheck size={17} aria-hidden="true" />
-                <span>Save key</span>
+          <Show when={moment() === 'ready'}>
+            <div class="ob-hero">
+              <p class="eyebrow">Profile complete</p>
+              <h1 class="ob-hero-title">
+                {form.firstName || 'You'} are ready
+                <br />
+                to apply.
+              </h1>
+              <p class="ob-hero-sub">
+                {form.experience.length} role{form.experience.length === 1 ? '' : 's'} and{' '}
+                {form.education.length} school{form.education.length === 1 ? '' : 's'} on file. Paste a job link in
+                Intake and Applyocalypse tailors from here. Nothing is ever submitted without your approval.
+              </p>
+              <button class="primary-action ob-advance" type="button" onClick={() => navigate('/', { replace: true })}>
+                <ArrowRight size={17} aria-hidden="true" />
+                <span>Go to the queue</span>
               </button>
-              <button class="secondary-action" type="button" onClick={advance}>Skip</button>
+              <p class="fine-print">
+                Have a cover letter you like the tone of? Add it any time under Documents to use it as a style
+                reference.
+              </p>
             </div>
           </Show>
-
-          {/* ── Done ─────────────────────────────────────────────────────────── */}
-          <Show when={step() === 'done'}>
-            <h2 style={{ 'margin-bottom': '0.5rem' }}>You're all set</h2>
-            <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '2rem' }}>
-              Your profile is configured and ready. Head to Intake to add job links.
-            </p>
-            <button class="primary-action" type="button" onClick={handleComplete}>
-              <ChevronRight size={18} aria-hidden="true" />
-              <span>Go to Queue</span>
-            </button>
-          </Show>
-
         </div>
 
-        <Show when={stepIndex() > 0 && step() !== 'done'}>
-          <button type="button" style={{ 'margin-top': '1.5rem', background: 'none', border: 'none', color: 'var(--muted)', cursor: 'pointer', 'font-size': '0.82rem' }} onClick={retreat}>
+        <Show when={momentIndex() > 0 && moment() !== 'ready'}>
+          <button class="ob-back" type="button" onClick={() => setMomentIndex((index) => index - 1)}>
             Back
           </button>
         </Show>
@@ -586,3 +468,5 @@ export default function OnboardingScreen() {
     </div>
   )
 }
+
+export default OnboardingScreen

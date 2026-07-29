@@ -5,10 +5,10 @@ Implements the BrowserAdapter protocol using SeleniumBase with UC Mode enabled
 call is dispatched via asyncio.to_thread so the rest of the async pipeline is
 never blocked.
 
-Cloudflare challenge handling: after detect_blockers finds a CF challenge, call
-uc_gui_click_captcha() once via to_thread, then re-detect blockers. If the
-challenge persists it is returned unchanged for the runner to handle as a CAPTCHA
-review event.
+Cloudflare challenge handling is detection only. We never attempt to clear, solve
+or otherwise defeat a bot challenge; when a Cloudflare interstitial is detected
+the blocker is flagged for human handoff so the runner pauses and the user takes
+over in the visible browser.
 
 Candidate order (from adapter_factory):
   high-stealth boards : nodriver -> seleniumbase
@@ -39,12 +39,87 @@ from .field_detection import (
     parse_click_by_text_result,
     parse_final_submit_result,
 )
+from .field_write import verify_or_repair_text_write
+from .page_readiness import (
+    PAGE_TEXT_POLL_INTERVAL_S,
+    PAGE_TEXT_TIMEOUT_S,
+    POST_CLICK_POLL_INTERVAL_S,
+    POST_CLICK_TIMEOUT_S,
+    POST_CLICK_UNCHANGED_GRACE_S,
+    wait_for_page_change,
+    wait_for_page_text,
+)
 
-_CLOUDFLARE_BLOCKER_TYPE = "CLOUDFLARE_CHALLENGE"
+PAGE_FINGERPRINT_PROBE_SCRIPT = (
+    "(location.href + '|' + (document.title || '') + '|'"
+    " + String(((document.body && document.body.innerText) || '').trim().length))"
+)
+
+# field_detection reports a Cloudflare interstitial as a CAPTCHA blocker carrying
+# metadata.vendor == "cloudflare" (there is no CLOUDFLARE_CHALLENGE blocker type,
+# and blockers_from_dom_snapshot would drop one). Matching on the vendor is what
+# makes this branch reachable at all.
+_CLOUDFLARE_BLOCKER_TYPE = "CAPTCHA"
+_CLOUDFLARE_VENDOR = "cloudflare"
+CLOUDFLARE_HANDOFF_REASON = "cloudflare_interstitial"
 
 
 def _is_cloudflare_blocker(blockers: list[BrowserBlocker]) -> bool:
-    return any(b.blocker_type == _CLOUDFLARE_BLOCKER_TYPE for b in blockers)
+    return any(
+        blocker.blocker_type == _CLOUDFLARE_BLOCKER_TYPE
+        and str(blocker.metadata.get("vendor") or "").strip().lower() == _CLOUDFLARE_VENDOR
+        for blocker in blockers
+    )
+
+
+def _flag_cloudflare_for_human_handoff(blockers: list[BrowserBlocker]) -> list[BrowserBlocker]:
+    """Mark Cloudflare interstitials as needing a human, without touching them.
+
+    We do not clear, solve or bypass bot challenges. The run pauses and the user
+    completes the challenge in the visible browser; this annotation is what tells
+    the runner (and the UI) exactly why.
+    """
+    flagged: list[BrowserBlocker] = []
+    for blocker in blockers:
+        if not _is_cloudflare_blocker([blocker]):
+            flagged.append(blocker)
+            continue
+        flagged.append(
+            BrowserBlocker(
+                blocker_type=blocker.blocker_type,
+                message=blocker.message,
+                confidence=blocker.confidence,
+                metadata={
+                    **blocker.metadata,
+                    "requires_human_handoff": True,
+                    "handoff_reason": CLOUDFLARE_HANDOFF_REASON,
+                },
+            )
+        )
+    return flagged
+
+
+def _visible_text_length(raw_result: Any) -> int:
+    """Length of the page's visible text, not of the JSON envelope carrying it.
+
+    DOM_VISIBLE_TEXT_SCRIPT returns {url,title,text,text_length}; measuring the
+    serialized envelope declared a blank page ready because the URL and title
+    alone exceed PAGE_TEXT_MIN_LENGTH.
+    """
+    if raw_result is None:
+        return 0
+    payload: Any = raw_result
+    if isinstance(payload, str):
+        try:
+            payload = json.loads(payload)
+        except json.JSONDecodeError:
+            return len(payload.strip())
+    if isinstance(payload, dict):
+        declared = payload.get("text_length")
+        if isinstance(declared, (int, float)) and not isinstance(declared, bool):
+            return max(int(declared), 0)
+        return len(str(payload.get("text") or "").strip())
+    return len(str(payload).strip())
 
 
 class SeleniumBaseBrowserAdapter(BrowserAdapter):
@@ -110,7 +185,40 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
             await asyncio.to_thread(self._driver.get, url)
         except Exception as exc:
             return BrowserStepResult(False, "page navigation failed", {"url": url, "error": str(exc)})
-        return BrowserStepResult(True, "page navigated", {"url": url})
+        # Same readiness poll as the nodriver/playwright adapters; without it this
+        # fallback engine scraped SPA shells before real content had rendered.
+        readiness = await wait_for_page_text(
+            self._probe_visible_text_length,
+            timeout_s=PAGE_TEXT_TIMEOUT_S,
+            poll_interval_s=PAGE_TEXT_POLL_INTERVAL_S,
+        )
+        return BrowserStepResult(True, "page navigated", {"url": url, "page_text": readiness})
+
+    async def _probe_visible_text_length(self) -> int:
+        if self._driver is None:
+            return 0
+        try:
+            raw_result = await self._evaluate(DOM_VISIBLE_TEXT_SCRIPT)
+        except Exception:
+            return 0
+        return _visible_text_length(raw_result)
+
+    async def _probe_page_fingerprint(self) -> str:
+        if self._driver is None:
+            return ""
+        try:
+            return str(await self._evaluate(PAGE_FINGERPRINT_PROBE_SCRIPT) or "")
+        except Exception:
+            return ""
+
+    async def _settle_after_click(self, baseline: str) -> dict[str, object]:
+        return await wait_for_page_change(
+            self._probe_page_fingerprint,
+            baseline=baseline,
+            timeout_s=POST_CLICK_TIMEOUT_S,
+            poll_interval_s=POST_CLICK_POLL_INTERVAL_S,
+            unchanged_grace_s=POST_CLICK_UNCHANGED_GRACE_S,
+        )
 
     async def detect_fields(self) -> list[BrowserField]:
         if self._driver is None:
@@ -138,24 +246,9 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
                 raw_result = json.loads(raw_result)
             except json.JSONDecodeError:
                 return []
-        blockers = blockers_from_dom_snapshot(raw_result)
-
-        # Attempt Cloudflare challenge bypass once if detected
-        if _is_cloudflare_blocker(blockers):
-            try:
-                await asyncio.to_thread(self._driver.uc_gui_click_captcha)
-            except Exception:
-                pass
-            # Re-evaluate after bypass attempt
-            try:
-                raw_result = await self._evaluate(DOM_BLOCKER_DISCOVERY_SCRIPT)
-                if isinstance(raw_result, str):
-                    raw_result = json.loads(raw_result)
-                blockers = blockers_from_dom_snapshot(raw_result)
-            except Exception:
-                pass
-
-        return blockers
+        # Detection only. A Cloudflare interstitial is flagged so the runner pauses
+        # and hands the visible browser to the user; we never try to clear it.
+        return _flag_cloudflare_for_human_handoff(blockers_from_dom_snapshot(raw_result))
 
     async def capture_dom_snapshot(self, output_path: Path) -> BrowserStepResult:
         if self._driver is None:
@@ -230,7 +323,10 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
 
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
         if field.field_type not in {"select", "checkbox", "radio"}:
-            return await self.fill_field(field, value)
+            filled = await self.fill_field(field, value)
+            if not filled.ok:
+                return filled
+            return await verify_or_repair_text_write(self._evaluate, field, value, fill_payload=filled.payload)
         if self._driver is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
         try:
@@ -242,22 +338,30 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
     async def click_by_text(self, labels: list[str]) -> BrowserStepResult:
         if self._driver is None:
             return BrowserStepResult(False, "browser is not launched")
+        baseline = await self._probe_page_fingerprint()
         try:
             raw_result = await self._evaluate(build_click_by_text_script(labels))
-            await asyncio.to_thread(self._driver.sleep, 1.5)
         except Exception as exc:
             return BrowserStepResult(False, "portal action click failed", {"error": str(exc)})
-        return parse_click_by_text_result(raw_result)
+        result = parse_click_by_text_result(raw_result)
+        if not result.ok:
+            return result
+        settle = await self._settle_after_click(baseline)
+        return BrowserStepResult(result.ok, result.message, {**result.payload, "page_settle": settle})
 
     async def click_final_submit(self, labels: list[str]) -> BrowserStepResult:
         if self._driver is None:
             return BrowserStepResult(False, "browser is not launched")
+        baseline = await self._probe_page_fingerprint()
         try:
             raw_result = await self._evaluate(build_final_submit_script(labels))
-            await asyncio.to_thread(self._driver.sleep, 2.0)
         except Exception as exc:
             return BrowserStepResult(False, "final submit click failed", {"error": str(exc)})
-        return parse_final_submit_result(raw_result)
+        result = parse_final_submit_result(raw_result)
+        if not result.ok:
+            return result
+        settle = await self._settle_after_click(baseline)
+        return BrowserStepResult(result.ok, result.message, {**result.payload, "page_settle": settle})
 
     async def upload_file(self, field: BrowserField, path: Path) -> BrowserStepResult:
         if not path.exists():

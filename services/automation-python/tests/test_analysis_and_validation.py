@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from applyocalypse_automation.answers import propose_answer_for_detected_field
 from applyocalypse_automation.documents.artifact_generation import (
     build_cover_letter_text,
@@ -138,6 +140,24 @@ def test_validator_blocks_banned_words_and_em_dash() -> None:
     assert report.passed is False
     assert {issue.code for issue in report.blocking_issues} == {"BANNED_WORD", "EM_DASH"}
     assert "Validation failed." in report.to_dict()["human_report"]
+
+
+@pytest.mark.parametrize(
+    "variant",
+    ["—", "―", "⸺", "⸻", "﹘"],
+    ids=["em-dash", "horizontal-bar", "two-em-dash", "three-em-dash", "small-em-dash"],
+)
+def test_validator_blocks_em_dash_lookalikes(variant: str) -> None:
+    report = TextArtifactValidator().validate(f"Shipped v2 {variant} on time.", artifact_kind="cover_letter")
+
+    assert report.passed is False
+    assert any(issue.code == "EM_DASH" for issue in report.blocking_issues)
+
+
+def test_validator_allows_en_dash_date_ranges() -> None:
+    report = TextArtifactValidator().validate("Led the team 2019–2023 in Austin.", artifact_kind="cover_letter")
+
+    assert not any(issue.code == "EM_DASH" for issue in report.blocking_issues)
 
 
 def test_validator_reads_docx_artifacts(tmp_path: Path) -> None:

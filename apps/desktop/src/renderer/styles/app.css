@@ -1,62 +1,87 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   DOSSIER — paper & ink design system
-   Light-first: your documents are white paper. Wax owns the signature ritual.
-   Fonts: Instrument Serif (display) · Hanken Grotesk (body) · JetBrains Mono
+   INSTRUMENT - cold-rolled control surface
+   This app supervises risky automation and waits for your hand on the switch,
+   so it is built like an instrument panel, not like stationery: cool rolled
+   steel instead of cream paper, cobalt for anything you can press, and citron
+   reserved for ARMED - the one state that means "this will act if you allow it".
+   Legacy class vocabulary (paper-card, btn-wax, serif-title) is retained and
+   re-skinned in place, matching the convention already used further down.
+   Fonts: Hanken Grotesk (display, heavy + body) - JetBrains Mono (data, labels)
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Tokens ────────────────────────────────────────────────────────────────── */
 :root {
-  --paper: #fbfaf7;
-  --chrome: #f4f2ec;
+  --paper: #eceff4;
+  --chrome: #e2e6ed;
   --card: #ffffff;
-  --ink: #201d17;
-  --ink-2: #6c675b;
-  --ink-3: #a39d8f;
-  --hairline: rgba(32, 29, 23, 0.09);
-  --hairline-strong: rgba(32, 29, 23, 0.15);
-  --hairline-soft: rgba(32, 29, 23, 0.06);
-  --wax: #a03123;
-  --wax-sweep: #c86f5b;
-  --on-wax: #fbf1ec;
-  --wax-wash: rgba(160, 49, 35, 0.06);
-  --wax-border: rgba(160, 49, 35, 0.35);
-  --wax-shadow: rgba(160, 49, 35, 0.3);
-  --live: #47714f;
-  --live-bright: #47714f;
-  --edited: #a2721f;
-  --viewport-hatch-a: #f7f5f0;
-  --viewport-hatch-b: #f1eee7;
-  --card-shadow: 0 1px 3px rgba(32, 29, 23, 0.05);
-  --gate-shadow: 0 3px 10px rgba(160, 49, 35, 0.12);
+  --ink: #0e1420;
+  --ink-2: #56606f;
+  --ink-3: #6b7484;
+  --hairline: rgba(14, 20, 32, 0.1);
+  --hairline-strong: rgba(14, 20, 32, 0.17);
+  --hairline-soft: rgba(14, 20, 32, 0.055);
+  --wax: #1b3fd8;
+  --wax-sweep: #5d7cf5;
+  --on-wax: #f3f6ff;
+  --wax-wash: rgba(27, 63, 216, 0.07);
+  --wax-border: rgba(27, 63, 216, 0.38);
+  --wax-shadow: rgba(27, 63, 216, 0.26);
+  --live: #0b7a5a;
+  --live-bright: #0b7a5a;
+  --edited: #96660a;
+  /* ARMED splits in two: --armed draws lines and small labels, so on white it has
+     to be a dark olive to stay legible; --armed-fill is the hazard citron used for
+     the irreversible button itself, and it is the SAME in both themes so "bright
+     yellow-green button + near-black text" always means "this one actually acts". */
+  --armed: #556200;
+  --armed-fill: #cfe81a;
+  --on-armed: #141a05;
+  --armed-wash: rgba(85, 98, 0, 0.13);
+  --live-wash: rgba(11, 122, 90, 0.14);
+  --edited-wash: rgba(150, 102, 10, 0.14);
+  --viewport-hatch-a: #e8ecf2;
+  --viewport-hatch-b: #e2e7ef;
+  --card-shadow: 0 1px 2px rgba(14, 20, 32, 0.06);
+  --gate-shadow: 0 3px 12px rgba(27, 63, 216, 0.14);
 
-  --serif: 'Instrument Serif', georgia, serif;
+  --display: 'Hanken Grotesk', system-ui, sans-serif;
   --sans: 'Hanken Grotesk', system-ui, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
+
+  /* Native form controls follow the active theme instead of UA light defaults. */
+  color-scheme: light;
 }
 
 :root[data-theme='dark'] {
-  --paper: #191612;
-  --chrome: #1e1b16;
-  --card: #26221c;
-  --ink: #ede8de;
-  --ink-2: #a69f92;
-  --ink-3: #6e675c;
-  --hairline: rgba(237, 232, 222, 0.08);
-  --hairline-strong: rgba(237, 232, 222, 0.14);
-  --hairline-soft: rgba(237, 232, 222, 0.07);
-  --wax: #c6503a;
-  --wax-sweep: #d97862;
-  --on-wax: #fff3ed;
-  --wax-wash: rgba(198, 80, 58, 0.15);
-  --wax-border: rgba(198, 80, 58, 0.35);
-  --wax-shadow: rgba(0, 0, 0, 0.3);
-  --live: #5f8a68;
-  --live-bright: #84b08d;
-  --edited: #c99a4b;
-  --viewport-hatch-a: #1e1b16;
-  --viewport-hatch-b: #221e18;
-  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
-  --gate-shadow: 0 3px 10px rgba(0, 0, 0, 0.3);
+  color-scheme: dark;
+  --paper: #0a0e15;
+  --chrome: #0e131c;
+  --card: #141a24;
+  --ink: #e4eaf3;
+  --ink-2: #9aa5b4;
+  --ink-3: #66707e;
+  --hairline: rgba(228, 234, 243, 0.09);
+  --hairline-strong: rgba(228, 234, 243, 0.15);
+  --hairline-soft: rgba(228, 234, 243, 0.06);
+  --wax: #6486ff;
+  --wax-sweep: #93aaff;
+  --on-wax: #060b16;
+  --wax-wash: rgba(100, 134, 255, 0.14);
+  --wax-border: rgba(100, 134, 255, 0.4);
+  --wax-shadow: rgba(0, 0, 0, 0.45);
+  --live: #24d3a0;
+  --live-bright: #5ce9bd;
+  --edited: #e0a63c;
+  --armed: #c8e01f;
+  --armed-fill: #d4ec1f;
+  --on-armed: #10160a;
+  --armed-wash: rgba(212, 236, 31, 0.16);
+  --live-wash: rgba(36, 211, 160, 0.16);
+  --edited-wash: rgba(224, 166, 60, 0.16);
+  --viewport-hatch-a: #0e131c;
+  --viewport-hatch-b: #121822;
+  --card-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --gate-shadow: 0 3px 14px rgba(0, 0, 0, 0.5);
 }
 
 /* ── Motion ────────────────────────────────────────────────────────────────── */
@@ -165,7 +190,8 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .serif-title {
-  font: 400 16.5px var(--serif);
+  font: 650 15.5px/1.25 var(--display);
+  letter-spacing: -0.012em;
   color: var(--ink);
 }
 
@@ -218,7 +244,7 @@ h1, h2, h3, p { margin: 0; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgba(32, 29, 23, 0.2);
+  border: 1px solid var(--hairline-strong);
   color: var(--ink-2);
   border-radius: 7px;
   padding: 7px 12px;
@@ -303,13 +329,16 @@ h1, h2, h3, p { margin: 0; }
   border: 1px dashed var(--wax);
   display: grid;
   place-items: center;
-  font: italic 400 11px var(--serif);
+  font: 700 9px var(--mono);
+  letter-spacing: 0.02em;
   color: var(--wax);
   flex: none;
 }
 
 .titlebar .brand-word {
-  font: italic 400 14px var(--serif);
+  font: 750 12px var(--display);
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
   color: var(--ink);
 }
 
@@ -464,7 +493,8 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .screen-headline {
-  font: 400 34px/1.15 var(--serif);
+  font: 700 33px/1.08 var(--display);
+  letter-spacing: -0.028em;
   margin: 6px 0 4px;
 }
 
@@ -526,6 +556,11 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .intake-card textarea::placeholder { color: var(--ink-3); }
+
+.intake-card:focus-within {
+  outline: 2px solid var(--wax);
+  outline-offset: 2px;
+}
 
 .intake-foot {
   display: flex;
@@ -594,7 +629,8 @@ h1, h2, h3, p { margin: 0; }
   border: 1px solid var(--hairline-strong);
   display: grid;
   place-items: center;
-  font: 400 16px var(--serif);
+  font: 650 13px var(--display);
+  letter-spacing: 0.01em;
   flex: none;
 }
 
@@ -711,12 +747,20 @@ h1, h2, h3, p { margin: 0; }
   position: relative;
 }
 
+/* Same citron language as .gate-card.armed: a run sitting at READY is one click
+   from shipping, and Home should say so in the same colour the console does. */
 .rail-card.ready {
-  border: 1.5px solid var(--wax);
-  box-shadow: var(--gate-shadow);
+  border: 1.5px solid var(--armed);
+  box-shadow: 0 3px 14px var(--armed-wash);
 }
 
-.rail-card .rail-title { font: 400 15.5px var(--serif); }
+.rail-card.ready .btn-wax {
+  background: var(--armed-fill);
+  color: var(--on-armed);
+  box-shadow: 0 2px 8px var(--armed-wash);
+}
+
+.rail-card .rail-title { font: 650 14.5px/1.3 var(--display); letter-spacing: -0.011em; }
 
 .rail-card .rail-sub {
   font-size: 11.5px;
@@ -734,11 +778,13 @@ h1, h2, h3, p { margin: 0; }
   width: 38px;
   height: 38px;
   border-radius: 50%;
-  border: 1.5px solid var(--wax);
+  border: 1.5px solid var(--armed);
   display: grid;
   place-items: center;
-  font: italic 400 9px var(--serif);
-  color: var(--wax);
+  font: 700 7.5px var(--mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--armed);
   animation: apoStampIn 0.5s ease-out both;
 }
 
@@ -747,7 +793,7 @@ h1, h2, h3, p { margin: 0; }
   padding: 12px 14px;
   border-radius: 12px;
   border: 1px dashed var(--hairline-strong);
-  font: italic 400 13px var(--serif);
+  font: 500 12px var(--sans);
   color: var(--ink-2);
 }
 
@@ -761,7 +807,14 @@ h1, h2, h3, p { margin: 0; }
   flex: none;
 }
 
-.console-header .console-title { font: 400 17px var(--serif); }
+.console-header .console-title {
+  font: 650 15.5px var(--display);
+  letter-spacing: -0.014em;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
 
 .console-header .console-runid {
   font: 400 10px var(--mono);
@@ -939,6 +992,10 @@ h1, h2, h3, p { margin: 0; }
 
 .viewport-chrome .address-bar {
   flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
   height: 12px;
   border-radius: 6px;
   background: var(--hairline-soft);
@@ -1033,7 +1090,8 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .gate-card .gate-question {
-  font: 400 15px/1.35 var(--serif);
+  font: 550 14.5px/1.4 var(--sans);
+  letter-spacing: -0.004em;
 }
 
 .gate-card .gate-question .quiet { color: var(--ink-2); }
@@ -1055,6 +1113,24 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .gate-actions .btn-wax { border-radius: 7px; padding: 9px 0; font-size: 12.5px; }
+
+/* The one irreversible gate. Citron marks ARMED, so a final submit can never be
+   mistaken at a glance for an ordinary "continue" approval wearing the same blue. */
+.gate-card.armed {
+  border-color: var(--armed);
+  box-shadow: 0 3px 14px var(--armed-wash);
+}
+
+.gate-card.armed .house-rule {
+  background: var(--armed-wash);
+  color: var(--armed);
+}
+
+.gate-card.armed .btn-wax {
+  background: var(--armed-fill);
+  color: var(--on-armed);
+  box-shadow: 0 2px 8px var(--armed-wash);
+}
 
 .field-card {
   background: var(--card);
@@ -1169,7 +1245,8 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .receipt-row .receipt-title {
-  font: 400 14.5px var(--serif);
+  font: 600 13.5px var(--display);
+  letter-spacing: -0.008em;
   flex: 1;
   min-width: 0;
   overflow: hidden;
@@ -1288,13 +1365,13 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .anchor-zone.ready {
-  background: rgba(71, 113, 79, 0.2);
+  background: var(--live-wash);
   border: 1px solid var(--live);
   color: var(--live);
 }
 
 .anchor-zone.repairable {
-  background: rgba(162, 114, 31, 0.16);
+  background: var(--edited-wash);
   border: 1px solid var(--edited);
   color: var(--edited);
 }
@@ -1400,7 +1477,8 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .section-header h2 {
-  font: 400 26px/1.15 var(--serif);
+  font: 700 25px/1.1 var(--display);
+  letter-spacing: -0.025em;
   margin-top: 2px;
 }
 
@@ -1471,14 +1549,33 @@ h1, h2, h3, p { margin: 0; }
 }
 
 .structured-entry input,
-.structured-entry textarea { width: 100%; min-width: 0; }
+.structured-entry textarea {
+  width: 100%;
+  min-width: 0;
+  background: transparent;
+  color: var(--ink);
+  border: none;
+  border-bottom: 1px solid transparent;
+  border-radius: 0;
+}
+.structured-entry input:focus-visible,
+.structured-entry textarea:focus-visible {
+  outline: none;
+  border-bottom-color: var(--wax);
+}
 .structured-entry-header input { flex: 1; }
 .bullet-row input { flex: 1; }
 
-.entry-title-input { font: 400 15px var(--serif) !important; }
+.entry-title-input { font: 600 14px var(--display) !important; letter-spacing: -0.008em; }
 .entry-sub-input, .entry-date-input { font-size: 12px !important; }
 
-.chip-input { font: 400 12px var(--mono) !important; width: 100%; }
+.chip-input {
+  font: 400 12px var(--mono) !important;
+  width: 100%;
+  background: transparent;
+  color: var(--ink);
+  border: none;
+}
 
 .tool-chips {
   display: flex;
@@ -1575,7 +1672,7 @@ h1, h2, h3, p { margin: 0; }
   --text-secondary: var(--ink-2);
   --muted: var(--ink-3);
   --success: var(--live);
-  --success-soft: rgba(71, 113, 79, 0.12);
+  --success-soft: var(--live-wash);
   --danger: var(--wax);
   --warning: var(--edited);
   --accent-strong: var(--wax);
@@ -1669,39 +1766,6 @@ h1, h2, h3, p { margin: 0; }
 }
 
 /* ── Onboarding ────────────────────────────────────────────────────────────── */
-.onboarding-stage {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
-  display: flex;
-  justify-content: center;
-  padding: 40px 28px;
-}
-
-.onboarding-card {
-  width: min(680px, 100%);
-  align-self: flex-start;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.step-dots {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.step-dots .dot {
-  width: 22px;
-  height: 3px;
-  border-radius: 2px;
-  background: var(--hairline-strong);
-}
-
-.step-dots .dot.done { background: var(--ink); }
-.step-dots .dot.current { background: var(--wax); }
-
 .dropzone {
   border: 1.5px dashed var(--hairline-strong);
   border-radius: 12px;
@@ -1716,10 +1780,513 @@ h1, h2, h3, p { margin: 0; }
 
 .dropzone:hover { border-color: var(--wax); }
 
-.confidence-meter {
+/* ── Onboarding form fields (bare step inputs, themed like the rest of the app) ── */
+.onboarding-shell input:not([type='checkbox']):not([type='radio']),
+.onboarding-shell select,
+.onboarding-shell textarea {
+  background: var(--card);
+  color: var(--ink);
+  border: 1px solid var(--hairline-strong);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.onboarding-shell input:not([type='checkbox']):not([type='radio']):focus-visible,
+.onboarding-shell select:focus-visible,
+.onboarding-shell textarea:focus-visible {
+  outline: none;
+  border-color: var(--wax);
+}
+
+/* ── Screen-level fault + loading states (router ErrorBoundary / Suspense) ── */
+.screen-fault {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 32px;
+}
+.screen-fault-detail {
+  color: var(--ink-2);
+  font: 400 12.5px var(--mono);
+}
+.screen-loading { min-height: 120px; }
+
+/* ── Run console inline answer input ── */
+.answer-inline-input {
+  border: none;
+  background: transparent;
+  padding: 0;
+  width: 100%;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--ink);
+  border-bottom: 1px solid transparent;
+}
+.answer-inline-input:focus-visible {
+  outline: none;
+  border-bottom-color: var(--wax);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ONBOARDING - four moments, not thirteen steps
+   Resume first: the app reads the file, then shows its work and asks you to
+   correct it. So this surface is editorial rather than form-shaped - one huge
+   claim per screen, a lot of air around the single decision, and the ledger
+   using scale contrast (a 44px fact count over 9.5px mono labels) to say "here
+   is what we learned" before it says "here are twenty inputs".
+   Semantic colour, not decoration: --wax is anything you can press, --edited
+   marks a parse we are unsure of, --live means nothing needs a second look.
+   ═══════════════════════════════════════════════════════════════════════════ */
+.onboarding-shell {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  justify-content: center;
+  background:
+    radial-gradient(120% 80% at 50% -20%, var(--wax-wash), transparent 62%),
+    var(--paper);
+}
+
+.ob-frame {
+  width: min(760px, 100%);
+  padding: 34px 30px 72px;
+  display: flex;
+  flex-direction: column;
+  gap: 34px;
+}
+
+/* ── The rail: four stops, so the length of the flow is never a mystery ────── */
+.ob-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+}
+
+.ob-rail-stops {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.ob-rail-stop {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font: 500 9.5px var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color 0.25s ease;
+}
+
+.ob-rail-stop.done { color: var(--ink-2); }
+.ob-rail-stop.active { color: var(--wax); }
+
+.ob-rail-num {
+  display: grid;
+  place-items: center;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  font-size: 8.5px;
+  line-height: 1;
+}
+
+.ob-rail-stop.active .ob-rail-num {
+  background: var(--wax);
+  border-color: var(--wax);
+  color: var(--on-wax);
+}
+
+.ob-stage { display: flex; flex-direction: column; }
+
+/* ── Moment 1 + 4: the full-bleed claim ────────────────────────────────────── */
+.ob-hero {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 18px;
+  padding-top: 22px;
+}
+
+.ob-hero-title {
+  font: 800 clamp(2.1rem, 1.2rem + 3.4vw, 3.4rem) / 1.02 var(--display);
+  letter-spacing: -0.035em;
+  color: var(--ink);
+  margin: 0;
+}
+
+.ob-hero-sub {
+  max-width: 46ch;
+  font-size: 14.5px;
+  line-height: 1.55;
+  color: var(--ink-2);
+  margin: 0;
+}
+
+/* Deliberately a button, not a drop zone: the main process only accepts paths
+   it vetted through its own dialog, so a drop target here would be a lie. */
+.ob-target {
+  width: 100%;
+  margin-top: 6px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 40px 26px;
+  border: 1.5px dashed var(--hairline-strong);
+  border-radius: 16px;
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: var(--card-shadow);
+  transition: border-color 0.2s ease, transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s ease;
+}
+
+.ob-target:hover {
+  border-color: var(--wax);
+  border-style: solid;
+  transform: translateY(-2px);
+  box-shadow: var(--gate-shadow);
+}
+
+.ob-target:active { transform: translateY(0); }
+.ob-target:focus-visible { outline: 2px solid var(--wax); outline-offset: 3px; }
+.ob-target svg { color: var(--wax); }
+.ob-target-main { font-size: 15px; font-weight: 700; }
+.ob-target-sub { font: 400 9.5px var(--mono); letter-spacing: 0.11em; color: var(--ink-3); text-transform: uppercase; }
+
+.ob-picked { margin: 0; }
+
+.ob-privacy {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--ink-3);
+}
+
+.ob-privacy svg { color: var(--live); flex: none; }
+
+.ob-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  font-size: 12px;
+  color: var(--ink-2);
+  border-bottom: 1px solid transparent;
+  transition: color 0.18s ease, border-color 0.18s ease;
+}
+
+.ob-ghost:hover { color: var(--wax); border-bottom-color: var(--wax-border); }
+
+/* ── Moment 2: the app reading, out loud ───────────────────────────────────── */
+.ob-ledger { display: flex; flex-direction: column; gap: 24px; }
+
+.ob-reading {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 30px 24px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.ob-reading-pulse {
+  width: 9px;
+  height: 9px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--wax);
+  animation: apoPulse 1.1s ease-in-out infinite;
+}
+
+.ob-reading-title { margin: 0 0 2px; font-size: 14px; font-weight: 700; }
+
+.ob-ledger-head { display: flex; flex-direction: column; gap: 12px; }
+
+/* The one number worth shouting: how much the file saved you typing. */
+.ob-count {
+  display: flex;
+  align-items: baseline;
+  gap: 11px;
+  margin: 0;
+}
+
+.ob-count strong {
+  font: 800 44px/1 var(--display);
+  letter-spacing: -0.04em;
+  color: var(--ink);
+}
+
+.ob-count span {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.ob-flagbar,
+.ob-allclear {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  padding: 9px 13px;
+  border-radius: 9px;
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.ob-flagbar {
+  background: var(--edited-wash);
+  color: var(--edited);
+  border: 1px solid var(--edited-wash);
+}
+
+.ob-flagbar strong { font-weight: 700; }
+.ob-flagbar svg { flex: none; }
+
+.ob-allclear {
+  background: var(--live-wash);
+  color: var(--live);
+  border: 1px solid var(--live-wash);
+}
+
+.ob-allclear svg { flex: none; }
+
+/* ── Moment 3: confirm and correct ─────────────────────────────────────────── */
+.ob-groups { display: flex; flex-direction: column; gap: 14px; }
+
+.ob-group {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.ob-group > .fine-print { margin: -6px 0 0; }
+
+.ob-group-head {
   display: flex;
   align-items: center;
   gap: 8px;
+  margin: 0;
+  font: 600 10px var(--mono);
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+  color: var(--ink-3);
 }
 
-.confidence-meter .progress-track { max-width: none; height: 3px; }
+.ob-group-head svg { color: var(--wax); }
+
+.ob-group-count {
+  font-size: 9px;
+  padding: 1px 6px;
+  border-radius: 20px;
+  background: var(--wax-wash);
+  color: var(--wax);
+}
+
+.ob-identity-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px 14px;
+}
+
+/* Our form fields put the caption in a span, so restate `.form-field label`. */
+.ob-frame .form-field > span {
+  font: 500 9.5px var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+  text-transform: uppercase;
+}
+
+.ob-entry {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 13px 14px;
+  border: 1px solid var(--hairline-soft);
+  border-radius: 11px;
+  background: var(--chrome);
+}
+
+.ob-entry .fine-print { margin: 0; }
+
+.ob-entry-top { display: flex; align-items: center; gap: 9px; }
+
+.ob-entry-title {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px !important;
+  font-weight: 700;
+  border-color: transparent !important;
+  background: transparent !important;
+  padding: 3px 5px !important;
+}
+
+.ob-entry-title:hover { background: var(--card) !important; }
+.ob-entry-title:focus-visible { background: var(--card) !important; border-color: var(--wax) !important; }
+
+.ob-entry-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.ob-row-remove {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--ink-3);
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.ob-row-remove:hover { background: var(--wax-wash); color: var(--wax); }
+
+/* Below the merge gate the profile would silently drop it, so say so here. */
+.ob-flag {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 7px;
+  border-radius: 20px;
+  background: var(--edited-wash);
+  color: var(--edited);
+  font: 600 9px var(--mono);
+  letter-spacing: 0.06em;
+}
+
+.ob-add {
+  align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px dashed var(--hairline-strong);
+  border-radius: 8px;
+  color: var(--ink-2);
+  font-size: 11.5px;
+  font-weight: 600;
+  transition: border-color 0.16s ease, color 0.16s ease;
+}
+
+.ob-add:hover { border-color: var(--wax); color: var(--wax); border-style: solid; }
+
+.ob-skill-group { display: flex; flex-direction: column; gap: 7px; }
+
+.ob-skill-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}
+
+.ob-chip-row { display: flex; flex-wrap: wrap; gap: 5px; }
+
+.ob-fact-line {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0;
+  font-size: 12.5px;
+}
+
+.ob-fact-line .fine-print { margin-left: auto; }
+
+/* ── Moment 4: only what a resume cannot say ───────────────────────────────── */
+.ob-tail { display: flex; flex-direction: column; gap: 16px; }
+
+.ob-tail-title {
+  margin: 0 0 6px;
+  font: 800 clamp(1.5rem, 1.1rem + 1.5vw, 2rem) / 1.1 var(--display);
+  letter-spacing: -0.028em;
+}
+
+.ob-detail-card {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 20px;
+  border: 1px solid var(--hairline);
+  border-radius: 14px;
+  background: var(--card);
+  box-shadow: var(--card-shadow);
+}
+
+.ob-detail-card > .fine-print { margin: -6px 0 0; }
+
+.ob-disclosure {
+  border-top: 1px solid var(--hairline-soft);
+  padding-top: 12px;
+}
+
+.ob-disclosure summary {
+  cursor: pointer;
+  font: 600 10px var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+
+.ob-disclosure summary:hover { color: var(--wax); }
+.ob-disclosure > * + * { margin-top: 10px; }
+
+/* This paragraph is a promise, not a micro-label, so it gets readable size. */
+.ob-disclosure .review-always {
+  display: block;
+  font: 500 11.5px/1.45 var(--sans);
+  letter-spacing: 0;
+}
+
+.ob-disclosure label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+
+/* ── Advance / retreat ─────────────────────────────────────────────────────── */
+.ob-advance {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 12px 22px;
+  font-size: 13.5px;
+}
+
+.ob-back {
+  align-self: flex-start;
+  font: 500 10px var(--mono);
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  transition: color 0.16s ease;
+}
+
+.ob-back:hover { color: var(--wax); }
+
+@media (max-width: 620px) {
+  .ob-identity-grid,
+  .ob-entry-grid { grid-template-columns: 1fr; }
+  .ob-rail-stops { gap: 13px; }
+}

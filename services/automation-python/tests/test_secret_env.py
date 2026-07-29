@@ -2,10 +2,15 @@
 from __future__ import annotations
 
 import json
+import os
 
 import pytest
 
-from applyocalypse_automation.secret_env import _secrets_from_file, get_secret
+from applyocalypse_automation.secret_env import (
+    _secrets_from_file,
+    apply_provider_secrets_to_env,
+    get_secret,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -113,3 +118,46 @@ class TestSecretsFromFile:
         result = get_secret("APPLYO_APPLICATION_PASSWORD")
 
         assert result == "fallback-list"
+
+
+class TestApplyProviderSecretsToEnv:
+    def test_exports_provider_keys_into_process_env(self, tmp_path, monkeypatch):
+        secrets = {"OPENAI_API_KEY": "sk-from-file", "APPLYO_APPLICATION_PASSWORD": "s3cr3t"}
+        secret_file = tmp_path / "worker-secrets.json"
+        secret_file.write_text(json.dumps(secrets), encoding="utf-8")
+        monkeypatch.setenv("APPLYO_SECRETS_FILE", str(secret_file))
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        apply_provider_secrets_to_env()
+
+        assert os.environ["OPENAI_API_KEY"] == "sk-from-file"
+
+    def test_never_exports_applyo_internal_secrets(self, tmp_path, monkeypatch):
+        secrets = {"APPLYO_APPLICATION_PASSWORD": "s3cr3t"}
+        secret_file = tmp_path / "worker-secrets.json"
+        secret_file.write_text(json.dumps(secrets), encoding="utf-8")
+        monkeypatch.setenv("APPLYO_SECRETS_FILE", str(secret_file))
+        monkeypatch.delenv("APPLYO_APPLICATION_PASSWORD", raising=False)
+
+        apply_provider_secrets_to_env()
+
+        assert "APPLYO_APPLICATION_PASSWORD" not in os.environ
+
+    def test_file_value_overrides_stale_env_value(self, tmp_path, monkeypatch):
+        secrets = {"OPENAI_API_KEY": "sk-file-wins"}
+        secret_file = tmp_path / "worker-secrets.json"
+        secret_file.write_text(json.dumps(secrets), encoding="utf-8")
+        monkeypatch.setenv("APPLYO_SECRETS_FILE", str(secret_file))
+        monkeypatch.setenv("OPENAI_API_KEY", "sk-stale")
+
+        apply_provider_secrets_to_env()
+
+        assert os.environ["OPENAI_API_KEY"] == "sk-file-wins"
+
+    def test_missing_secrets_file_is_a_noop(self, monkeypatch):
+        monkeypatch.setenv("APPLYO_SECRETS_FILE", "does-not-exist.json")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+        apply_provider_secrets_to_env()
+
+        assert "OPENAI_API_KEY" not in os.environ

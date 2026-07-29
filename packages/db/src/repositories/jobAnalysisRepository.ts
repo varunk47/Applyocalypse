@@ -1,12 +1,53 @@
 import type { Database } from "better-sqlite3";
 import { createHash, randomUUID } from "node:crypto";
+import { CROSS_LISTING_SIMILARITY, simhash64, simhashSimilarity } from "../jdFingerprint";
 import { stringifyJsonColumn } from "../json";
+
+export type CrossListing = {
+  jobTargetId: string;
+  scrapedUrl: string | null;
+  similarity: number;
+};
 
 const arrayFromPayload = (payload: Record<string, unknown>, key: string): string[] =>
   Array.isArray(payload[key]) ? (payload[key] as unknown[]).map((item) => String(item)) : [];
 
 export class JobAnalysisRepository {
   constructor(private readonly db: Database) {}
+
+  /** Near-duplicate JDs from OTHER job targets: agency reposts and cross-listings
+   * of a description the user already processed under a different URL/company. */
+  findCrossListings(rawText: string, applicationRunId: string): CrossListing[] {
+    const jdSimhash = simhash64(rawText);
+    if (!jdSimhash) {
+      return [];
+    }
+    const runRow = this.db
+      .prepare("SELECT job_target_id FROM application_runs WHERE id = ?")
+      .get(applicationRunId) as { job_target_id: string } | undefined;
+    const rows = this.db
+      .prepare("SELECT job_target_id, scraped_url, jd_simhash FROM job_descriptions WHERE jd_simhash IS NOT NULL")
+      .all() as Array<{ job_target_id: string; scraped_url: string | null; jd_simhash: string }>;
+    const bestPerTarget = new Map<string, CrossListing>();
+    for (const row of rows) {
+      if (runRow && row.job_target_id === runRow.job_target_id) {
+        continue;
+      }
+      const similarity = simhashSimilarity(jdSimhash, row.jd_simhash);
+      if (similarity < CROSS_LISTING_SIMILARITY) {
+        continue;
+      }
+      const existing = bestPerTarget.get(row.job_target_id);
+      if (!existing || similarity > existing.similarity) {
+        bestPerTarget.set(row.job_target_id, {
+          jobTargetId: row.job_target_id,
+          scrapedUrl: row.scraped_url,
+          similarity: Number(similarity.toFixed(3))
+        });
+      }
+    }
+    return [...bestPerTarget.values()].sort((a, b) => b.similarity - a.similarity);
+  }
 
   persistFromWorkerEvent(input: {
     applicationRunId: string;
@@ -26,6 +67,7 @@ export class JobAnalysisRepository {
     const jobDescriptionId = randomUUID();
     const keywordSetId = randomUUID();
     const sha256 = createHash("sha256").update(input.rawText).digest("hex");
+    const jdSimhash = simhash64(input.rawText);
     const now = new Date().toISOString();
 
     this.db.transaction(() => {
@@ -33,10 +75,10 @@ export class JobAnalysisRepository {
         .prepare(
           `
           INSERT INTO job_descriptions (
-            id, job_target_id, raw_text, scraped_url, source, sha256, extracted_at, created_at, updated_at
+            id, job_target_id, raw_text, scraped_url, source, sha256, jd_simhash, extracted_at, created_at, updated_at
           )
           VALUES (
-            @id, @jobTargetId, @rawText, @scrapedUrl, @source, @sha256, @extractedAt, @now, @now
+            @id, @jobTargetId, @rawText, @scrapedUrl, @source, @sha256, @jdSimhash, @extractedAt, @now, @now
           )
         `
         )
@@ -47,6 +89,7 @@ export class JobAnalysisRepository {
           scrapedUrl: input.scrapedUrl ?? null,
           source: input.source,
           sha256,
+          jdSimhash,
           extractedAt: input.extractedAt,
           now
         });

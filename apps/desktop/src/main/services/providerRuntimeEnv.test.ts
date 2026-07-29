@@ -15,34 +15,33 @@ describe("provider runtime env", () => {
       ["azure_openai", "AZURE_API_KEY"],
       ["aws_bedrock", "AWS_SECRET_ACCESS_KEY"]
     ] as const;
-
     for (const [provider, envName] of expected) {
-      const env = buildProviderRuntimeEnv({
+      const { env, secretEnv } = buildProviderRuntimeEnv({
         provider,
         apiKey: `${provider}-secret`,
         metadata: { defaultModel: `${provider}/model` }
       });
-
-      expect(env[envName]).toBe(`${provider}-secret`);
+      expect(secretEnv[envName]).toBe(`${provider}-secret`);
+      expect(env[envName]).toBeUndefined();
       expect(env.LITELLM_PROVIDER).toBe(provider);
       expect(env.LITELLM_MODEL).toBe(`${provider}/model`);
     }
   });
 
-  it("maps BYOK provider keys to LiteLLM environment variables", () => {
-    const env = buildProviderRuntimeEnv({
+  it("keeps the API key out of the spawn env and in secretEnv only", () => {
+    const { env, secretEnv } = buildProviderRuntimeEnv({
       provider: "openai",
       apiKey: "sk-test",
       metadata: { defaultModel: "gpt-4.1" }
     });
-
-    expect(env.OPENAI_API_KEY).toBe("sk-test");
+    expect(secretEnv.OPENAI_API_KEY).toBe("sk-test");
+    expect(Object.values(env)).not.toContain("sk-test");
     expect(env.LITELLM_PROVIDER).toBe("openai");
     expect(env.LITELLM_MODEL).toBe("gpt-4.1");
   });
 
   it("sets LITELLM_MODEL_STRONG and LITELLM_MODEL_FAST when strongModel and fastModel are in metadata", () => {
-    const env = buildProviderRuntimeEnv({
+    const { env } = buildProviderRuntimeEnv({
       provider: "openai",
       apiKey: "sk-test",
       metadata: {
@@ -51,37 +50,34 @@ describe("provider runtime env", () => {
         fastModel: "groq/openai/gpt-oss-120b"
       }
     });
-
     expect(env.LITELLM_MODEL).toBe("openai/gpt-5.5");
     expect(env.LITELLM_MODEL_STRONG).toBe("openai/gpt-5.5");
     expect(env.LITELLM_MODEL_FAST).toBe("groq/openai/gpt-oss-120b");
   });
 
-  it("omits LITELLM_MODEL_STRONG and LITELLM_MODEL_FAST when not in metadata", () => {
-    const env = buildProviderRuntimeEnv({
+  it("leaves LITELLM_MODEL_STRONG and LITELLM_MODEL_FAST unset without metadata", () => {
+    const { env } = buildProviderRuntimeEnv({
       provider: "openai",
       apiKey: "sk-test",
       metadata: { defaultModel: "openai/gpt-5.5" }
     });
-
     expect(env.LITELLM_MODEL_STRONG).toBeUndefined();
     expect(env.LITELLM_MODEL_FAST).toBeUndefined();
   });
 
-  it("maps ZAI provider key to ZAI_API_KEY", () => {
-    const env = buildProviderRuntimeEnv({
+  it("supports ZAI via ZAI_API_KEY", () => {
+    const { env, secretEnv } = buildProviderRuntimeEnv({
       provider: "zai",
       apiKey: "zai-secret",
       metadata: { defaultModel: "zai/glm-5" }
     });
-
-    expect(env.ZAI_API_KEY).toBe("zai-secret");
+    expect(secretEnv.ZAI_API_KEY).toBe("zai-secret");
     expect(env.LITELLM_PROVIDER).toBe("zai");
     expect(env.LITELLM_MODEL).toBe("zai/glm-5");
   });
 
-  it("maps Azure OpenAI provider metadata without exposing it to the renderer at runtime", () => {
-    const env = buildProviderRuntimeEnv({
+  it("supports Azure OpenAI with api base and version", () => {
+    const { env, secretEnv } = buildProviderRuntimeEnv({
       provider: "azure_openai",
       apiKey: "test-key",
       metadata: {
@@ -90,15 +86,14 @@ describe("provider runtime env", () => {
         apiVersion: "2025-01-01-preview"
       }
     });
-
-    expect(env.AZURE_API_KEY).toBe("test-key");
+    expect(secretEnv.AZURE_API_KEY).toBe("test-key");
     expect(env.LITELLM_MODEL).toBe("azure/gpt-4.1");
     expect(env.LITELLM_API_BASE).toBe("https://example.openai.azure.com");
     expect(env.AZURE_API_VERSION).toBe("2025-01-01-preview");
   });
 
-  it("maps AWS Bedrock access metadata and keeps the encrypted secret as the secret access key", () => {
-    const env = buildProviderRuntimeEnv({
+  it("supports AWS Bedrock and keeps only the secret access key out of the spawn env", () => {
+    const { env, secretEnv } = buildProviderRuntimeEnv({
       provider: "aws_bedrock",
       apiKey: "test-key",
       metadata: {
@@ -107,8 +102,8 @@ describe("provider runtime env", () => {
         awsRegion: "us-east-1"
       }
     });
-
-    expect(env.AWS_SECRET_ACCESS_KEY).toBe("test-key");
+    expect(secretEnv.AWS_SECRET_ACCESS_KEY).toBe("test-key");
+    expect(env.AWS_SECRET_ACCESS_KEY).toBeUndefined();
     expect(env.AWS_ACCESS_KEY_ID).toBe("AKIA_TEST");
     expect(env.AWS_REGION).toBe("us-east-1");
     expect(env.AWS_DEFAULT_REGION).toBe("us-east-1");

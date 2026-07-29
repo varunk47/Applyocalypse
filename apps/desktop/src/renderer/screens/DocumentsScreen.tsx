@@ -24,7 +24,11 @@ export default function DocumentsScreen() {
   } = useProfileStore()
   const { state: queueState } = useQueueStore()
 
+  // Constant source so the fetcher runs once on mount and thereafter only on an
+  // explicit refetch. Splitting source from fetcher also keeps the tracked scope
+  // synchronous, which is what Solid's reactivity actually requires.
   const [generated, { refetch: refetchGenerated }] = createResource(
+    () => 'generated',
     async () => (await window.applyocalypse.documents.listGenerated(50)).items,
     { initialValue: [] as GeneratedFile[] }
   )
@@ -170,7 +174,7 @@ export default function DocumentsScreen() {
             </For>
 
             <div class="validators-note">
-              HOUSE VALIDATORS: ONE PAGE · BANNED WORDS · EM-DASH GATE — ALL BLOCKING
+              HOUSE VALIDATORS: ONE PAGE · BANNED WORDS · EM-DASH GATE / ALL BLOCKING
             </div>
           </div>
 
@@ -186,7 +190,7 @@ export default function DocumentsScreen() {
               when={generated().length > 0}
               fallback={
                 <div class="empty-state">
-                  <span>Tailored copies appear here as missions run. Paste a job link on Missions to start one.</span>
+                  <span>{generated.loading ? 'Loading tailored documents...' : 'Tailored copies appear here as missions run. Paste a job link on Missions to start one.'}</span>
                 </div>
               }
             >
@@ -204,7 +208,7 @@ export default function DocumentsScreen() {
                         <span style={{ display: 'block', font: '500 11.5px var(--mono)', overflow: 'hidden', 'text-overflow': 'ellipsis', 'white-space': 'nowrap' }}>
                           {file.filename}
                         </span>
-                        <span style={{ display: 'block', font: '400 12px var(--serif)', color: 'var(--ink-2)' }}>
+                        <span style={{ display: 'block', font: '500 12px var(--sans)', color: 'var(--ink-2)' }}>
                           {generatedJobLabel(file)}
                         </span>
                       </span>

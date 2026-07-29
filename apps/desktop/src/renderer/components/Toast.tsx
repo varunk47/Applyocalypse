@@ -1,6 +1,7 @@
 import { For, createContext, createSignal, useContext, type ParentProps } from 'solid-js'
 import { CheckCircle2, AlertTriangle, XCircle, Info, X } from 'lucide-solid'
 import { gsap } from '../animations/gsap'
+import { prefersReducedMotion } from '../animations/motion'
 
 type ToastKind = 'success' | 'error' | 'info' | 'warning'
 
@@ -63,9 +64,14 @@ export const ToastProvider = (props: ParentProps) => {
             const Icon = ICON[item.kind]
 
             const animateIn = (node: Element) => {
+              if (prefersReducedMotion()) return
               gsap.fromTo(node, { y: 12, opacity: 0 }, { y: 0, opacity: 1, duration: 0.25, ease: 'expo.out' })
             }
             const animateOut = (node: Element, done: () => void) => {
+              if (prefersReducedMotion()) {
+                done()
+                return
+              }
               gsap.to(node, { y: 12, opacity: 0, duration: 0.18, ease: 'expo.in', onComplete: done })
             }
 

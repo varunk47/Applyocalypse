@@ -26,6 +26,11 @@ export const registerRunHandlers = (ctx: IpcHandlerContext): void => {
     workerSupervisor.stop(runId);
     return updateRunAndQueueStatus(runId, "CANCELLED");
   });
+
+  handleContract(IpcContracts.runsCancelPaused, () => {
+    const cancelled = runRepository.cancelPausedRuns();
+    return { cancelled };
+  });
   handleContract(IpcContracts.runsResolveReview, ({ runId, reviewRequestId, status, reason }) => {
     const reviewRequest = runRepository.listReviewRequests(runId).find((request) => request.id === reviewRequestId);
     if (!reviewRequest) {
@@ -99,10 +104,21 @@ export const registerRunHandlers = (ctx: IpcHandlerContext): void => {
     if (inactive) {
       return inactive;
     }
+    const applicationRun = runRepository.getApplicationRun(runId);
+    if ((approvalType === "FINAL_SUBMIT" || approvalType === "AUTO_SUBMIT") && applicationRun.status !== "READY_TO_SUBMIT") {
+      // Never forward a final-submit approval unless the worker is actually parked at that gate.
+      const message = `Run is not awaiting final-submit approval (status: ${applicationRun.status}).`;
+      auditRepository.append({
+        action: "run.control.rejected_gate_mismatch",
+        entityType: "application_run",
+        entityId: runId,
+        metadata: { approvalType, status: applicationRun.status }
+      });
+      return { accepted: false, message };
+    }
     if (approvalType === "ANSWER_EDIT") {
       runRepository.approvePendingAnswers(runId);
     }
-    const applicationRun = runRepository.getApplicationRun(runId);
     const approvedAnswers = runRepository
       .listAnswers(runId)
       .filter((answer) => answer.status === "APPROVED")

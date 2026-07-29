@@ -1,14 +1,16 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="Georgia, 'Times New Roman', serif">
-  <rect width="1200" height="630" fill="#FBFAF7"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 630" font-family="'Instrument Serif', Georgia, 'Times New Roman', serif">
+  <rect width="1200" height="630" fill="#ECEFF4"/>
   <rect width="1200" height="630" fill="none"/>
   <g transform="translate(90 96)">
-    <circle cx="18" cy="14" r="17" fill="none" stroke="#A03123" stroke-width="1.6" stroke-dasharray="3 3"/>
-    <text x="18" y="21" text-anchor="middle" font-style="italic" font-size="20" fill="#A03123">A</text>
-    <text x="48" y="22" font-style="italic" font-size="26" fill="#201D17">Applyocalypse</text>
-    <text x="900" y="20" font-family="'JetBrains Mono', monospace" font-size="15" letter-spacing="3" fill="#A39D8F">LOCAL-FIRST · WINDOWS</text>
+    <circle cx="18" cy="14" r="17" fill="none" stroke="#1B3FD8" stroke-width="1.6" stroke-dasharray="3 3"/>
+    <text x="18" y="21" text-anchor="middle" font-style="italic" font-size="20" fill="#1B3FD8">A</text>
+    <text x="48" y="22" font-style="italic" font-size="26" fill="#0E1420">Applyocalypse</text>
+    <!-- Anchored to the right margin (1110 absolute, less the group's 90 offset)
+         so the label cannot run off the card as the string or face changes. -->
+    <text x="1020" y="20" text-anchor="end" font-family="'JetBrains Mono', ui-monospace, monospace" font-size="15" letter-spacing="3" fill="#646D7D">LOCAL-FIRST · WINDOWS</text>
   </g>
-  <text x="90" y="330" font-size="86" fill="#201D17">An evening of drudgery,</text>
-  <text x="90" y="428" font-size="86" fill="#201D17">reduced to a <tspan font-style="italic" fill="#A03123">signature.</tspan></text>
-  <text x="92" y="520" font-family="Arial, sans-serif" font-size="27" fill="#6C675B">It tailors, fills, and files. Then it stops and waits for you to sign.</text>
-  <rect x="90" y="556" width="240" height="6" rx="3" fill="#A03123"/>
+  <text x="90" y="330" font-size="86" fill="#0E1420">An evening of drudgery,</text>
+  <text x="90" y="428" font-size="86" fill="#0E1420">reduced to a <tspan font-style="italic" fill="#1B3FD8">signature.</tspan></text>
+  <text x="92" y="520" font-family="'Hanken Grotesk', Arial, sans-serif" font-size="27" fill="#56606F">It tailors, fills, and files. Then it stops and waits for you to sign.</text>
+  <rect x="90" y="556" width="240" height="6" rx="3" fill="#1B3FD8"/>
 </svg>

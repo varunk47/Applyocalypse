@@ -22,7 +22,12 @@ def read_worker_control(work_dir: Path, *, consume: bool = True) -> WorkerContro
     if not control_path.exists():
         return None
 
-    raw = json.loads(control_path.read_text(encoding="utf-8"))
+    try:
+        raw = json.loads(control_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        # Electron may still be mid-write; treat a torn or unreadable file as
+        # "no command yet" and let the next poll pick up the settled file.
+        return None
     command = raw.get("command")
     if command not in {"PAUSE", "RESUME", "CANCEL", "RETRY_STEP", "SKIP_STEP"}:
         raise ValueError(f"Unsupported worker control command: {command}")

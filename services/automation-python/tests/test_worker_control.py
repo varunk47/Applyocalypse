@@ -10,9 +10,9 @@ from applyocalypse_automation.browser.adapter import BrowserBlocker, BrowserFiel
 from applyocalypse_automation.browser.field_detection import build_click_by_text_script, build_final_submit_script
 from applyocalypse_automation.browser.portal_workflows import workflow_for_url
 from applyocalypse_automation.control import WorkerControl, read_worker_control
+from applyocalypse_automation.field_resolution import approved_value_for_field
 from applyocalypse_automation.otp import GmailOtpResult
 from applyocalypse_automation.runner import (
-    approved_value_for_field,
     control_auto_submit_enabled,
     cover_letter_requirement_from_fields,
     field_file_count,
@@ -227,7 +227,7 @@ def test_wait_for_review_resume_reports_unsupported_control_commands(tmp_path, c
 def test_runtime_control_cancel_emits_failed_event(tmp_path, capsys):
     (tmp_path / "control.json").write_text(json.dumps({"command": "CANCEL", "reason": "local_user_cancel"}), encoding="utf-8")
 
-    should_stop = handle_runtime_control(tmp_path, "run-control", context="field application")
+    should_stop = asyncio.run(handle_runtime_control(tmp_path, "run-control", context="field application"))
 
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     assert should_stop is True
@@ -245,7 +245,7 @@ def test_runtime_control_pause_waits_for_fresh_resume(tmp_path, capsys):
 
     resume_thread = threading.Thread(target=write_resume)
     resume_thread.start()
-    should_stop = handle_runtime_control(tmp_path, "run-control", context="page navigation")
+    should_stop = asyncio.run(handle_runtime_control(tmp_path, "run-control", context="page navigation"))
     resume_thread.join(timeout=2)
 
     events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
@@ -339,7 +339,7 @@ def test_pause_for_blockers_fills_gmail_otp_without_logging_code(tmp_path, capsy
     monkeypatch.setattr(
         runner_module,
         "read_gmail_otp_from_env",
-        lambda: GmailOtpResult(True, "493821", "Gmail OTP code extracted", metadata={"message_id_sha256": "hash"}),
+        lambda **_: GmailOtpResult(True, "493821", "Gmail OTP code extracted", metadata={"message_id_sha256": "hash"}),
     )
 
     should_stop = asyncio.run(
@@ -1132,3 +1132,210 @@ def test_required_document_missing_payload_includes_existing_file_count():
     payload = required_document_missing_payload(field, generated_files=[])
 
     assert payload["existing_file_count"] == 2
+
+
+def test_pause_for_blockers_stops_after_max_cycles_when_blocker_persists(tmp_path, capsys):
+    """A detection that never clears must degrade to a terminal review, never loop forever."""
+
+    class FakeAdapter:
+        async def detect_blockers(self):
+            return [BrowserBlocker(blocker_type="CAPTCHA", message="CAPTCHA challenge detected", confidence=0.92)]
+
+    stop_writer = threading.Event()
+
+    def keep_resuming() -> None:
+        while not stop_writer.is_set():
+            control_path = tmp_path / "control.json"
+            if not control_path.exists():
+                control_path.write_text(json.dumps({"command": "RESUME", "reason": "captcha_completed"}), encoding="utf-8")
+            time.sleep(0.02)
+
+    writer = threading.Thread(target=keep_resuming, daemon=True)
+    writer.start()
+    try:
+        should_stop = asyncio.run(
+            pause_for_blockers(
+                FakeAdapter(),
+                tmp_path,
+                "run-stuck",
+                [BrowserBlocker(blocker_type="CAPTCHA", message="CAPTCHA challenge detected", confidence=0.92)],
+                context="page review",
+            )
+        )
+    finally:
+        stop_writer.set()
+        writer.join(timeout=2)
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    event_types = [event["event_type"] for event in events]
+    assert should_stop is True
+    assert event_types.count("PAUSED") == 3
+    assert event_types[-1] == "FAILED"
+    assert events[-1]["machine_state"]["reason"] == "CAPTCHA_UNRESOLVED"
+    assert events[-1]["payload"]["code"] == "CAPTCHA_UNRESOLVED"
+
+
+def test_pause_for_blockers_ignores_ambiguous_question_and_continues(tmp_path, capsys):
+    """Sensitive/EEO questions are reviewed per-field, not by halting the whole run."""
+
+    class FakeAdapter:
+        async def detect_blockers(self):
+            return []
+
+    should_stop = asyncio.run(
+        pause_for_blockers(
+            FakeAdapter(),
+            tmp_path,
+            "run-eeo",
+            [BrowserBlocker(blocker_type="AMBIGUOUS_QUESTION", message="Sensitive question detected", confidence=0.86)],
+            context="page review",
+        )
+    )
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert should_stop is False
+    assert events == []
+    assert not (tmp_path / "control.json").exists()
+
+
+def test_pause_for_blockers_still_halts_on_real_blocker_mixed_with_ambiguous(tmp_path, capsys):
+    """A genuine gate (CAPTCHA) mixed with a soft AMBIGUOUS_QUESTION still pauses."""
+
+    class FakeAdapter:
+        async def detect_blockers(self):
+            return []
+
+    def write_resume() -> None:
+        time.sleep(0.05)
+        (tmp_path / "control.json").write_text(json.dumps({"command": "RESUME", "reason": "captcha_done"}), encoding="utf-8")
+
+    resume_thread = threading.Thread(target=write_resume)
+    resume_thread.start()
+    should_stop = asyncio.run(
+        pause_for_blockers(
+            FakeAdapter(),
+            tmp_path,
+            "run-mixed",
+            [
+                BrowserBlocker(blocker_type="AMBIGUOUS_QUESTION", message="Sensitive question detected", confidence=0.86),
+                BrowserBlocker(blocker_type="CAPTCHA", message="CAPTCHA challenge detected", confidence=0.95),
+            ],
+            context="page review",
+        )
+    )
+    resume_thread.join(timeout=2)
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert should_stop is False
+    assert events[0]["event_type"] == "PAUSED"
+    assert events[0]["machine_state"]["reason"] == "CAPTCHA_DETECTED"
+
+
+def test_a_field_the_page_never_labeled_is_handed_to_a_person_not_guessed_at(tmp_path, monkeypatch, capsys):
+    """Detection invents a label so an unlabeled control does not vanish.
+
+    That invented label must not then be matched against approved answers: the
+    match would be against a name the applicant never saw, and a wrong match
+    writes a real value into a box nobody has identified.
+    """
+
+    class FakeAdapter:
+        name = "playwright"
+
+        def __init__(self):
+            self.applied_values = []
+            self.final_submit_clicked = False
+
+        async def launch(self, *, run_id, user_data_dir):
+            return type("Result", (), {"ok": True, "payload": {"run_id": run_id}})()
+
+        async def open_url(self, url):
+            return type("Result", (), {"ok": True, "payload": {"url": url}})()
+
+        async def detect_blockers(self):
+            return []
+
+        async def click_by_text(self, labels):
+            return type("Result", (), {"ok": True, "payload": {"clicked_label": labels[0]}})()
+
+        async def detect_fields(self):
+            return [
+                BrowserField(
+                    field_id="field-email",
+                    label="Email address",
+                    field_type="email",
+                    selector="#email",
+                    required=True,
+                    confidence=0.95,
+                ),
+                BrowserField(
+                    field_id="field-mystery",
+                    label="Unlabeled field",
+                    field_type="text",
+                    selector="#mystery",
+                    required=False,
+                    confidence=0.4,
+                    metadata={
+                        "label_source": "synthetic",
+                        "label_synthetic": True,
+                        "requires_human_label_review": True,
+                    },
+                ),
+            ]
+
+        async def apply_field_value(self, field, value):
+            self.applied_values.append((field.selector, value))
+            return type("Result", (), {"ok": True, "payload": {"action": "set_value"}})()
+
+        async def extract_visible_text(self):
+            text = "Application submitted. Thank you for applying." if self.final_submit_clicked else "Apply form"
+            return type("Result", (), {"ok": True, "payload": {"text": text, "text_length": len(text)}})()
+
+        async def click_final_submit(self, labels):
+            self.final_submit_clicked = True
+            return type("Result", (), {"ok": True, "payload": {"clicked_label": "Submit application"}})()
+
+        async def screenshot(self, output_path):
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_bytes(b"fake-png")
+            return type("Result", (), {"ok": True, "payload": {"mime_type": "image/png", "width": 900, "height": 700}})()
+
+        async def close(self):
+            return type("Result", (), {"ok": True, "payload": {}})()
+
+    fake_adapter = FakeAdapter()
+    monkeypatch.setattr(runner_module, "create_browser_adapter", lambda name: fake_adapter)
+    monkeypatch.delenv("APPLYO_WORKER_WAIT_FOR_REVIEW", raising=False)
+
+    asyncio.run(
+        run_browser_apply_after_review(
+            run_id="run-synthetic-label",
+            job_url="https://boards.greenhouse.io/northstar-labs/jobs/1",
+            work_dir=tmp_path,
+            adapter_name="playwright",
+            control=WorkerControl(
+                command="RESUME",
+                reason="local_user_approval",
+                step_id=None,
+                written_at=None,
+                payload={
+                    "approvalType": "DOCUMENT_APPROVAL",
+                    "autoSubmitEnabled": True,
+                    "approvedAnswers": [
+                        {"fieldLabel": "Email address", "fieldType": "email", "value": "ada@example.com"},
+                        {"fieldLabel": "Unlabeled field", "fieldType": "text", "value": "should never be written"},
+                    ],
+                },
+            ),
+        )
+    )
+
+    events = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    applied_selectors = [selector for selector, _ in fake_adapter.applied_values]
+
+    assert "#mystery" not in applied_selectors, "an approved answer was written into an unidentified field"
+    assert ("#email", "ada@example.com") in fake_adapter.applied_values
+    review_reasons = [
+        event["payload"].get("reason") for event in events if event["event_type"] == "USER_REVIEW_REQUIRED"
+    ]
+    assert "SYNTHETIC_FIELD_LABEL" in review_reasons

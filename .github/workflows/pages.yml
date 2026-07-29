@@ -1,0 +1,54 @@
+name: Deploy landing page
+
+# The landing page is a static folder with no build step, so deploying it is a
+# copy. It publishes only from main, and only after the asset check passes: a
+# page whose fonts or vendored animation scripts are missing renders as an
+# unstyled wall of text, which is worse than not shipping.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "landing/**"
+      - "scripts/landing/**"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# A newer commit should win, but never by cancelling a deploy already in flight.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check self-hosted assets are present
+        run: node scripts/landing/check-assets.mjs
+
+      - name: Configure Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload landing folder
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: landing
+
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

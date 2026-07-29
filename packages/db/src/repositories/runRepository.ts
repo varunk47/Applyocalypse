@@ -190,6 +190,33 @@ export class RunRepository {
     return this.getApplicationRun(input.runId);
   }
 
+  /** Cancel every run parked awaiting the user (paused/blocked/waiting) and its queue item.
+   * Lets the user clear an accumulated backlog of stuck runs in one action. */
+  cancelPausedRuns(): number {
+    const now = nowIso();
+    const parked = ["PAUSED", "WAITING_FOR_USER_EDIT", "WAITING_FOR_USER", "BLOCKED_CAPTCHA"];
+    const placeholders = parked.map(() => "?").join(", ");
+    const runResult = this.db
+      .prepare(
+        `
+        UPDATE application_runs
+        SET status = 'CANCELLED', failure_code = 'USER_CLEARED_PAUSED', completed_at = ?, updated_at = ?
+        WHERE status IN (${placeholders})
+      `
+      )
+      .run(now, now, ...parked);
+    this.db
+      .prepare(
+        `
+        UPDATE queue_items
+        SET status = 'CANCELLED', updated_at = ?
+        WHERE status IN (${placeholders})
+      `
+      )
+      .run(now, ...parked);
+    return runResult.changes;
+  }
+
   recoverStaleRuns(now = nowIso()): number {
     const recover = this.db.transaction(() => {
       const statusList = recoverableActiveRunStatuses.map((status) => `'${status}'`).join(",");
@@ -679,19 +706,19 @@ export class RunRepository {
     });
   }
 
-  addGeneratedFile(input: Omit<GeneratedFile, "id">): GeneratedFile {
+  addGeneratedFile(input: Omit<GeneratedFile, "id" | "applicationRunId"> & { applicationRunId?: string | null }): GeneratedFile {
     const id = randomUUID();
     const now = nowIso();
     this.db
       .prepare(
         `
         INSERT INTO generated_files (
-          id, tailoring_run_id, profile_id, job_target_id, file_kind, format, filename, local_path,
+          id, application_run_id, tailoring_run_id, profile_id, job_target_id, file_kind, format, filename, local_path,
           sha256, size_bytes, upload_status, uploaded_at, retention_policy, delete_after,
           created_at, updated_at, deleted_at
         )
         VALUES (
-          @id, @tailoringRunId, @profileId, @jobTargetId, @fileKind, @format, @filename, @localPath,
+          @id, @applicationRunId, @tailoringRunId, @profileId, @jobTargetId, @fileKind, @format, @filename, @localPath,
           @sha256, @sizeBytes, @uploadStatus, @uploadedAt, @retentionPolicy, @deleteAfter,
           @now, @now, @deletedAt
         )
@@ -699,6 +726,7 @@ export class RunRepository {
       )
       .run({
         id,
+        applicationRunId: input.applicationRunId ?? null,
         tailoringRunId: input.tailoringRunId,
         profileId: input.profileId,
         jobTargetId: input.jobTargetId,
@@ -731,11 +759,18 @@ export class RunRepository {
         JOIN application_runs
           ON application_runs.id = @applicationRunId
          AND (
-           generated_files.tailoring_run_id = application_runs.tailoring_run_id
+           generated_files.application_run_id = application_runs.id
            OR (
-             generated_files.tailoring_run_id IS NULL
-             AND generated_files.profile_id = application_runs.profile_id
-             AND generated_files.job_target_id = application_runs.job_target_id
+             -- Legacy rows only: files created before application_run_id existed.
+             generated_files.application_run_id IS NULL
+             AND (
+               generated_files.tailoring_run_id = application_runs.tailoring_run_id
+               OR (
+                 generated_files.tailoring_run_id IS NULL
+                 AND generated_files.profile_id = application_runs.profile_id
+                 AND generated_files.job_target_id = application_runs.job_target_id
+               )
+             )
            )
          )
         WHERE generated_files.deleted_at IS NULL
@@ -744,6 +779,7 @@ export class RunRepository {
       )
       .all({ applicationRunId }) as Array<{
       id: string;
+      application_run_id: string | null;
       tailoring_run_id: string | null;
       profile_id: string;
       job_target_id: string;
@@ -763,6 +799,7 @@ export class RunRepository {
     return rows.map((row) =>
       GeneratedFileSchema.parse({
         id: row.id,
+        applicationRunId: row.application_run_id,
         tailoringRunId: row.tailoring_run_id,
         profileId: row.profile_id,
         jobTargetId: row.job_target_id,
@@ -794,6 +831,7 @@ export class RunRepository {
       )
       .all({ limit }) as Array<{
       id: string;
+      application_run_id: string | null;
       tailoring_run_id: string | null;
       profile_id: string;
       job_target_id: string;
@@ -813,6 +851,7 @@ export class RunRepository {
     return rows.map((row) =>
       GeneratedFileSchema.parse({
         id: row.id,
+        applicationRunId: row.application_run_id,
         tailoringRunId: row.tailoring_run_id,
         profileId: row.profile_id,
         jobTargetId: row.job_target_id,

@@ -571,6 +571,45 @@ describe("python event ingest", () => {
     }
   });
 
+  it("opens an OTP review for an emailed verification link, carrying only the redacted target", () => {
+    const { db, runId } = createRun();
+    try {
+      ingestPythonEventLine({
+        db,
+        windows: () => [],
+        rawLine: JSON.stringify({
+          event_type: "PAUSED",
+          run_id: runId,
+          step_id: null,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          severity: "WARN",
+          message:
+            "A verification link for https://wd5.myworkday.com/wday/authgwy/acme/login arrived in Gmail during portal sign-in. Approve to open it in the automation browser.",
+          machine_state: { reason: "EMAIL_VERIFICATION_LINK_APPROVAL_REQUIRED", otp_kind: "LINK" },
+          ui_state: { requires_user_review: true, current_step: "blocked" },
+          payload: {
+            provider: "gmail",
+            ok: true,
+            code_length: null,
+            link_count: 2,
+            otp_kind: "LINK",
+            redacted_target: "https://wd5.myworkday.com/wday/authgwy/acme/login"
+          }
+        })
+      });
+
+      const reviewRequests = new RunRepository(db).listReviewRequests(runId);
+      expect(reviewRequests).toHaveLength(1);
+      expect(reviewRequests[0]?.reviewType).toBe("OTP");
+      expect(reviewRequests[0]?.status).toBe("OPEN");
+      const payload = JSON.stringify(reviewRequests[0]?.payload);
+      expect(payload).toContain("https://wd5.myworkday.com/wday/authgwy/acme/login");
+      expect(payload).not.toContain("token");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("maps blocker pause events to blocked run statuses and review requests", () => {
     const { db, runId } = createRun();
     try {

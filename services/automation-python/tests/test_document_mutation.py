@@ -152,6 +152,127 @@ def test_parser_extracts_structured_profile_sections_from_text(tmp_path: Path) -
     assert canonical["skillGroups"][0]["skills"] == ["Python", "TypeScript", "SQLite"]
 
 
+def test_parser_keeps_docx_tables_in_body_order(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("EDUCATION")
+    education = document.add_table(rows=1, cols=2)
+    education.cell(0, 0).text = "Illinois Institute of Technology"
+    education.cell(0, 1).text = "May 2026"
+    document.add_paragraph("CERTIFICATIONS")
+    document.add_paragraph("Vector Databases in Practice")
+    document.save(source)
+
+    parsed = parse_document(source, document_kind="RESUME")
+    canonical = parsed.canonical
+
+    assert [entry["institution"] for entry in canonical["education"]] == [
+        "Illinois Institute of Technology"
+    ]
+    assert [entry["name"] for entry in canonical["certifications"]] == [
+        "Vector Databases in Practice"
+    ]
+
+
+def test_parser_splits_bullets_packed_into_one_paragraph(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("WORK EXPERIENCE")
+    document.add_paragraph("Nimbus Labs \tJan 2024 - Jun 2024 Data Science Intern")
+    document.add_paragraph("•Cut inference latency by 45%.•Shipped an evaluation harness.")
+    document.save(source)
+
+    parsed = parse_document(source, document_kind="RESUME")
+    experience = parsed.canonical["experience"]
+
+    assert experience[0]["bullets"] == [
+        "Cut inference latency by 45%.",
+        "Shipped an evaluation harness.",
+    ]
+
+
+def test_parser_reads_experience_from_tab_separated_date_row(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("WORK EXPERIENCE")
+    document.add_paragraph(
+        "SkillCred.co \tJan 2024 – Jun 2024 Data Science Intern \t\tMumbai, India"
+        "•Drove a 45% increase in retention."
+    )
+    document.save(source)
+
+    parsed = parse_document(source, document_kind="RESUME")
+    entry = parsed.canonical["experience"][0]
+
+    assert entry["company"] == "SkillCred.co"
+    assert entry["title"] == "Data Science Intern"
+    assert entry["location"] == "Mumbai, India"
+    assert entry["startDate"] == "Jan 2024"
+    assert entry["endDate"] == "Jun 2024"
+    assert entry["bullets"] == ["Drove a 45% increase in retention."]
+    # mergeIntoProfile only applies entries at or above 0.75 confidence.
+    assert entry["confidence"] >= 0.75
+
+
+def test_parser_pairs_two_column_education_rows(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("EDUCATION")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = (
+        "Illinois Institute of Technology\nMaster of Science in Computer Science"
+    )
+    table.cell(0, 1).text = "May 2026\nChicago, IL"
+    document.save(source)
+
+    parsed = parse_document(source, document_kind="RESUME")
+    education = parsed.canonical["education"]
+
+    assert len(education) == 1
+    assert education[0]["institution"] == "Illinois Institute of Technology"
+    assert education[0]["degree"] == "Master of Science in Computer Science"
+    assert education[0]["endDate"] == "May 2026"
+
+
+def test_parser_splits_institution_that_absorbed_its_degree(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("EDUCATION")
+    table = document.add_table(rows=1, cols=2)
+    table.cell(0, 0).text = (
+        "Narsee Monjee Institute of Management Studies "
+        "Bachelor of Technology in Computer Engineering"
+    )
+    table.cell(0, 1).text = "May 2024"
+    document.save(source)
+
+    parsed = parse_document(source, document_kind="RESUME")
+    entry = parsed.canonical["education"][0]
+
+    assert entry["institution"] == "Narsee Monjee Institute of Management Studies"
+    assert entry["degree"] == "Bachelor of Technology in Computer Engineering"
+    assert entry["endDate"] == "May 2024"
+
+
+def test_parser_lifts_certification_year_out_of_the_name(tmp_path: Path) -> None:
+    source = tmp_path / "resume.docx"
+    document = Document()
+    document.add_paragraph("CERTIFICATIONS")
+    document.add_paragraph(
+        "IBM AI Engineering Specialization (2025) – PyTorch, Transformers, RAG"
+    )
+    document.add_paragraph("Vector Databases in Practice")
+    document.save(source)
+
+    parsed = parse_document(source, document_kind="RESUME")
+    certifications = parsed.canonical["certifications"]
+
+    assert certifications[0]["name"] == "IBM AI Engineering Specialization"
+    assert certifications[0]["issuedAt"] == "2025"
+    assert certifications[1]["name"] == "Vector Databases in Practice"
+    assert certifications[1]["issuedAt"] is None
+
+
 def test_docx_anchor_repair_creates_reviewable_candidate_without_touching_source(tmp_path: Path) -> None:
     source = tmp_path / "source.docx"
     output = tmp_path / "anchored.docx"

@@ -20,6 +20,19 @@ const run = (args, options = {}) => {
   }
 };
 
+// node-gyp is a transitive dependency, so pnpm never links it into a `.bin`
+// directory on PATH. Spawning a bare "node-gyp" therefore only works when some
+// unrelated toolchain happens to have put one there. Resolve the real
+// entrypoint out of the store instead.
+const findNodeGypScript = () => {
+  if (!existsSync(pnpmStoreDir)) return null;
+  const candidates = readdirSync(pnpmStoreDir)
+    .filter((entry) => entry.startsWith("node-gyp@"))
+    .map((entry) => join(pnpmStoreDir, entry, "node_modules", "node-gyp", "bin", "node-gyp.js"))
+    .filter((candidate) => existsSync(candidate));
+  return candidates[0] ?? null;
+};
+
 const findBetterSqlitePackageDirs = () => {
   if (!existsSync(pnpmStoreDir)) {
     throw new Error(`pnpm store directory not found: ${pnpmStoreDir}`);
@@ -44,9 +57,9 @@ if (runtime === "electron") {
   // compiled against Electron headers. We bypass electron-rebuild entirely
   // and call prebuild-install directly on @12.10.0 with the Electron runtime,
   // which downloads the prebuilt binary compiled against the correct Electron ABI.
-  const sqlite3v12Dir = join(pnpmStoreDir, "better-sqlite3@12.10.0", "node_modules", "better-sqlite3");
-  if (!existsSync(join(sqlite3v12Dir, "package.json"))) {
-    console.error(`better-sqlite3@12.10.0 not found at: ${sqlite3v12Dir}`);
+  const sqlite3v12Dir = findBetterSqlitePackageDirs().find((dir) => /better-sqlite3@12\./.test(dir));
+  if (!sqlite3v12Dir) {
+    console.error(`better-sqlite3@12.x not found in the pnpm store: ${pnpmStoreDir}`);
     process.exit(1);
   }
 
@@ -56,7 +69,7 @@ if (runtime === "electron") {
     process.exit(1);
   }
   const electronVersion = JSON.parse(readFileSync(electronPkgPath, "utf8")).version;
-  console.log(`Rebuilding better-sqlite3@12.10.0 for Electron ${electronVersion}`);
+  console.log(`Rebuilding ${sqlite3v12Dir} for Electron ${electronVersion}`);
 
   const prebuildInstall = join(sqlite3v12Dir, "node_modules", ".bin", "prebuild-install");
   const result = spawnSync(
@@ -76,13 +89,18 @@ if (runtime === "electron") {
 
   if (result.status !== 0) {
     console.error("prebuild-install failed, falling back to node-gyp...");
+    const nodeGypScript = findNodeGypScript();
+    if (!nodeGypScript) {
+      console.error(`node-gyp not found in the pnpm store: ${pnpmStoreDir}`);
+      process.exit(1);
+    }
     const nodeGyp = spawnSync(
-      "node-gyp",
-      ["rebuild", "--release"],
+      process.execPath,
+      [nodeGypScript, "rebuild", "--release"],
       {
         cwd: sqlite3v12Dir,
         stdio: "inherit",
-        shell: process.platform === "win32",
+        shell: false,
         env: {
           ...process.env,
           npm_config_runtime: "electron",
@@ -96,10 +114,10 @@ if (runtime === "electron") {
     }
   }
 } else if (runtime === "node") {
-  // Rebuild only the Node.js-compatible version; @12.9.0 is handled by the
+  // Rebuild only the Node.js-compatible version; 12.x is handled by the
   // electron branch and must not be compiled against Node.js ABI.
   for (const packageDir of findBetterSqlitePackageDirs().filter(
-    (d) => !d.includes("better-sqlite3@12.10.0")
+    (d) => !/better-sqlite3@12\./.test(d)
   )) {
     run(["--dir", packageDir, "run", "install"]);
   }

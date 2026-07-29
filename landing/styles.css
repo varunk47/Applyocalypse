@@ -1,6 +1,10 @@
 /* ==========================================================================
    Applyocalypse landing page
-   Dossier design system: paper and ink, sealing-wax accent, quiet wit.
+   Dossier design system: cool slate paper, electric blue accent, quiet wit.
+   Materially matched to the app shell (apps/desktop/src/renderer/styles/app.css)
+   so the site and the product do not read as two different products. The
+   editorial serif stays: marketing display type is allowed more voice than the
+   dense product UI, which carries display on weight alone.
    Light-first. No em dashes anywhere, in code or copy.
    ========================================================================== */
 
@@ -43,35 +47,37 @@
 
 /* ---- Tokens ------------------------------------------------------------- */
 :root {
-  --paper: #fbfaf7;
-  --paper-deep: #f4f2ec;
-  --chrome: #f4f2ec;
+  --paper: #eceff4;
+  --paper-deep: #e2e6ed;
+  --chrome: #e2e6ed;
   --card: #ffffff;
-  --ink: #201d17;
-  --ink-2: #6c675b;
-  --ink-3: #a39d8f;
+  --ink: #0e1420;
+  --ink-2: #56606f;
+  --ink-3: #646d7d; /* AA 4.53:1 on --paper. The slate paper is lighter than the
+                       cream it replaced, so the old #757061 (4.74:1 on cream)
+                       would have landed at 4.09:1 here and failed AA. */
 
-  --wax: #a03123;
-  --wax-mid: #b5402f;
-  --wax-deep: #8e2a22;
-  --wax-sweep: #c86f5b;
-  --on-wax: #fbf1ec;
-  --wax-wash: rgba(160, 49, 35, 0.06);
-  --wax-line: rgba(160, 49, 35, 0.35);
+  --wax: #1b3fd8;
+  --wax-mid: #3355e0;
+  --wax-deep: #14319f;
+  --wax-sweep: #5d7cf5;
+  --on-wax: #f3f6ff;
+  --wax-wash: rgba(27, 63, 216, 0.06);
+  --wax-line: rgba(27, 63, 216, 0.35);
 
-  --live: #47714f;
-  --live-soft: #84b08d;
-  --amber: #a2721f;
+  --live: #0b7a5a;
+  --live-soft: #4da88c;
+  --amber: #96660a;
 
-  --hair: rgba(32, 29, 23, 0.09);
-  --hair-strong: rgba(32, 29, 23, 0.16);
-  --hair-soft: rgba(32, 29, 23, 0.06);
+  --hair: rgba(14, 20, 32, 0.09);
+  --hair-strong: rgba(14, 20, 32, 0.16);
+  --hair-soft: rgba(14, 20, 32, 0.06);
 
-  --shadow-card: 0 1px 2px rgba(32, 29, 23, 0.05);
-  --shadow-lift: 0 12px 26px rgba(32, 29, 23, 0.14);
-  --shadow-float: 0 20px 50px -24px rgba(32, 29, 23, 0.22);
-  --shadow-hero: 0 50px 100px -30px rgba(32, 29, 23, 0.4), 0 20px 50px -20px rgba(32, 29, 23, 0.22);
-  --shadow-wax: 0 8px 22px rgba(160, 49, 35, 0.28);
+  --shadow-card: 0 1px 2px rgba(14, 20, 32, 0.05);
+  --shadow-lift: 0 12px 26px rgba(14, 20, 32, 0.14);
+  --shadow-float: 0 20px 50px -24px rgba(14, 20, 32, 0.22);
+  --shadow-hero: 0 50px 100px -30px rgba(14, 20, 32, 0.4), 0 20px 50px -20px rgba(14, 20, 32, 0.22);
+  --shadow-wax: 0 8px 22px rgba(27, 63, 216, 0.28);
 
   --serif: 'Instrument Serif', georgia, 'Times New Roman', serif;
   --sans: 'Hanken Grotesk', system-ui, -apple-system, sans-serif;
@@ -142,7 +148,7 @@ p {
 }
 
 ::selection {
-  background: rgba(160, 49, 35, 0.18);
+  background: rgba(27, 63, 216, 0.18);
   color: var(--ink);
 }
 
@@ -253,7 +259,7 @@ p {
 }
 .btn-wax:hover {
   transform: translateY(-2px);
-  box-shadow: 0 14px 30px rgba(160, 49, 35, 0.34);
+  box-shadow: 0 14px 30px rgba(27, 63, 216, 0.34);
   background: var(--wax-mid);
 }
 .btn-ghost {
@@ -264,7 +270,7 @@ p {
 .btn-ghost:hover {
   transform: translateY(-2px);
   border-color: var(--ink-3);
-  background: rgba(32, 29, 23, 0.03);
+  background: rgba(14, 20, 32, 0.03);
 }
 .btn .tick {
   font: 500 11px var(--mono);
@@ -281,7 +287,7 @@ p {
   background: radial-gradient(circle at 34% 30%, var(--wax-mid), var(--wax-deep));
   color: var(--on-wax);
   font: italic 400 15px var(--serif);
-  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.18), 0 6px 16px rgba(160, 49, 35, 0.34);
+  box-shadow: inset 0 2px 6px rgba(255, 255, 255, 0.18), 0 6px 16px rgba(27, 63, 216, 0.34);
   border: 1px solid rgba(255, 255, 255, 0.12);
 }
 
@@ -373,7 +379,7 @@ p {
   border-bottom: 1px solid transparent;
 }
 .nav.is-stuck {
-  background: rgba(251, 250, 247, 0.82);
+  background: rgba(236, 239, 244, 0.82);
   backdrop-filter: saturate(1.4) blur(12px);
   border-bottom-color: var(--hair);
   padding-top: 11px;
@@ -406,7 +412,7 @@ p {
 }
 .nav-links a:hover {
   color: var(--ink);
-  background: rgba(32, 29, 23, 0.04);
+  background: rgba(14, 20, 32, 0.04);
 }
 .nav-cta {
   display: inline-flex;
@@ -417,7 +423,7 @@ p {
   background: var(--wax);
   padding: 9px 16px;
   border-radius: 9px;
-  box-shadow: 0 4px 12px rgba(160, 49, 35, 0.26);
+  box-shadow: 0 4px 12px rgba(27, 63, 216, 0.26);
   transition: transform 0.2s var(--ease), background 0.2s;
 }
 .nav-cta:hover {
@@ -537,7 +543,7 @@ p {
   border: 2px solid var(--wax);
   color: var(--wax);
   font: italic 400 17px var(--serif);
-  background: rgba(251, 250, 247, 0.7);
+  background: rgba(236, 239, 244, 0.7);
   transform: rotate(-8deg);
   box-shadow: var(--shadow-lift);
   animation: apoStamp 0.7s var(--ease) 0.6s both;
@@ -823,7 +829,7 @@ p {
 }
 .aw-card.ready {
   border: 1.5px solid var(--wax);
-  box-shadow: 0 3px 10px rgba(160, 49, 35, 0.12);
+  box-shadow: 0 3px 10px rgba(27, 63, 216, 0.12);
 }
 .aw-card .stamp {
   position: absolute;
@@ -841,6 +847,11 @@ p {
 }
 .aw-card .t {
   font: 400 12.5px var(--serif);
+}
+/* The stamp is absolutely positioned, so it does not push the title out of its
+   way; without this the two overlap and neither one reads. */
+.aw-card.ready .t {
+  padding-right: 32px;
 }
 .aw-card .s {
   font-size: 9px;
@@ -1115,7 +1126,7 @@ p {
 .hv-letter b {
   font-weight: 400;
   font-style: normal;
-  background: rgba(160, 49, 35, 0.1);
+  background: rgba(27, 63, 216, 0.1);
   border-radius: 3px;
   padding: 0 3px;
 }
@@ -1356,7 +1367,7 @@ p {
   color: var(--ink-3);
 }
 .pcard.hero-stat .k {
-  color: rgba(237, 232, 222, 0.6);
+  color: rgba(226, 230, 237, 0.6);
 }
 .pcard .big {
   font: 400 clamp(2.6rem, 2rem + 2.4vw, 3.8rem) var(--serif);
@@ -1374,7 +1385,7 @@ p {
   line-height: 1.55;
 }
 .pcard.hero-stat p {
-  color: rgba(237, 232, 222, 0.72);
+  color: rgba(226, 230, 237, 0.72);
 }
 .privacy-vow {
   margin-top: 18px;
@@ -1440,7 +1451,7 @@ p {
 }
 .plan.featured {
   border: 1.5px solid var(--wax);
-  box-shadow: 0 24px 60px -30px rgba(160, 49, 35, 0.4);
+  box-shadow: 0 24px 60px -30px rgba(27, 63, 216, 0.4);
   position: relative;
 }
 .plan.featured::before {

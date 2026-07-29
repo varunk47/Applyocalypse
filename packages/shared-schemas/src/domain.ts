@@ -405,6 +405,8 @@ export const BrowserArtifactSchema = z.object({
 
 export const GeneratedFileSchema = z.object({
   id: IdSchema,
+  // Run that produced the file; null only for rows created before the column existed.
+  applicationRunId: IdSchema.nullable().default(null),
   tailoringRunId: IdSchema.nullable(),
   profileId: IdSchema,
   jobTargetId: IdSchema,

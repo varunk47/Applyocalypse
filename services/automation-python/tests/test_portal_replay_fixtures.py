@@ -458,3 +458,33 @@ def test_portal_with_required_cover_letter_field_is_detected_as_cover_letter() -
         f"Expected a cover letter field in {field_labels}"
     )
     assert analysis.page_state.likely_application_surface is True
+
+
+def test_replay_ignores_passive_recaptcha_notice():
+    analysis = analyze_portal_html_fixture(
+        "https://boards.greenhouse.io/acme/jobs/1",
+        """
+        <html><body>
+          <h1>Apply for Senior Engineer</h1>
+          <label for="email">Email</label><input id="email" type="email">
+          <button>Submit application</button>
+          <p>This site is protected by reCAPTCHA and the Google Privacy Policy and Terms of Service apply.</p>
+        </body></html>
+        """,
+    )
+
+    assert "CAPTCHA" not in {blocker.blocker_type for blocker in analysis.blockers}
+
+
+def test_replay_detects_active_captcha_challenge():
+    analysis = analyze_portal_html_fixture(
+        "https://acme.com/verify",
+        """
+        <html><body>
+          <h2>Verify you are human</h2>
+          <p>Select all images with a crosswalk, then click verify to continue.</p>
+        </body></html>
+        """,
+    )
+
+    assert "CAPTCHA" in {blocker.blocker_type for blocker in analysis.blockers}

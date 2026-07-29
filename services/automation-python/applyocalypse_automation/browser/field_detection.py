@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -85,8 +86,124 @@ def choose_safe_click_target(labels: list[str], candidates: list[ControlCandidat
     )
 
 
-DOM_FIELD_DISCOVERY_SCRIPT = r"""
-(() => {
+# --- Shared label resolution -------------------------------------------------
+# The browser (injected JS below) and the offline replay of saved portal HTML
+# (`html_replay.py`) MUST resolve labels identically, or the replay fixtures stop
+# being evidence about what the browser actually sees. Both sides consume this
+# one ordering; `tests/test_label_resolution.py` pins them to the same table.
+LABEL_SOURCE_ORDER: tuple[str, ...] = (
+    "label_for",
+    "wrapping_label",
+    "aria_labelledby",
+    "aria_label",
+    "legend",
+    "title",
+    "placeholder",
+    "name_or_id",
+)
+
+# A field we could not label is surfaced under this label instead of being
+# dropped, so the run pauses for a human rather than silently skipping a
+# required question. The literal string is part of the runner's contract.
+SYNTHETIC_LABEL = "Unlabeled field"
+
+_MAX_LABEL_LENGTH = 240
+_CAMEL_BOUNDARY = re.compile(r"([a-z0-9])([A-Z])")
+_ACRONYM_BOUNDARY = re.compile(r"([A-Z]+)([A-Z][a-z])")
+_NON_ALNUM = re.compile(r"[^A-Za-z0-9]+")
+
+
+def humanize_identifier(raw: str) -> str:
+    """Turn a machine name such as ``candidate.firstName`` into ``Candidate First Name``.
+
+    Mirrored verbatim by ``humanizeIdentifier`` in :data:`LABEL_RESOLUTION_JS`.
+    """
+    source = str(raw or "")
+    if not source:
+        return ""
+    spaced = _ACRONYM_BOUNDARY.sub(r"\1 \2", _CAMEL_BOUNDARY.sub(r"\1 \2", _NON_ALNUM.sub(" ", source)))
+    tokens = [token for token in spaced.split() if token]
+    return " ".join(token if token == token.upper() else token[0].upper() + token[1:] for token in tokens)
+
+
+def resolve_field_label(sources: dict[str, Any] | None) -> tuple[str, str, bool]:
+    """Resolve one field label from the ordered chain in :data:`LABEL_SOURCE_ORDER`.
+
+    Returns ``(label, label_source, synthetic)``. ``synthetic`` is True only when
+    every source was empty; the caller must surface the field for human review
+    instead of dropping it.
+    """
+    for source in LABEL_SOURCE_ORDER:
+        raw = (sources or {}).get(source)
+        candidate = " ".join(str(raw).split()) if raw is not None else ""
+        if not candidate:
+            continue
+        if source == "name_or_id":
+            candidate = humanize_identifier(candidate)
+            if not candidate:
+                continue
+        return candidate[:_MAX_LABEL_LENGTH], source, False
+    return SYNTHETIC_LABEL, "synthetic", True
+
+
+# The JavaScript twin of the three definitions above. Kept as a standalone chunk
+# of `const` declarations so it can be spliced into any injected script.
+LABEL_RESOLUTION_JS = r"""
+const LABEL_SOURCE_ORDER = [
+  'label_for', 'wrapping_label', 'aria_labelledby', 'aria_label',
+  'legend', 'title', 'placeholder', 'name_or_id'
+];
+const SYNTHETIC_LABEL = 'Unlabeled field';
+const collapseLabelWhitespace = (value) => String(value == null ? '' : value).replace(/\s+/g, ' ').trim();
+const humanizeIdentifier = (raw) => {
+  const source = String(raw == null ? '' : raw);
+  if (!source) return '';
+  return source
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/([A-Z]+)([A-Z][a-z])/g, '$1 $2')
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((token) => (token === token.toUpperCase() ? token : token.charAt(0).toUpperCase() + token.slice(1)))
+    .join(' ');
+};
+const resolveLabelFromSources = (sources) => {
+  for (const source of LABEL_SOURCE_ORDER) {
+    let candidate = collapseLabelWhitespace(sources ? sources[source] : '');
+    if (!candidate) continue;
+    if (source === 'name_or_id') candidate = humanizeIdentifier(candidate);
+    if (!candidate) continue;
+    return { label: candidate.slice(0, 240), label_source: source, label_synthetic: false };
+  }
+  return { label: SYNTHETIC_LABEL, label_source: 'synthetic', label_synthetic: true };
+};
+const labelSourcesFor = (element) => {
+  const readText = (node) => (node ? (node.innerText || node.textContent || '') : '');
+  const elementId = element.getAttribute('id');
+  const explicit = elementId ? document.querySelector(`label[for="${CSS.escape(elementId)}"]`) : null;
+  const wrapping = element.closest ? element.closest('label') : null;
+  const fieldset = element.closest ? element.closest('fieldset') : null;
+  const legend = fieldset && fieldset.querySelector ? fieldset.querySelector('legend') : null;
+  return {
+    label_for: readText(explicit),
+    wrapping_label: readText(wrapping),
+    aria_labelledby: String(element.getAttribute('aria-labelledby') || '')
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((reference) => collapseLabelWhitespace(readText(document.getElementById(reference))))
+      .filter(Boolean)
+      .join(' '),
+    aria_label: element.getAttribute('aria-label') || '',
+    legend: readText(legend),
+    title: element.getAttribute('title') || '',
+    placeholder: element.getAttribute('placeholder') || '',
+    name_or_id: element.getAttribute('name') || elementId || ''
+  };
+};
+"""
+
+
+_FIELD_DISCOVERY_BODY_JS = r"""
   const fields = [];
   const candidates = Array.from(document.querySelectorAll('input, textarea, select'));
   const attrValue = (value) => JSON.stringify(String(value));
@@ -114,29 +231,26 @@ DOM_FIELD_DISCOVERY_SCRIPT = r"""
     }
     return `${tag}[name=${attrValue(name)}]`;
   };
-  const textForLabel = (element) => {
-    const id = element.getAttribute('id');
-    if (id) {
-      const explicit = document.querySelector(`label[for="${CSS.escape(id)}"]`);
-      if (explicit && explicit.innerText.trim()) return explicit.innerText.trim();
-    }
-    const parentLabel = element.closest('label');
-    if (parentLabel && parentLabel.innerText.trim()) return parentLabel.innerText.trim();
-    return element.getAttribute('aria-label')
-      || element.getAttribute('name')
-      || element.getAttribute('placeholder')
-      || id
-      || 'Unlabeled field';
-  };
   for (const element of candidates) {
     const type = fieldType(element);
-    if (['hidden', 'submit', 'button', 'image', 'reset'].includes(type)) continue;
-    const label = textForLabel(element);
+    if (['hidden', 'submit', 'button', 'image', 'reset', 'search'].includes(type)) continue;
+    // Skip non-interactable controls: the display:none g-recaptcha-response textarea,
+    // collapsed/conditional fields, and any bot-challenge field the user cannot fill.
+    const rect = element.getBoundingClientRect();
+    const style = window.getComputedStyle(element);
+    if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
+    const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
+    if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
+    // A field we cannot label is NEVER dropped: it is surfaced with a synthetic
+    // label and a flag so the run can pause for a human (audit finding F6).
+    const resolved = resolveLabelFromSources(labelSourcesFor(element));
     const id = element.getAttribute('id');
     const name = element.getAttribute('name');
     const selector = selectorFor(element, type);
     fields.push({
-      label,
+      label: resolved.label,
+      label_source: resolved.label_source,
+      label_synthetic: resolved.label_synthetic,
       field_type: type,
       selector,
       required: element.required === true || element.getAttribute('aria-required') === 'true',
@@ -155,8 +269,10 @@ DOM_FIELD_DISCOVERY_SCRIPT = r"""
     });
   }
   return JSON.stringify(fields);
-})()
 """
+
+
+DOM_FIELD_DISCOVERY_SCRIPT = "\n".join(["(() => {", LABEL_RESOLUTION_JS, _FIELD_DISCOVERY_BODY_JS, "})()"])
 
 
 DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
@@ -164,11 +280,47 @@ DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
   const text = (document.body && document.body.innerText ? document.body.innerText : '').toLowerCase();
   const html = document.documentElement ? document.documentElement.innerHTML.toLowerCase() : '';
   const blockers = [];
-  const hasCaptchaWidget = Boolean(
-    document.querySelector('[class*="captcha" i], [id*="captcha" i], iframe[src*="recaptcha" i], iframe[src*="hcaptcha" i]')
-  );
-  if (hasCaptchaWidget || text.includes('captcha') || html.includes('recaptcha') || html.includes('hcaptcha')) {
-    blockers.push({ blocker_type: 'CAPTCHA', message: 'CAPTCHA challenge detected', confidence: hasCaptchaWidget ? 0.92 : 0.72 });
+  const isChallengeVisible = (element) => {
+    if (!element) { return false; }
+    const rect = element.getBoundingClientRect();
+    if (rect.width < 40 || rect.height < 40) { return false; }
+    const style = window.getComputedStyle(element);
+    return style.visibility !== 'hidden' && style.display !== 'none' && Number(style.opacity || '1') > 0.1;
+  };
+  // Only a VISIBLE, interactive challenge is a real blocker. An invisible reCAPTCHA v3
+  // badge/script is embedded on most modern application forms, requires no interaction,
+  // and must never pause the run. Matching raw page text/HTML (the old behaviour) flagged
+  // every such form as a CAPTCHA and hung the run in an endless pause/resume loop.
+  const recaptchaChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="recaptcha/api2/anchor" i], iframe[src*="recaptcha/api2/bframe" i], div.g-recaptcha')
+  ).some((element) => {
+    if (element.closest && element.closest('.grecaptcha-badge')) { return false; }
+    const src = (element.getAttribute('src') || '').toLowerCase();
+    if (src.indexOf('size=invisible') !== -1) { return false; }
+    if ((element.getAttribute('data-size') || '').toLowerCase() === 'invisible') { return false; }
+    return isChallengeVisible(element);
+  });
+  const hcaptchaChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="hcaptcha.com" i], div.h-captcha')
+  ).some(isChallengeVisible);
+  const turnstileChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="challenges.cloudflare.com" i], div.cf-turnstile')
+  ).some(isChallengeVisible);
+  const datadomeChallenge = Array.from(
+    document.querySelectorAll('iframe[src*="captcha-delivery.com" i]')
+  ).some(isChallengeVisible);
+  const docTitle = (document.title || '').toLowerCase();
+  const cloudflareInterstitial =
+    Boolean(document.querySelector('#challenge-running, #cf-challenge-running, #challenge-stage, #challenge-form'))
+    || docTitle === 'just a moment...'
+    || (docTitle.indexOf('attention required') !== -1 && html.includes('cloudflare'));
+  let captchaVendor = null;
+  if (recaptchaChallenge) { captchaVendor = 'recaptcha'; }
+  else if (hcaptchaChallenge) { captchaVendor = 'hcaptcha'; }
+  else if (turnstileChallenge || cloudflareInterstitial) { captchaVendor = 'cloudflare'; }
+  else if (datadomeChallenge) { captchaVendor = 'datadome'; }
+  if (captchaVendor) {
+    blockers.push({ blocker_type: 'CAPTCHA', message: 'Interactive CAPTCHA or bot challenge detected', confidence: 0.95, metadata: { vendor: captchaVendor } });
   }
   if (text.includes('multi-factor') || text.includes('multifactor') || text.includes('authenticator app') || text.includes('mfa')) {
     blockers.push({ blocker_type: 'MFA', message: 'Multi-factor authentication detected', confidence: 0.82 });
@@ -306,11 +458,25 @@ def fields_from_dom_snapshot(raw_fields: Any) -> list[BrowserField]:
         if not isinstance(raw, dict):
             continue
         label = str(raw.get("label") or "").strip()
+        label_source = str(raw.get("label_source") or "").strip()
         selector = raw.get("selector")
         field_type = str(raw.get("field_type") or "text").strip().lower()
-        if not label:
-            label = "Unlabeled field"
+        synthetic = bool(raw.get("label_synthetic")) or not label
+        if synthetic:
+            label = SYNTHETIC_LABEL
+            label_source = "synthetic"
         confidence = 0.78 if selector else 0.45
+        if synthetic:
+            # Surfaced, never dropped, but never confident enough to answer
+            # without a human reading the page first.
+            confidence = round(confidence / 2, 2)
+        raw_metadata = raw.get("metadata")
+        metadata: dict[str, Any] = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
+        if label_source:
+            metadata["label_source"] = label_source
+        if synthetic:
+            metadata["label_synthetic"] = True
+            metadata["requires_human_label_review"] = True
         parsed.append(
             BrowserField(
                 field_id=f"field:{index}:{field_type}:{label[:40].lower()}",
@@ -319,149 +485,413 @@ def fields_from_dom_snapshot(raw_fields: Any) -> list[BrowserField]:
                 selector=str(selector) if selector else None,
                 required=bool(raw.get("required", False)),
                 confidence=confidence,
-                metadata=raw.get("metadata") if isinstance(raw.get("metadata"), dict) else {},
+                metadata=metadata,
             )
         )
     return parsed
 
 
-def build_apply_field_value_script(selector: str, value: str) -> str:
-    selector_json = json.dumps(selector)
-    value_json = json.dumps(value)
-    return f"""
-(() => {{
-  const selector = {selector_json};
-  const reviewedValue = {value_json};
-  const normalize = (input) => String(input ?? '')
+_FIELD_WRITE_HELPERS_JS = r"""
+  const normalize = (input) => String(input == null ? '' : input)
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
-  const dispatchChange = (element) => {{
-    element.dispatchEvent(new Event('input', {{ bubbles: true }}));
-    element.dispatchEvent(new Event('change', {{ bubbles: true }}));
-  }};
-  const labelFor = (element) => {{
-    const id = element.getAttribute('id');
-    if (id) {{
-      const explicit = document.querySelector(`label[for="${{CSS.escape(id)}}"]`);
-      if (explicit && explicit.innerText.trim()) return explicit.innerText.trim();
-    }}
-    const parentLabel = element.closest('label');
-    if (parentLabel && parentLabel.innerText.trim()) return parentLabel.innerText.trim();
-    return element.getAttribute('aria-label')
-      || element.getAttribute('name')
-      || element.getAttribute('value')
-      || '';
-  }};
-  const parseBooleanIntent = (raw) => {{
+  const digitsOf = (input) => String(input == null ? '' : input).replace(/[^0-9]/g, '');
+  const parseBooleanIntent = (raw) => {
     const normalized = normalize(raw);
     if (['yes', 'true', 'checked', 'check', '1', 'on', 'agree', 'accepted', 'accept'].includes(normalized)) return true;
-    if (['no', 'false', 'unchecked', 'uncheck', '0', 'off', 'decline', 'declined', 'reject'].includes(normalized)) return false;
+    if (['no', 'false', 'unchecked', 'uncheck', '0', 'off', 'decline', 'declined', 'reject'].includes(normalized)) {
+      return false;
+    }
     return null;
-  }};
+  };
+  // React 16+ installs its OWN `value`/`checked` descriptor on the node, and that
+  // setter refreshes React's cached copy of the value. A plain `node.value = x`
+  // therefore leaves the tracker believing nothing changed, so React DISCARDS the
+  // synthetic change event and the portal never sees the answer. Writing through
+  // the *prototype* descriptor leaves React's cache stale, so the framework
+  // observes a real change. Same mechanism in Vue and Angular. (Audit finding F5.)
+  const prototypeSetterFor = (element, property) => {
+    const tagName = element.tagName ? element.tagName.toLowerCase() : '';
+    let ctor = window.HTMLInputElement;
+    if (tagName === 'select') ctor = window.HTMLSelectElement;
+    else if (tagName === 'textarea') ctor = window.HTMLTextAreaElement;
+    let proto = ctor ? ctor.prototype : null;
+    while (proto) {
+      const descriptor = Object.getOwnPropertyDescriptor(proto, property);
+      if (descriptor && typeof descriptor.set === 'function') return descriptor.set;
+      proto = Object.getPrototypeOf(proto);
+    }
+    return null;
+  };
+  const setNativeValue = (element, property, next) => {
+    const setter = prototypeSetterFor(element, property);
+    if (setter) {
+      setter.call(element, next);
+      return true;
+    }
+    element[property] = next;
+    return false;
+  };
+  const fireInputEvents = (element) => {
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  const focusSafely = (element) => { try { if (element.focus) element.focus(); } catch (error) { /* non-fatal */ } };
+  const blurSafely = (element) => { try { if (element.blur) element.blur(); } catch (error) { /* non-fatal */ } };
+  // How closely the value read back off the node matches what we asked for.
+  const classifyMatch = (expected, actual) => {
+    const expectedText = String(expected == null ? '' : expected);
+    const actualText = String(actual == null ? '' : actual);
+    if (expectedText === actualText) return 'exact';
+    const expectedNormalized = normalize(expectedText);
+    if (expectedNormalized && expectedNormalized === normalize(actualText)) return 'normalized';
+    const expectedDigits = digitsOf(expectedText);
+    if (expectedDigits && expectedDigits === digitsOf(actualText)) return 'reformatted';
+    return 'mismatch';
+  };
+  // Every write is read back: a value that silently did not land reports ok:false.
+  const verdict = (expected, actual, base) => {
+    const expectedText = String(expected == null ? '' : expected);
+    const actualText = String(actual == null ? '' : actual);
+    const mode = classifyMatch(expectedText, actualText);
+    const matched = mode !== 'mismatch';
+    return Object.assign({
+      ok: matched,
+      verified: true,
+      value_matched: matched,
+      match_mode: mode,
+      expected: expectedText,
+      actual: actualText,
+      expected_length: expectedText.length,
+      actual_length: actualText.length,
+      message: matched ? 'field value applied' : 'the field did not keep the value that was written'
+    }, base);
+  };
+  const MATCH_TIERS = ['exact', 'prefix', 'token'];
+  const tokensOf = (value) => normalize(value).split(' ').filter(Boolean);
+  const isTokenPrefix = (haystack, needle) => {
+    if (needle.length === 0 || needle.length > haystack.length) return false;
+    return needle.every((token, index) => haystack[index] === token);
+  };
+  const hasTokenRun = (haystack, needle) => {
+    if (needle.length === 0 || needle.length > haystack.length) return false;
+    for (let start = 0; start + needle.length <= haystack.length; start += 1) {
+      if (needle.every((token, index) => haystack[start + index] === token)) return true;
+    }
+    return false;
+  };
+  // There is deliberately NO raw character-substring tier: bidirectional substring
+  // matching is precisely what made "India" select "Indiana". Every tier below is
+  // token-bounded. (Audit finding F9 / fix-plan row 10.)
+  const tierFor = (texts, target) => {
+    const targetNormalized = normalize(target);
+    if (!targetNormalized) return null;
+    const targetTokens = tokensOf(target);
+    let best = null;
+    for (const text of texts) {
+      const normalized = normalize(text);
+      if (!normalized) continue;
+      const tokens = tokensOf(text);
+      let tier = null;
+      if (normalized === targetNormalized) tier = 'exact';
+      else if (isTokenPrefix(tokens, targetTokens) || isTokenPrefix(targetTokens, tokens)) tier = 'prefix';
+      else if (hasTokenRun(tokens, targetTokens) || hasTokenRun(targetTokens, tokens)) tier = 'token';
+      if (tier === null) continue;
+      if (best === null || MATCH_TIERS.indexOf(tier) < MATCH_TIERS.indexOf(best)) best = tier;
+    }
+    return best;
+  };
+  // Ranked match that requires a UNIQUE winner at the best populated tier.
+  // A tie or a miss never guesses: it reports the candidates and refuses.
+  const rankCandidates = (entries, target) => {
+    const scored = [];
+    for (const entry of entries) {
+      const tier = tierFor([entry.label, entry.value], target);
+      if (tier !== null) scored.push({ entry, tier });
+    }
+    for (const tier of MATCH_TIERS) {
+      const atTier = scored.filter((candidate) => candidate.tier === tier);
+      if (atTier.length === 0) continue;
+      return {
+        status: atTier.length === 1 ? 'unique' : 'ambiguous',
+        tier,
+        winners: atTier.map((candidate) => candidate.entry)
+      };
+    }
+    return { status: 'none', tier: null, winners: [] };
+  };
+  const refuseChoice = (action, type, ranked, target, currentText, optionCount) => {
+    const targetText = String(target == null ? '' : target);
+    const currentValue = String(currentText == null ? '' : currentText);
+    const failure = {
+      ok: false,
+      action,
+      field_type: type,
+      verified: false,
+      value_matched: false,
+      match_mode: 'mismatch',
+      expected: targetText,
+      actual: currentValue,
+      expected_length: targetText.length,
+      actual_length: currentValue.length,
+      option_count: optionCount,
+      message: ranked.status === 'ambiguous'
+        ? 'reviewed value matched more than one option; a human must choose'
+        : 'reviewed value did not match any option'
+    };
+    if (ranked.status === 'ambiguous') {
+      failure.ambiguity_code = 'AMBIGUOUS_SELECT_OPTION';
+      failure.match_tier = ranked.tier;
+      failure.candidate_labels = ranked.winners.map((entry) => String(entry.label).slice(0, 160)).slice(0, 8);
+    }
+    return failure;
+  };
+  const selectedOptionLabel = (element) => {
+    const selected = Array.from(element.options || []).find((option) => option.selected === true);
+    return selected ? String(selected.textContent || '').trim() : '';
+  };
+  const optionLabelFor = (element) => {
+    const resolved = resolveLabelFromSources(labelSourcesFor(element));
+    return resolved.label_synthetic ? '' : resolved.label;
+  };
+"""
+
+
+_FIELD_WRITE_BODY_JS = r"""
   const element = document.querySelector(selector);
-  if (!element) {{
-    return JSON.stringify({{ ok: false, action: 'query', message: 'field not found' }});
-  }}
+  if (!element) {
+    return JSON.stringify({
+      ok: false, action: 'query', verified: false, value_matched: false, message: 'field not found'
+    });
+  }
   const tag = element.tagName.toLowerCase();
   const type = tag === 'input' ? (element.getAttribute('type') || 'text').toLowerCase() : tag;
   const normalizedReviewedValue = normalize(reviewedValue);
-  if (!normalizedReviewedValue) {{
-    return JSON.stringify({{ ok: false, action: 'apply', field_type: type, message: 'reviewed value is empty' }});
-  }}
+  if (!normalizedReviewedValue) {
+    return JSON.stringify({
+      ok: false, action: 'apply', field_type: type, verified: false, value_matched: false,
+      message: 'reviewed value is empty'
+    });
+  }
 
-  if (tag === 'select') {{
-    const options = Array.from(element.options || []).filter((option) => option.disabled !== true);
-    const optionData = options.map((option) => ({{
-      option,
-      label: (option.textContent || '').trim(),
-      value: option.getAttribute('value') || option.value || ''
-    }}));
-    const exact = optionData.find((entry) =>
-      normalize(entry.label) === normalizedReviewedValue || normalize(entry.value) === normalizedReviewedValue
-    );
-    const partial = exact || optionData.find((entry) => {{
-      const label = normalize(entry.label);
-      const value = normalize(entry.value);
-      return (label && (label.includes(normalizedReviewedValue) || normalizedReviewedValue.includes(label)))
-        || (value && (value.includes(normalizedReviewedValue) || normalizedReviewedValue.includes(value)));
-    }});
-    if (!partial) {{
-      return JSON.stringify({{
-        ok: false,
-        action: 'select_option',
-        field_type: type,
-        option_count: options.length,
-        message: 'reviewed value did not match any select option'
-      }});
-    }}
-    element.value = partial.option.value;
-    dispatchChange(element);
-    return JSON.stringify({{
-      ok: true,
+  if (tag === 'select') {
+    const allOptions = Array.from(element.options || []);
+    const entries = allOptions
+      .filter((option) => option.disabled !== true)
+      .map((option) => ({
+        option,
+        label: String(option.textContent || '').trim(),
+        value: option.getAttribute('value') || option.value || ''
+      }));
+    const ranked = rankCandidates(entries, reviewedValue);
+    if (ranked.status !== 'unique') {
+      return JSON.stringify(
+        refuseChoice('select_option', type, ranked, reviewedValue, selectedOptionLabel(element), entries.length)
+      );
+    }
+    const winner = ranked.winners[0];
+    focusSafely(element);
+    for (const option of allOptions) option.selected = option === winner.option;
+    setNativeValue(element, 'value', winner.value);
+    fireInputEvents(element);
+    blurSafely(element);
+    return JSON.stringify(verdict(winner.label, selectedOptionLabel(element), {
       action: 'select_option',
       field_type: type,
-      selected_label: partial.label,
-      selected_value_length: String(partial.option.value || '').length
-    }});
-  }}
+      match_tier: ranked.tier,
+      option_count: entries.length,
+      selected_label: winner.label,
+      selected_value_length: String(winner.value || '').length
+    }));
+  }
 
-  if (type === 'checkbox') {{
+  if (type === 'checkbox') {
     const desired = parseBooleanIntent(reviewedValue);
-    if (desired === null) {{
-      return JSON.stringify({{
-        ok: false,
-        action: 'set_checkbox',
-        field_type: type,
+    if (desired === null) {
+      return JSON.stringify({
+        ok: false, action: 'set_checkbox', field_type: type, verified: false, value_matched: false,
         message: 'checkbox answer must be reviewed as yes or no'
-      }});
-    }}
-    element.checked = desired;
-    dispatchChange(element);
-    return JSON.stringify({{ ok: true, action: 'set_checkbox', field_type: type, checked: desired }});
-  }}
+      });
+    }
+    focusSafely(element);
+    setNativeValue(element, 'checked', desired);
+    fireInputEvents(element);
+    blurSafely(element);
+    return JSON.stringify(verdict(String(desired), String(element.checked === true), {
+      action: 'set_checkbox',
+      field_type: type,
+      checked: element.checked === true
+    }));
+  }
 
-  if (type === 'radio') {{
+  if (type === 'radio') {
     const root = element.form || document;
-    const name = element.getAttribute('name');
-    const candidates = name
-      ? Array.from(root.querySelectorAll(`input[type="radio"][name="${{CSS.escape(name)}}"]`))
+    const groupName = element.getAttribute('name');
+    const group = groupName
+      ? Array.from(root.querySelectorAll(`input[type="radio"][name="${CSS.escape(groupName)}"]`))
       : [element];
-    const match = candidates.find((candidate) => {{
-      const value = normalize(candidate.getAttribute('value') || '');
-      const label = normalize(labelFor(candidate));
-      return value === normalizedReviewedValue
-        || label === normalizedReviewedValue
-        || (label && (label.includes(normalizedReviewedValue) || normalizedReviewedValue.includes(label)));
-    }});
-    if (!match) {{
-      return JSON.stringify({{
-        ok: false,
-        action: 'set_radio',
-        field_type: type,
-        option_count: candidates.length,
-        message: 'reviewed value did not match any radio option'
-      }});
-    }}
-    match.checked = true;
-    dispatchChange(match);
-    return JSON.stringify({{
-      ok: true,
+    const entries = group
+      .filter((candidate) => candidate.disabled !== true)
+      .map((candidate) => ({
+        option: candidate,
+        label: optionLabelFor(candidate),
+        value: candidate.getAttribute('value') || ''
+      }));
+    const ranked = rankCandidates(entries, reviewedValue);
+    if (ranked.status !== 'unique') {
+      return JSON.stringify(refuseChoice('set_radio', type, ranked, reviewedValue, '', entries.length));
+    }
+    const winner = ranked.winners[0];
+    focusSafely(winner.option);
+    setNativeValue(winner.option, 'checked', true);
+    fireInputEvents(winner.option);
+    blurSafely(winner.option);
+    return JSON.stringify(verdict('true', String(winner.option.checked === true), {
       action: 'set_radio',
       field_type: type,
-      selected_label: labelFor(match),
-      selected_value_length: String(match.getAttribute('value') || '').length
-    }});
-  }}
+      match_tier: ranked.tier,
+      option_count: entries.length,
+      checked: winner.option.checked === true,
+      selected_label: winner.label,
+      selected_value_length: String(winner.value || '').length
+    }));
+  }
 
-  if ('value' in element) {{
-    element.value = reviewedValue;
-    dispatchChange(element);
-    return JSON.stringify({{ ok: true, action: 'set_value', field_type: type }});
-  }}
-  return JSON.stringify({{ ok: false, action: 'apply', field_type: type, message: 'field type is not supported' }});
-}})()
+  if ('value' in element) {
+    focusSafely(element);
+    setNativeValue(element, 'value', reviewedValue);
+    fireInputEvents(element);
+    blurSafely(element);
+    return JSON.stringify(verdict(reviewedValue, element.value, { action: 'set_value', field_type: type }));
+  }
+  return JSON.stringify({
+    ok: false, action: 'apply', field_type: type, verified: false, value_matched: false,
+    message: 'field type is not supported'
+  });
 """
+
+
+# Named in the injected source so a captured script says which one it is, both in
+# a debug log and to anything that has to tell a write apart from a read-back.
+WRITE_SCRIPT_MARKER = "applyo:write-field-value"
+VERIFY_SCRIPT_MARKER = "applyo:verify-field-value"
+
+
+def build_apply_field_value_script(selector: str, value: str) -> str:
+    """Build the injected script that writes one reviewed answer and verifies it.
+
+    The script returns a JSON string. Consumers (``runner.py`` via
+    :func:`parse_apply_field_result`) can rely on this envelope:
+
+    ==========================  ====================================================
+    key                         meaning
+    ==========================  ====================================================
+    ``ok``                      bool. True only when the value was written AND read
+                                back successfully. A write that silently did not
+                                take is ``False``.
+    ``action``                  ``query`` | ``apply`` | ``set_value`` |
+                                ``select_option`` | ``set_checkbox`` | ``set_radio``
+    ``field_type``              resolved input type (absent for ``query``)
+    ``verified``                bool. True when a read-back actually happened. False
+                                means we never got as far as writing (field missing,
+                                empty answer, refused option match).
+    ``value_matched``           bool. Read-back agreed with the intended value.
+    ``match_mode``              ``exact`` | ``normalized`` | ``reformatted`` |
+                                ``mismatch``. ``reformatted`` means the page
+                                rewrote the value but kept the same digits (phone
+                                numbers, dates) and is treated as success.
+    ``expected`` / ``actual``   strings, present whenever a comparison was made.
+                                REDACTED by :func:`parse_apply_field_result` for
+                                secret-bearing fields.
+    ``expected_length`` /       int lengths of the above.
+    ``actual_length``
+    ``match_tier``              ``exact`` | ``prefix`` | ``token`` for select/radio.
+    ``option_count``            number of enabled options considered.
+    ``selected_label``          label of the option that was chosen.
+    ``selected_value_length``   length of the chosen option's value.
+    ``checked``                 bool for checkbox/radio.
+    ``candidate_labels``        present only on an ambiguous option match: the
+                                competing labels (<= 8, truncated).
+    ``ambiguity_code``          ``AMBIGUOUS_SELECT_OPTION`` when two or more options
+                                tied. The script refuses to guess; a human decides.
+    ``message``                 human-readable outcome.
+    ==========================  ====================================================
+    """
+    selector_json = json.dumps(selector)
+    value_json = json.dumps(value)
+    return "\n".join(
+        [
+            "(() => {",
+            f"  // {WRITE_SCRIPT_MARKER}",
+            f"  const selector = {selector_json};",
+            f"  const reviewedValue = {value_json};",
+            LABEL_RESOLUTION_JS,
+            _FIELD_WRITE_HELPERS_JS,
+            _FIELD_WRITE_BODY_JS,
+            "})()",
+        ]
+    )
+
+
+_FIELD_VERIFY_BODY_JS = r"""
+  const element = document.querySelector(selector);
+  if (!element) {
+    return JSON.stringify({
+      ok: false, action: 'verify', verified: false, value_matched: false, message: 'field not found'
+    });
+  }
+  const tag = element.tagName.toLowerCase();
+  const type = tag === 'input' ? (element.getAttribute('type') || 'text').toLowerCase() : tag;
+  if (!('value' in element)) {
+    return JSON.stringify({
+      ok: false, action: 'verify', field_type: type, verified: false, value_matched: false,
+      message: 'field value cannot be read back'
+    });
+  }
+  const actual = String(element.value == null ? '' : element.value);
+  const base = verdict(reviewedValue, actual, { action: 'verify', field_type: type });
+  if (!base.value_matched && actual) {
+    // An autocomplete that turns "New York" into "New York, NY, United States"
+    // has accepted the answer, not lost it. Rewriting the field to the shorter
+    // form would undo the portal's own selection, so this counts as landed.
+    if (isTokenPrefix(tokensOf(actual), tokensOf(reviewedValue))) {
+      return JSON.stringify(Object.assign({}, base, {
+        ok: true,
+        value_matched: true,
+        match_mode: 'expanded',
+        message: 'the page expanded the typed value into its own form'
+      }));
+    }
+  }
+  return JSON.stringify(base);
+"""
+
+
+def build_verify_field_value_script(selector: str, value: str) -> str:
+    """Build a script that reads a field back without writing to it.
+
+    Typing is the right way to fill a text field: it fires the key events that
+    autocomplete widgets listen for, which a native value assignment never does.
+    But typing gives no evidence the value survived, and a React-controlled input
+    routinely discards it. This reads the field back and reports the same verdict
+    envelope as :func:`build_apply_field_value_script`, with one extra
+    ``match_mode`` of ``expanded`` for a page that canonicalised what was typed.
+    """
+    selector_json = json.dumps(selector)
+    value_json = json.dumps(value)
+    return "\n".join(
+        [
+            "(() => {",
+            f"  // {VERIFY_SCRIPT_MARKER}",
+            f"  const selector = {selector_json};",
+            f"  const reviewedValue = {value_json};",
+            LABEL_RESOLUTION_JS,
+            _FIELD_WRITE_HELPERS_JS,
+            _FIELD_VERIFY_BODY_JS,
+            "})()",
+        ]
+    )
 
 
 def build_click_by_text_script(labels: list[str]) -> str:
@@ -586,6 +1016,47 @@ def build_final_submit_script(labels: list[str]) -> str:
 """
 
 
+# Multi-word phrases that are unambiguous wherever they appear.
+_SECRET_PHRASE_HINTS: tuple[str, ...] = (
+    "password",
+    "passcode",
+    "one-time",
+    "one time",
+    "onetime",
+    "social security",
+    "api key",
+)
+
+# Single words that only count on a token boundary, so "encode"/"tokenize" and
+# similar innocent substrings do not trip the redaction.
+_SECRET_WORD_PATTERN = re.compile(
+    r"\b(code|codes|otp|pin|ssn|secret|secrets|token|tokens|credential|credentials)\b"
+)
+
+
+def _is_secret_field(field: BrowserField) -> bool:
+    """True when read-back values for this field must never be reported verbatim.
+
+    Deliberately over-inclusive: ``runner.py`` spreads this payload straight into
+    emitted events (including the OTP failure event), and CLAUDE.md forbids ever
+    logging a plaintext key, password, or OTP code. Losing ``expected``/``actual``
+    on a "Postal code" field costs a little debuggability; leaking a one-time code
+    breaks a safety invariant.
+    """
+    if field.field_type == "password":
+        return True
+    metadata = field.metadata if isinstance(field.metadata, dict) else {}
+    # Machine names carry no separators ("otpValue"), so humanize them first or
+    # the word-boundary patterns below would never fire on them.
+    identifiers = (metadata.get("name"), metadata.get("id"), metadata.get("autocomplete"))
+    haystack = " ".join(
+        [str(field.label or "")] + [humanize_identifier(str(value)) for value in identifiers if value]
+    ).lower()
+    if any(hint in haystack for hint in _SECRET_PHRASE_HINTS):
+        return True
+    return _SECRET_WORD_PATTERN.search(haystack) is not None
+
+
 def parse_apply_field_result(raw_result: Any, field: BrowserField) -> BrowserStepResult:
     if isinstance(raw_result, str):
         try:
@@ -597,9 +1068,39 @@ def parse_apply_field_result(raw_result: Any, field: BrowserField) -> BrowserSte
 
     action = str(payload.get("action") or "apply")
     safe_payload: dict[str, Any] = {"field_id": field.field_id, "action": action}
-    for key in ("field_type", "checked", "option_count", "selected_value_length"):
+    for key in (
+        "field_type",
+        "checked",
+        "option_count",
+        "selected_value_length",
+        "verified",
+        "value_matched",
+        "match_mode",
+        "match_tier",
+    ):
         if key in payload:
             safe_payload[key] = payload[key]
+    # The runner spreads this payload into emitted events, so the verification
+    # values must never carry a password or a one-time code (CLAUDE.md #3).
+    verification_keys = ("expected", "actual", "expected_length", "actual_length")
+    if _is_secret_field(field):
+        if any(key in payload for key in verification_keys):
+            safe_payload["values_redacted"] = True
+    else:
+        for key in ("expected", "actual"):
+            if key in payload:
+                safe_payload[key] = str(payload[key])[:240]
+        for key in ("expected_length", "actual_length"):
+            if key in payload:
+                safe_payload[key] = payload[key]
+    ambiguity_code = payload.get("ambiguity_code")
+    if isinstance(ambiguity_code, str) and ambiguity_code.strip():
+        safe_payload["ambiguity_code"] = ambiguity_code.strip()[:80]
+    candidate_labels = payload.get("candidate_labels")
+    if isinstance(candidate_labels, list):
+        safe_payload["candidate_labels"] = [
+            str(label).strip()[:160] for label in candidate_labels if str(label).strip()
+        ][:8]
     selected_label = payload.get("selected_label")
     if isinstance(selected_label, str) and selected_label.strip():
         safe_payload["selected_label"] = selected_label.strip()[:160]

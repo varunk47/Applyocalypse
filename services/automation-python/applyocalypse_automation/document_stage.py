@@ -10,6 +10,7 @@ import asyncio
 import json
 import os
 import re
+import sys
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
@@ -25,7 +26,7 @@ from .documents.artifact_generation import (
     split_legal_name,
     write_text_artifact,
 )
-from .documents.docx_builder import build_cover_letter_docx, build_resume_docx
+from .documents.docx_builder import build_cover_letter_docx
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
 from .documents.export_flow import RESUME_DOCX_TAIL, RESUME_TEX_TAIL, run_resume_render_tail
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
@@ -37,6 +38,28 @@ from .llm.litellm_client import LiteLlmClient
 from .resume_tailoring import tailor_resume_sections
 from .tailoring.engine import TailoringEngine
 from .validation import TextArtifactValidator, ValidationReport
+
+
+def _cover_letter_degradation_reason(*, model: str | None, job_text: str) -> str | None:
+    """Why the cover letter will fall back to the deterministic template, if it will.
+
+    A template cover letter that arrives with no explanation reads as a broken
+    product, so every degradation path carries a machine-readable reason onto the
+    emitted event.
+    """
+    if not model:
+        return "NO_LLM_MODEL_CONFIGURED"
+    if not job_text:
+        return "NO_JOB_DESCRIPTION_TEXT"
+    return None
+
+
+def _cl_machine_state(mode: str, reason: str | None, **extra: object) -> dict[str, object]:
+    """machine_state for a cover-letter event, carrying the degradation reason when there is one."""
+    state: dict[str, object] = {**extra, "generation_mode": mode}
+    if reason:
+        state["degradation_reason"] = reason
+    return state
 
 
 def tex_escape(value: str) -> str:
@@ -136,8 +159,8 @@ async def _lazy_generate_cover_letter_for_portal(
     if profile_path.exists():
         try:
             canonical_profile = json.loads(profile_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - an unreadable profile must not be silent.
+            print(f"canonical profile unreadable ({profile_path}): {type(exc).__name__}: {exc}", file=sys.stderr)
 
     job_text = ""
     for _job_name in ("job-description.txt", "job-description-scraped.txt"):
@@ -156,12 +179,13 @@ async def _lazy_generate_cover_letter_for_portal(
     if metadata_path.exists():
         try:
             job_metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
+        except Exception as exc:  # noqa: BLE001 - degrade, but say why.
+            print(f"job target unreadable ({metadata_path}): {type(exc).__name__}: {exc}", file=sys.stderr)
 
     cover_letter_content: str | None = None
     cl_generation_mode = "DETERMINISTIC"
     cl_llm_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
+    cl_degradation_reason = _cover_letter_degradation_reason(model=cl_llm_model, job_text=job_text)
     if cl_llm_model and job_text:
         try:
             generated = await generate_cover_letter(
@@ -173,8 +197,12 @@ async def _lazy_generate_cover_letter_for_portal(
             if generated:
                 cover_letter_content = generated.text
                 cl_generation_mode = "LLM"
-        except Exception:
-            pass
+                cl_degradation_reason = None
+            else:
+                cl_degradation_reason = "LLM_OUTPUT_REJECTED"
+        except Exception as exc:  # noqa: BLE001 - degrade to the template, but say why.
+            cl_degradation_reason = f"LLM_CALL_FAILED:{type(exc).__name__}"
+            print(f"lazy cover letter LLM path failed: {type(exc).__name__}: {exc}", file=sys.stderr)
 
     if cover_letter_content is None:
         tailoring_plan: dict[str, object] = {}
@@ -182,8 +210,8 @@ async def _lazy_generate_cover_letter_for_portal(
         if plan_path.exists():
             try:
                 tailoring_plan = json.loads(plan_path.read_text(encoding="utf-8"))
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - degrade, but say why.
+                print(f"tailoring plan unreadable ({plan_path}): {type(exc).__name__}: {exc}", file=sys.stderr)
         cover_letter_content = build_cover_letter_text(
             canonical_profile=canonical_profile,
             job_metadata=job_metadata,
@@ -205,7 +233,7 @@ async def _lazy_generate_cover_letter_for_portal(
             step_id=None,
             severity=Severity.ERROR,
             message="Lazily generated cover letter failed validation",
-            machine_state={"generation_mode": cl_generation_mode},
+            machine_state=_cl_machine_state(cl_generation_mode, cl_degradation_reason),
             ui_state={"current_step": "document_review", "requires_user_review": True},
             payload={"artifact_kind": "cover_letter", "validation_report_path": str(report_path), **report.to_dict()},
         ).emit()
@@ -239,7 +267,9 @@ async def _lazy_generate_cover_letter_for_portal(
         step_id=None,
         severity=Severity.INFO,
         message="Cover letter generated lazily for portal upload field",
-        machine_state={"format": "DOCX", "review_only": True, "generation_mode": cl_generation_mode},
+        machine_state=_cl_machine_state(
+            cl_generation_mode, cl_degradation_reason, format="DOCX", review_only=True
+        ),
         ui_state={"current_step": "document_review"},
         payload={**cl_artifact.to_payload(), "validation_report_path": str(report_path)},
     ).emit()
@@ -250,7 +280,9 @@ async def _lazy_generate_cover_letter_for_portal(
         step_id=None,
         severity=Severity.WARN,
         message="Lazily generated cover letter awaits review before upload",
-        machine_state={"artifact_kind": "DOCUMENT", "generation_mode": cl_generation_mode},
+        machine_state=_cl_machine_state(
+            cl_generation_mode, cl_degradation_reason, artifact_kind="DOCUMENT"
+        ),
         ui_state={"requires_user_review": True, "current_step": "document_review", "artifact_kind": "DOCUMENT"},
         payload={"artifact_kind": "DOCUMENT", **cl_artifact.to_payload()},
     ).emit()
@@ -555,17 +587,37 @@ def generate_application_documents(
                             },
                         ).emit()
             else:
-                # Anchor-free fallback: build a fresh DOCX from canonical profile
+                # No anchors in the master: preserve the user's EXACT formatting by editing
+                # the master DOCX in place (only bullet text is rewritten) instead of
+                # regenerating a plain document from the canonical profile.
                 output_path.unlink(missing_ok=True)
                 try:
-                    from .documents.font_detection import detect_resume_font_size
-                    fallback_font_size = detect_resume_font_size(master_path)
-                    build_resume_docx(
-                        canonical_profile=canonical_profile,
-                        tailoring_plan=tailoring_plan,
-                        output_path=output_path,
-                        font_size=fallback_font_size,
-                    )
+                    from docx import Document as _MasterDocument  # type: ignore
+
+                    from .documents.docx_mutation import collect_tailorable_bullets, tailor_master_docx_in_place
+                    from .resume_tailoring import tailor_bullets_1to1
+
+                    inplace_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
+                    master_bullets = collect_tailorable_bullets(_MasterDocument(str(master_path)))
+                    tailored_by_index: dict[int, str] = {}
+                    if master_bullets and inplace_model and job_text:
+                        rewritten_bullets = asyncio.run(
+                            tailor_bullets_1to1(
+                                [text for _, text in master_bullets],
+                                job_description=job_text,
+                                llm_client=LiteLlmClient(model=inplace_model),
+                            )
+                        )
+                        if rewritten_bullets and len(rewritten_bullets) == len(master_bullets):
+                            for (index, original), rewritten in zip(master_bullets, rewritten_bullets, strict=True):
+                                rewritten = rewritten.strip()
+                                if (
+                                    rewritten
+                                    and rewritten != original
+                                    and TextArtifactValidator().validate(rewritten, artifact_kind="resume").passed
+                                ):
+                                    tailored_by_index[index] = rewritten
+                    _, bullets_tailored = tailor_master_docx_in_place(master_path, output_path, tailored_by_index)
                     fallback_artifact = metadata_for_existing_file(
                         path=output_path,
                         file_kind="RESUME",
@@ -576,9 +628,18 @@ def generate_application_documents(
                         event_type=EventType.RESUME_RENDERED,
                         run_id=run_id,
                         step_id=None,
-                        severity=Severity.WARN,
-                        message="Anchor-free DOCX fallback generated from canonical profile (no master anchors found)",
-                        machine_state={"source_format": "DOCX", "fallback": True, "review_only": True},
+                        severity=Severity.INFO,
+                        message=(
+                            f"Tailored {bullets_tailored} bullet(s) in place, keeping your original resume formatting"
+                            if bullets_tailored
+                            else "Kept your original resume formatting (no bullets needed changes)"
+                        ),
+                        machine_state={
+                            "source_format": "DOCX",
+                            "in_place": True,
+                            "bullets_tailored": bullets_tailored,
+                            "review_only": True,
+                        },
                         ui_state={"current_step": "document_review", "requires_user_review": True},
                         payload=fallback_artifact.to_payload(),
                     ).emit()
@@ -600,7 +661,7 @@ def generate_application_documents(
                             ui_state={"current_step": "document_review", "requires_user_review": True},
                             payload=fallback_pdf_artifact.to_payload(),
                         ).emit()
-                except Exception as _fallback_exc:
+                except Exception as fallback_exc:
                     WorkerEvent(
                         event_type=EventType.USER_REVIEW_REQUIRED,
                         run_id=run_id,
@@ -609,7 +670,11 @@ def generate_application_documents(
                         message="Verified DOCX master has no explicit Applyocalypse anchors for safe mutation",
                         machine_state={"source_format": "DOCX", "source_master_path": str(master_path)},
                         ui_state={"requires_user_review": True},
-                        payload={"code": "MISSING_DOCX_ANCHORS", "source_master_path": str(master_path)},
+                        payload={
+                            "code": "MISSING_DOCX_ANCHORS",
+                            "source_master_path": str(master_path),
+                            "error": f"{type(fallback_exc).__name__}: {fallback_exc}",
+                        },
                     ).emit()
         elif master_format == "TEX":
             output_path = choose_collision_safe_path(
@@ -679,16 +744,24 @@ def generate_application_documents(
         cl_llm_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
         cover_letter_content: str | None = None
         cl_generation_mode = "DETERMINISTIC"
+        cl_degradation_reason = _cover_letter_degradation_reason(model=cl_llm_model, job_text=job_text)
         if cl_llm_model and job_text:
-            generated = asyncio.run(generate_cover_letter(
-                job_description=job_text,
-                canonical_profile=canonical_profile,
-                cover_letter_sample=cover_letter_sample_text,
-                llm_client=LiteLlmClient(model=cl_llm_model),
-            ))
-            if generated:
-                cover_letter_content = generated.text
-                cl_generation_mode = "LLM"
+            try:
+                generated = asyncio.run(generate_cover_letter(
+                    job_description=job_text,
+                    canonical_profile=canonical_profile,
+                    cover_letter_sample=cover_letter_sample_text,
+                    llm_client=LiteLlmClient(model=cl_llm_model),
+                ))
+                if generated:
+                    cover_letter_content = generated.text
+                    cl_generation_mode = "LLM"
+                    cl_degradation_reason = None
+                else:
+                    cl_degradation_reason = "LLM_OUTPUT_REJECTED"
+            except Exception as exc:  # noqa: BLE001 - a failed cover letter must not abort the run.
+                cl_degradation_reason = f"LLM_CALL_FAILED:{type(exc).__name__}"
+                print(f"cover letter LLM path failed: {type(exc).__name__}: {exc}", file=sys.stderr)
         if cover_letter_content is None:
             cover_letter_content = build_cover_letter_text(
                 canonical_profile=canonical_profile,
@@ -725,7 +798,9 @@ def generate_application_documents(
                     step_id=None,
                     severity=Severity.INFO,
                     message="Cover letter review artifact rendered to local filesystem",
-                    machine_state={"format": "DOCX", "review_only": True, "generation_mode": cl_generation_mode},
+                    machine_state=_cl_machine_state(
+                        cl_generation_mode, cl_degradation_reason, format="DOCX", review_only=True
+                    ),
                     ui_state={"current_step": "document_review"},
                     payload={**cover_letter_artifact.to_payload(), "validation_report_path": str(cover_letter_report_path)},
                 ).emit()
@@ -743,7 +818,9 @@ def generate_application_documents(
                         step_id=None,
                         severity=Severity.INFO,
                         message="Cover letter PDF exported",
-                        machine_state={"format": "PDF", "review_only": True, "generation_mode": cl_generation_mode},
+                        machine_state=_cl_machine_state(
+                            cl_generation_mode, cl_degradation_reason, format="PDF", review_only=True
+                        ),
                         ui_state={"current_step": "document_review"},
                         payload={**pdf_artifact.to_payload(), "validation_report_path": str(cover_letter_report_path)},
                     ).emit()
@@ -754,7 +831,9 @@ def generate_application_documents(
                     step_id=None,
                     severity=Severity.ERROR,
                     message="Cover letter artifact failed validation",
-                    machine_state={"format": "DOCX", "review_only": True, "generation_mode": cl_generation_mode},
+                    machine_state=_cl_machine_state(
+                        cl_generation_mode, cl_degradation_reason, format="DOCX", review_only=True
+                    ),
                     ui_state={"current_step": "document_review", "requires_user_review": True},
                     payload={"artifact_kind": "cover_letter", "validation_report_path": str(cover_letter_report_path), **cover_letter_report.to_dict()},
                 ).emit()

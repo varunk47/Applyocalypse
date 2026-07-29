@@ -1,5 +1,6 @@
 import { app, dialog, shell } from "electron";
 import { IpcContracts } from "@applyocalypse/ipc-contracts";
+import { resolveOwningProfileId } from "../../services/profileOwnership";
 import { handleContract, type IpcHandlerContext } from "./context";
 
 export const registerFileHandlers = (ctx: IpcHandlerContext): void => {
@@ -10,6 +11,7 @@ export const registerFileHandlers = (ctx: IpcHandlerContext): void => {
     requireOpenablePath,
     approvePickedPath,
     uploadRepository,
+    profileRepository,
     documentIngestionService
   } = ctx;
 
@@ -51,7 +53,7 @@ export const registerFileHandlers = (ctx: IpcHandlerContext): void => {
       throw new Error("Resume uploads must use the editable-master ingestion flow");
     }
     return documentIngestionService.ingestSourceMaterial({
-      profileId,
+      profileId: resolveOwningProfileId(profileId, profileRepository),
       localPath: requirePickedPath(localPath),
       fileKind
     });

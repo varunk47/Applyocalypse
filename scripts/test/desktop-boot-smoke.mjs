@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "../..");
@@ -31,11 +32,12 @@ const child = spawn(executable, [], {
 });
 
 let output = "";
+const budgetMs = smokeBudgetMs();
 const timeout = setTimeout(() => {
   child.kill();
-  console.error(output || "boot-smoke:timeout");
+  console.error(timeoutMessage("boot-smoke", budgetMs, output));
   cleanup(1);
-}, 25_000);
+}, budgetMs);
 
 const onData = (chunk) => {
   output += chunk.toString("utf8");

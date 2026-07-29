@@ -168,8 +168,13 @@ def repair_docx_anchors(source: Path, output: Path) -> AnchorRepairResult:
     missing_exp = [a for a in exp_anchors if a not in already_present]
     if missing_exp:
         exp_bullets = find_first_bullet_in_each_experience_block(paragraphs)
-        for anchor, paragraph in zip(missing_exp, exp_bullets, strict=False):
-            replace_paragraph_text_preserving_runs(paragraph, anchor)
+        # Keep the bullet index aligned to each anchor's ordinal position; zipping the
+        # sparse missing list against the dense bullet list would shift anchors across
+        # entries and put one employer's tailored bullets under another's heading.
+        for index, anchor in enumerate(exp_anchors):
+            if anchor in already_present or index >= len(exp_bullets):
+                continue
+            replace_paragraph_text_preserving_runs(exp_bullets[index], anchor)
             added.append(anchor)
         if not exp_bullets:
             warnings.append("No work experience bullet blocks found for {{APPLYO_EXP_N_BULLETS}} anchors.")

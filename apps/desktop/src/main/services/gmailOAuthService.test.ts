@@ -84,21 +84,37 @@ describe("GmailOAuthService startOAuthFlow", () => {
     return state!;
   };
 
-  it("rejects a state mismatch without calling the token endpoint", async () => {
+  it("ignores a state mismatch and still completes when the real callback arrives", async () => {
     const realFetch = globalThis.fetch;
-    const fetchStub = vi.fn();
+    const fetchStub = vi.fn(async (url: string | URL) => {
+      if (String(url).startsWith(GMAIL_TOKEN_URL)) {
+        return {
+          ok: true,
+          json: async () => ({ access_token: "at", refresh_token: "rt", token_type: "Bearer", expires_in: 3600 })
+        } as unknown as Response;
+      }
+      return realFetch(url);
+    });
     vi.stubGlobal("fetch", fetchStub);
     try {
       const service = new GmailOAuthService(fakeRepository(""));
       const flowPromise = service.startOAuthFlow("client-id", "client-secret");
       await vi.waitFor(() => expect(shell.openExternal).toHaveBeenCalled());
-      extractState();
+      const state = extractState();
 
-      await realFetch("http://127.0.0.1:9736/?code=abc&state=WRONG");
+      // A stray local request (favicon, other tab) must not close the loopback
+      // server or resolve the flow before Google's real redirect arrives.
+      const strayResponse = await realFetch("http://127.0.0.1:9736/?code=abc&state=WRONG");
+      expect(strayResponse.status).toBe(404);
+      const tokenCallsAfterStray = fetchStub.mock.calls.filter((call) => String(call[0]).startsWith(GMAIL_TOKEN_URL));
+      expect(tokenCallsAfterStray).toHaveLength(0);
+
+      await realFetch(`http://127.0.0.1:9736/?code=abc&state=${state}`);
       const result = await flowPromise;
 
-      expect(result.ok).toBe(false);
-      expect(fetchStub).not.toHaveBeenCalled();
+      expect(result.ok).toBe(true);
+      const tokenCalls = fetchStub.mock.calls.filter((call) => String(call[0]).startsWith(GMAIL_TOKEN_URL));
+      expect(tokenCalls).toHaveLength(1);
     } finally {
       vi.unstubAllGlobals();
     }

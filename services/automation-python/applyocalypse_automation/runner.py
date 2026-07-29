@@ -9,22 +9,33 @@ import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
-from .browser.portal_adapters import COMMON_STEP_PROGRESSION_LABELS, progression_labels_for_workflow
+from .browser.portal_adapters import (
+    COMMON_STEP_PROGRESSION_LABELS,
+    PortalRuntimePolicy,
+    final_submit_labels_for_workflow,
+    portal_runtime_policy_for_workflow,
+    progression_labels_for_workflow,
+)
 from .browser.portal_state import PortalPageState, classify_portal_page_state
 from .browser.portal_workflows import PortalWorkflow, workflow_for_url
 from .control import WorkerControl, read_worker_control
 from .document_stage import _lazy_generate_cover_letter_for_portal, generate_application_documents
-from .event_protocol import EventType, Severity, WorkerEvent, utc_now
+from .event_protocol import EventType, Severity, WorkerEvent, fail_process, utc_now
 from .field_resolution import (
+    MATCH_OUTCOME_AMBIGUOUS,
+    MATCH_OUTCOME_MATCHED,
     is_otp_field,
+    match_approved_answer,
     normalize_field_label,
     proposed_answer_for_browser_field,
     resolve_secret_reviewed_value,
 )
-from .otp import read_gmail_otp_from_env
+from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
+from .secret_env import apply_provider_secrets_to_env
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,7 +55,10 @@ FINAL_SUBMIT_LABELS = (
 
 SAFE_STEP_PROGRESSION_LABELS = COMMON_STEP_PROGRESSION_LABELS
 
-MAX_AUTOMATED_PORTAL_STEPS = 20
+MAX_BLOCKED_PROGRESSION_ATTEMPTS = 3
+# Server-side resume parsing (Workday, iCIMS) repopulates the form well after
+# the upload request returns, so the wait after an upload is generous.
+RESUME_PARSE_SETTLE_S = 15.0
 
 SUBMISSION_CONFIRMATION_PATTERNS = (
     "application submitted",
@@ -184,13 +198,96 @@ def wait_for_document_approval(work_dir: Path, run_id: str, *, poll_seconds: flo
         ).emit()
 
 
-async def perform_final_submit_with_control(adapter: BrowserAdapter, work_dir: Path, run_id: str, final_submit_control: WorkerControl) -> bool:
+@dataclass(frozen=True, slots=True)
+class FinalSubmitGate:
+    """What the run decided at the last gate before a click that cannot be undone."""
+
+    auto_submit_enabled: bool
+    review_text_detected: bool | None
+    withdrawn: bool
+    message: str
+
+
+def evaluate_final_submit_gate(
+    *,
+    policy: PortalRuntimePolicy,
+    auto_submit_enabled: bool,
+    visible_text: str | None,
+) -> FinalSubmitGate:
+    """Decide whether a standing auto-submit preapproval applies to THIS page.
+
+    Portals whose plan declares a review step (Workday, iCIMS) always show a
+    summary page before the submit button. The plan listed that as evidence and
+    nothing ever checked it. A page with no review text is probably not the
+    submit page, so the preapproval does not apply to it and a person looks
+    first. ``visible_text`` is None when the page could not be read, which is
+    not evidence that the review screen is there.
+    """
+    if not policy.review_evidence_required:
+        return FinalSubmitGate(
+            auto_submit_enabled=auto_submit_enabled,
+            review_text_detected=None,
+            withdrawn=False,
+            message=(
+                "Final submission is preapproved by the explicit auto-submit setting"
+                if auto_submit_enabled
+                else "Final submission is gated until explicit approval"
+            ),
+        )
+
+    detected = policy.review_signal_observed(visible_text or "")
+    if detected:
+        return FinalSubmitGate(
+            auto_submit_enabled=auto_submit_enabled,
+            review_text_detected=True,
+            withdrawn=False,
+            message=(
+                "Final submission is preapproved by the explicit auto-submit setting"
+                if auto_submit_enabled
+                else "Final submission is gated until explicit approval"
+            ),
+        )
+
+    return FinalSubmitGate(
+        auto_submit_enabled=False,
+        review_text_detected=False,
+        withdrawn=auto_submit_enabled,
+        message=(
+            f"Final submission needs approval: {policy.portal_id} always shows a review page "
+            "and this one was not detected"
+            if auto_submit_enabled
+            else "Final submission is gated until explicit approval"
+        ),
+    )
+
+
+def final_submit_labels_for(workflow: PortalWorkflow | None) -> list[str]:
+    """Portal-specific submit labels first, then the generic ones.
+
+    The click matcher demands an exact normalized match, so a portal whose button
+    reads "Submit Profile" (iCIMS) is unreachable from the generic list alone.
+    Order is preserved and duplicates dropped so the portal's own wording wins.
+    """
+    labels = list(final_submit_labels_for_workflow(workflow)) if workflow is not None else []
+    labels.extend(FINAL_SUBMIT_LABELS)
+    return list(dict.fromkeys(labels))
+
+
+async def perform_final_submit_with_control(
+    adapter: BrowserAdapter,
+    work_dir: Path,
+    run_id: str,
+    final_submit_control: WorkerControl,
+    *,
+    workflow: PortalWorkflow | None = None,
+) -> bool:
     blockers = await adapter.detect_blockers()
     if blockers:
         if await pause_for_blockers(adapter, work_dir, run_id, blockers, context="final submission"):
             return False
 
-    result = await adapter.click_final_submit(list(FINAL_SUBMIT_LABELS))
+    labels = final_submit_labels_for(workflow)
+    result = await adapter.click_final_submit(labels)
     if not result.ok:
         WorkerEvent(
             event_type=EventType.USER_REVIEW_REQUIRED,
@@ -198,9 +295,13 @@ async def perform_final_submit_with_control(adapter: BrowserAdapter, work_dir: P
             step_id=final_submit_control.step_id,
             severity=Severity.WARN,
             message="Final submit approval was received, but no exact final submit control could be clicked",
-            machine_state={"reason": "FINAL_SUBMIT_CONTROL_NOT_FOUND"},
+            machine_state={
+                "reason": "FINAL_SUBMIT_CONTROL_NOT_FOUND",
+                "portal_id": workflow.portal_id if workflow is not None else None,
+                "attempted_labels": labels,
+            },
             ui_state={"requires_user_review": True, "current_step": "final_submit"},
-            payload=result.payload,
+            payload={**result.payload, "attempted_labels": labels},
         ).emit()
         return False
 
@@ -251,11 +352,17 @@ async def perform_final_submit_with_control(adapter: BrowserAdapter, work_dir: P
     return False
 
 
-async def perform_final_submit_after_approval(adapter: BrowserAdapter, work_dir: Path, run_id: str) -> bool:
-    final_submit_control = wait_for_final_submit_decision(work_dir, run_id)
+async def perform_final_submit_after_approval(
+    adapter: BrowserAdapter,
+    work_dir: Path,
+    run_id: str,
+    *,
+    workflow: PortalWorkflow | None = None,
+) -> bool:
+    final_submit_control = await asyncio.to_thread(wait_for_final_submit_decision, work_dir, run_id)
     if final_submit_control is None:
         return False
-    return await perform_final_submit_with_control(adapter, work_dir, run_id, final_submit_control)
+    return await perform_final_submit_with_control(adapter, work_dir, run_id, final_submit_control, workflow=workflow)
 
 
 def emit_worker_cancelled(run_id: str, control: WorkerControl, *, message: str) -> None:
@@ -271,7 +378,7 @@ def emit_worker_cancelled(run_id: str, control: WorkerControl, *, message: str) 
     ).emit()
 
 
-def handle_runtime_control(work_dir: Path, run_id: str, *, context: str) -> bool:
+async def handle_runtime_control(work_dir: Path, run_id: str, *, context: str) -> bool:
     control = read_worker_control(work_dir, consume=False)
     if control is None:
         return False
@@ -292,7 +399,7 @@ def handle_runtime_control(work_dir: Path, run_id: str, *, context: str) -> bool
             ui_state={"requires_user_review": True, "current_step": "paused"},
             payload={},
         ).emit()
-        resume_control = wait_for_review_resume(work_dir, run_id=run_id, current_step="automation", context=context)
+        resume_control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="automation", context=context)
         if resume_control.command == "CANCEL":
             emit_worker_cancelled(run_id, resume_control, message=f"Worker cancelled by local user while paused during {context}")
             return True
@@ -383,60 +490,256 @@ async def apply_otp_code_to_detected_field(adapter: object, run_id: str, code: s
     return True
 
 
-async def try_resolve_otp_with_gmail(adapter: object, run_id: str, *, context: str) -> bool:
-    if os.getenv("APPLYO_GMAIL_OTP_ENABLED") != "1":
-        return False
+def gmail_inbox_reader_configured() -> bool:
+    """True when either Gmail path is wired up for this run.
 
+    The OAuth flow only ever sets the token path, so checking the legacy
+    app-password flag alone would leave OAuth users with no automatic retrieval.
+    """
+    return bool(os.getenv("APPLYO_GMAIL_OAUTH_TOKEN_PATH")) or os.getenv("APPLYO_GMAIL_OTP_ENABLED") == "1"
+
+
+# NAVIGATED: a code was applied or an approved link was opened, so page state
+#   must be rechecked.
+# CANCELLED: the user cancelled at the approval gate; the run is over.
+# SKIPPED: nothing usable was found, so fall through to the normal manual pause.
+EmailVerificationOutcome = Literal["NAVIGATED", "CANCELLED", "SKIPPED"]
+
+# Blockers the inbox can answer, either with a code or with a confirmation link.
+# LOGIN is excluded: that is a password prompt, which is the user's alone.
+INBOX_RESOLVABLE_BLOCKER_TYPES = frozenset({"OTP", "MFA"})
+
+
+async def _current_page_url(adapter: object) -> str | None:
+    """Read the live URL, which is what a candidate link has to be trusted against."""
+    try:
+        result = await adapter.extract_visible_text()  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    return str(result.payload.get("url") or "") or None
+
+
+async def _read_gmail_verification(run_id: str, *, context: str) -> GmailOtpResult | None:
+    """Poll Gmail once for either a code or a confirmation link.
+
+    One read serves both paths: polling twice would double the wait and re-read
+    the same message.
+    """
     WorkerEvent(
         event_type=EventType.OTP_RETRIEVAL_STARTED,
         run_id=run_id,
         step_id=None,
         severity=Severity.INFO,
-        message="Gmail OTP retrieval started",
+        message="Gmail verification retrieval started",
         machine_state={"provider": "gmail", "context": context},
         ui_state={"current_step": "otp"},
         payload={"provider": "gmail"},
     ).emit()
-    result = await asyncio.to_thread(read_gmail_otp_from_env)
-    if not result.ok or not result.code:
+    result = await asyncio.to_thread(read_gmail_otp_from_env, accept="code_or_link")
+    if result.ok and (result.code or result.links):
+        return result
+    WorkerEvent(
+        event_type=EventType.OTP_RETRIEVAL_FAILED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.WARN,
+        message=result.message,
+        machine_state={"provider": "gmail", "context": context},
+        ui_state={"requires_user_review": True, "current_step": "otp"},
+        payload=result.safe_payload(),
+    ).emit()
+    return None
+
+
+async def try_resolve_verification_from_gmail(
+    adapter: object, work_dir: Path, run_id: str, *, context: str
+) -> EmailVerificationOutcome:
+    """Answer an OTP or MFA challenge from the user's inbox.
+
+    A numeric code is typed into the page as before. A confirmation link is
+    treated as the credential it is: it stays in worker memory, only its redacted
+    form reaches an event, and it is opened solely after the user approves at the
+    existing review gate, rather than routing around that gate.
+    """
+    if not gmail_inbox_reader_configured():
+        return "SKIPPED"
+
+    result = await _read_gmail_verification(run_id, context=context)
+    if result is None:
+        return "SKIPPED"
+
+    if result.code:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_COMPLETED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.INFO,
+            message="Gmail OTP retrieved without exposing the code",
+            machine_state={"provider": "gmail", "otp_kind": "CODE", "context": context},
+            ui_state={"current_step": "otp"},
+            payload=result.safe_payload(),
+        ).emit()
+        applied = await apply_otp_code_to_detected_field(adapter, run_id, result.code)
+        return "NAVIGATED" if applied else "SKIPPED"
+
+    portal_url = await _current_page_url(adapter)
+    target = select_trusted_verification_link(result.links, portal_url) if portal_url else None
+    if target is None:
+        # An inbox is untrusted input, so a link that cannot be tied to this
+        # portal is never offered: approving an unknown destination mid-run is
+        # exactly what an injected email would be angling for.
         WorkerEvent(
             event_type=EventType.OTP_RETRIEVAL_FAILED,
             run_id=run_id,
             step_id=None,
             severity=Severity.WARN,
-            message=result.message,
-            machine_state={"provider": "gmail", "context": context},
+            message="A verification email was found, but no link belonged to this portal, so none was offered",
+            machine_state={
+                "provider": "gmail",
+                "otp_kind": "LINK",
+                "reason": "LINK_NOT_TRUSTED_FOR_PORTAL",
+                "context": context,
+            },
             ui_state={"requires_user_review": True, "current_step": "otp"},
             payload=result.safe_payload(),
         ).emit()
-        return False
+        return "SKIPPED"
+
+    approval_payload = {
+        **result.safe_payload(),
+        "otp_kind": "LINK",
+        # The redacted form only: the query string is where the token lives.
+        "redacted_target": redact_link(target),
+    }
+    WorkerEvent(
+        event_type=EventType.PAUSED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.WARN,
+        message=(
+            f"A verification link for {redact_link(target)} arrived in Gmail during {context}. "
+            "Approve to open it in the automation browser."
+        ),
+        machine_state={
+            "reason": "EMAIL_VERIFICATION_LINK_APPROVAL_REQUIRED",
+            "otp_kind": "LINK",
+            "context": context,
+        },
+        ui_state={"requires_user_review": True, "current_step": "blocked"},
+        payload=approval_payload,
+    ).emit()
+
+    control = await asyncio.to_thread(
+        wait_for_review_resume,
+        work_dir,
+        run_id=run_id,
+        current_step="email_verification_link_review",
+        context=context,
+    )
+    if control.command == "CANCEL":
+        emit_worker_cancelled(
+            run_id, control, message=f"Worker cancelled by local user at the verification link approval during {context}"
+        )
+        return "CANCELLED"
+
+    open_result = await adapter.open_url(target)  # type: ignore[attr-defined]
+    if not open_result.ok:
+        WorkerEvent(
+            event_type=EventType.OTP_RETRIEVAL_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message="The approved verification link could not be opened",
+            machine_state={"provider": "gmail", "otp_kind": "LINK", "reason": "LINK_OPEN_FAILED", "context": context},
+            ui_state={"requires_user_review": True, "current_step": "otp"},
+            payload=approval_payload,
+        ).emit()
+        return "SKIPPED"
 
     WorkerEvent(
         event_type=EventType.OTP_RETRIEVAL_COMPLETED,
         run_id=run_id,
-        step_id=None,
+        step_id=control.step_id,
         severity=Severity.INFO,
-        message="Gmail OTP retrieved without exposing the code",
-        machine_state={"provider": "gmail", "context": context},
-        ui_state={"current_step": "otp"},
-        payload=result.safe_payload(),
+        message="Opened the approved verification link without exposing it",
+        machine_state={"provider": "gmail", "otp_kind": "LINK", "context": context},
+        ui_state={"current_step": "automation"},
+        payload=approval_payload,
     ).emit()
-    return await apply_otp_code_to_detected_field(adapter, run_id, result.code)
+    return "NAVIGATED"
+
+
+MAX_BLOCKER_PAUSE_CYCLES = 3
+
+
+async def _surface_browser_for_human(adapter: object) -> None:
+    """Best-effort: raise the automation browser window so the user can act on the challenge."""
+    bring_to_front = getattr(adapter, "bring_to_front", None)
+    if bring_to_front is None:
+        return
+    try:
+        await bring_to_front()
+    except Exception:
+        pass
+
+
+# Blockers that physically stop automation and require the user to act on the page.
+# AMBIGUOUS_QUESTION (sensitive / EEO / work-authorization questions) is intentionally
+# NOT here: those are normal on nearly every application form and are reviewed per-field
+# during the fill flow (answers.py forces requires_review=True on them), so they must
+# never halt the whole run at the observation stage.
+HALTING_BLOCKER_TYPES = frozenset({"CAPTCHA", "LOGIN", "MFA", "OTP"})
+
+
+def _halting_blockers(blockers: list[BrowserBlocker]) -> list[BrowserBlocker]:
+    return [blocker for blocker in blockers if blocker.blocker_type in HALTING_BLOCKER_TYPES]
 
 
 async def pause_for_blockers(adapter: object, work_dir: Path, run_id: str, blockers: list[BrowserBlocker], *, context: str) -> bool:
-    active_blockers = blockers
+    active_blockers = _halting_blockers(blockers)
+    pause_cycles = 0
     while active_blockers:
         blocker_payload = blocker_payload_from(active_blockers)
         primary_blocker = active_blockers[0]
-        if any(blocker.blocker_type == "OTP" for blocker in active_blockers) and await try_resolve_otp_with_gmail(
-            adapter, run_id, context=context
-        ):
-            active_blockers = await adapter.detect_blockers()  # type: ignore[attr-defined]
+        resolved_from_inbox = False
+        if any(blocker.blocker_type in INBOX_RESOLVABLE_BLOCKER_TYPES for blocker in active_blockers):
+            outcome = await try_resolve_verification_from_gmail(adapter, work_dir, run_id, context=context)
+            if outcome == "CANCELLED":
+                return True
+            resolved_from_inbox = outcome == "NAVIGATED"
+        if resolved_from_inbox:
+            active_blockers = _halting_blockers(await adapter.detect_blockers())  # type: ignore[attr-defined]
             if not active_blockers:
                 return False
             blocker_payload = blocker_payload_from(active_blockers)
             primary_blocker = active_blockers[0]
+        pause_cycles += 1
+        if pause_cycles > MAX_BLOCKER_PAUSE_CYCLES:
+            # A real challenge clears within a cycle or two; a detection that survives
+            # repeated resumes would otherwise pause forever. Fail the run cleanly (the
+            # same terminal path as cancel) so it always stops instead of hanging; the
+            # user finishes the challenge manually in the browser and starts a new run.
+            WorkerEvent(
+                event_type=EventType.FAILED,
+                run_id=run_id,
+                step_id=None,
+                severity=Severity.ERROR,
+                message=(
+                    f"{primary_blocker.blocker_type} challenge was still detected after "
+                    f"{MAX_BLOCKER_PAUSE_CYCLES} attempts during {context}. Stopping the run so you can "
+                    "finish it manually in the browser window, then start it again."
+                ),
+                machine_state={
+                    "reason": f"{primary_blocker.blocker_type}_UNRESOLVED",
+                    "blockers": blocker_payload,
+                    "context": context,
+                    "pause_cycles": pause_cycles - 1,
+                },
+                ui_state={"requires_user_review": True, "current_step": "blocked"},
+                payload={"code": f"{primary_blocker.blocker_type}_UNRESOLVED", "blockers": blocker_payload},
+            ).emit()
+            return True
+        await _surface_browser_for_human(adapter)
         WorkerEvent(
             event_type=EventType.PAUSED,
             run_id=run_id,
@@ -447,7 +750,7 @@ async def pause_for_blockers(adapter: object, work_dir: Path, run_id: str, block
             ui_state={"requires_user_review": True, "current_step": "blocked"},
             payload={"blockers": blocker_payload},
         ).emit()
-        control = wait_for_review_resume(work_dir, run_id=run_id, current_step="blocker_review", context=context)
+        control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="blocker_review", context=context)
         if control.command == "CANCEL":
             emit_worker_cancelled(run_id, control, message=f"Worker cancelled by local user while blocked during {context}")
             return True
@@ -461,11 +764,17 @@ async def pause_for_blockers(adapter: object, work_dir: Path, run_id: str, block
             ui_state={"current_step": "automation"},
             payload={"blocker_type": primary_blocker.blocker_type},
         ).emit()
-        active_blockers = await adapter.detect_blockers()  # type: ignore[attr-defined]
+        active_blockers = _halting_blockers(await adapter.detect_blockers())  # type: ignore[attr-defined]
     return False
 
 
-def portal_entry_requires_manual_action(workflow: PortalWorkflow, action_applied: bool) -> bool:
+def portal_entry_requires_manual_action(
+    workflow: PortalWorkflow, action_applied: bool, fields_already_present: bool = False
+) -> bool:
+    if fields_already_present:
+        # The application form is already inline on the page (common on Greenhouse/Lever):
+        # there is no "Apply" entry button to click, so do not pause for a manual entry action.
+        return False
     return (
         bool(workflow.entry_action_labels)
         and not action_applied
@@ -508,7 +817,7 @@ async def pause_for_portal_entry_action(
             "instructions": "Click the portal apply or start action in the browser, then mark this review handled.",
         },
     ).emit()
-    control = wait_for_review_resume(work_dir, run_id=run_id, current_step="portal_entry", context=f"{workflow.display_name} portal entry")
+    control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="portal_entry", context=f"{workflow.display_name} portal entry")
     if control.command == "CANCEL":
         emit_worker_cancelled(run_id, control, message=f"Worker cancelled by local user during {workflow.display_name} portal entry")
         return True
@@ -647,7 +956,7 @@ async def pause_for_portal_state_review(
         ui_state={"requires_user_review": True, "current_step": "portal_entry"},
         payload=page_state.to_event_payload(),
     ).emit()
-    control = wait_for_review_resume(work_dir, run_id=run_id, current_step="portal_entry", context=f"{workflow.display_name} redirect review")
+    control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="portal_entry", context=f"{workflow.display_name} redirect review")
     if control.command == "CANCEL":
         emit_worker_cancelled(run_id, control, message=f"Worker cancelled by local user during {workflow.display_name} redirect review")
         return True
@@ -665,27 +974,6 @@ async def pause_for_portal_state_review(
     if blockers:
         return await pause_for_blockers(adapter, work_dir, run_id, blockers, context=f"{context} after portal state review")
     return False
-
-
-def approved_value_for_field(field: BrowserField, approved_answers: object) -> str | None:
-    if not isinstance(approved_answers, list):
-        return None
-    field_label = normalize_field_label(field.label)
-    for answer in approved_answers:
-        if not isinstance(answer, dict):
-            continue
-        value = answer.get("value")
-        if not isinstance(value, str) or not value.strip():
-            continue
-        answer_label = normalize_field_label(str(answer.get("fieldLabel") or ""))
-        answer_type = normalize_field_label(str(answer.get("fieldType") or ""))
-        if not answer_label:
-            continue
-        if field_label == answer_label or answer_label in field_label or field_label in answer_label:
-            return value
-        if field.field_type in {"email", "tel", "url"} and field.field_type == answer_type:
-            return value
-    return None
 
 
 def required_answer_missing_payload(field: BrowserField) -> dict[str, object]:
@@ -936,6 +1224,98 @@ async def execute_portal_entry_action(
     return result
 
 
+@dataclass(frozen=True, slots=True)
+class PortalPageFingerprint:
+    """Enough page identity to tell "we moved on" from "the click did nothing"."""
+
+    url: str
+    title: str
+    text: str
+    text_digest: str
+    selectors: frozenset[str]
+
+
+async def capture_portal_page_fingerprint(adapter: object) -> PortalPageFingerprint | None:
+    """Reads the current page identity, or None when the page cannot be read.
+
+    None means "cannot tell" and must never be read as "unchanged" - a wrong
+    blocked verdict would stall a run that is actually progressing fine.
+    """
+    try:
+        result = await adapter.extract_visible_text()  # type: ignore[attr-defined]
+        fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    except Exception:
+        return None
+    if not result.ok:
+        return None
+    text = str(result.payload.get("text") or "")
+    return PortalPageFingerprint(
+        url=str(result.payload.get("url") or ""),
+        title=str(result.payload.get("title") or ""),
+        text=text,
+        text_digest=hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest(),
+        selectors=frozenset(str(field.selector or field.field_id) for field in fields),
+    )
+
+
+def portal_page_changed(before: PortalPageFingerprint | None, after: PortalPageFingerprint | None) -> bool:
+    """True unless we can positively show the page stayed put.
+
+    URL, title and the set of field selectors are the stable signals: a real
+    wizard step carries different inputs. Visible text alone is too noisy to
+    judge on (timers, toasts, character counters), so it only decides when the
+    page has no fields at all to compare.
+    """
+    if before is None or after is None:
+        return True
+    if before.url != after.url or before.title != after.title:
+        return True
+    if before.selectors != after.selectors:
+        return True
+    if not before.selectors and not after.selectors:
+        return before.text_digest != after.text_digest
+    return False
+
+
+PAGE_CHANGE_TIMEOUT_S = 8.0
+PAGE_CHANGE_POLL_INTERVAL_S = 0.5
+
+
+async def wait_for_portal_page_change(
+    adapter: object,
+    before: PortalPageFingerprint | None,
+    *,
+    timeout_s: float = PAGE_CHANGE_TIMEOUT_S,
+    poll_interval_s: float = PAGE_CHANGE_POLL_INTERVAL_S,
+    sleep: object = asyncio.sleep,
+    clock: object = time.monotonic,
+) -> PortalPageFingerprint | None:
+    """Polls until the page differs from `before`, or the timeout elapses.
+
+    Returns the last fingerprint read either way, so the caller can diff the
+    text of a page that never moved and surface the portal's own error copy.
+    """
+    started = clock()
+    after = await capture_portal_page_fingerprint(adapter)
+    while portal_page_changed(before, after) is False and clock() - started < timeout_s:
+        await sleep(poll_interval_s)
+        after = await capture_portal_page_fingerprint(adapter)
+    return after
+
+
+MAX_VALIDATION_EXCERPT_LINES = 8
+MAX_VALIDATION_EXCERPT_CHARS = 200
+
+
+def new_visible_lines(before: PortalPageFingerprint | None, after: PortalPageFingerprint | None) -> list[str]:
+    """Lines present after the click but not before - usually the validation copy."""
+    if before is None or after is None:
+        return []
+    previous = {line.strip() for line in before.text.splitlines() if line.strip()}
+    fresh = [line.strip() for line in after.text.splitlines() if line.strip() and line.strip() not in previous]
+    return [line[:MAX_VALIDATION_EXCERPT_CHARS] for line in fresh[:MAX_VALIDATION_EXCERPT_LINES]]
+
+
 async def attempt_safe_step_progression(
     *,
     adapter: object,
@@ -944,9 +1324,11 @@ async def attempt_safe_step_progression(
     workflow: PortalWorkflow,
     context: str,
     step_index: int,
+    page_change_timeout_s: float = PAGE_CHANGE_TIMEOUT_S,
 ) -> str:
     click_by_text = adapter.click_by_text
     labels = list(progression_labels_for_workflow(workflow))
+    before_click = await capture_portal_page_fingerprint(adapter)
     result = await click_by_text(labels)
     message = str(result.payload.get("message") or getattr(result, "message", ""))
     if not result.ok and message == "no matching safe portal action was found":
@@ -982,6 +1364,41 @@ async def attempt_safe_step_progression(
         blockers = await adapter.detect_blockers()  # type: ignore[attr-defined]
         if blockers and await pause_for_blockers(adapter, work_dir, run_id, blockers, context=f"{context} step progression"):
             return "cancelled"
+
+        # A successful click is not a successful step. Portals answer an invalid
+        # form by re-rendering the same page with error copy, and treating that
+        # as progress makes the worker march through phantom steps and then ask
+        # for a submit button that was never there.
+        after_click = await wait_for_portal_page_change(adapter, before_click, timeout_s=page_change_timeout_s)
+        if not portal_page_changed(before_click, after_click):
+            validation_lines = new_visible_lines(before_click, after_click)
+            WorkerEvent(
+                event_type=EventType.PAUSED,
+                run_id=run_id,
+                step_id=None,
+                severity=Severity.WARN,
+                message="The portal stayed on the same step after the progression click",
+                machine_state={
+                    "reason": "PORTAL_STEP_DID_NOT_ADVANCE",
+                    "portal_id": workflow.portal_id,
+                    "workflow_kind": workflow.workflow_kind,
+                    "context": context,
+                    "action_role": "STEP_PROGRESSION",
+                    "step_index": step_index,
+                    "validation_line_count": len(validation_lines),
+                },
+                ui_state={"requires_user_review": True, "current_step": "portal_step"},
+                payload={
+                    "portal_id": workflow.portal_id,
+                    "workflow_kind": workflow.workflow_kind,
+                    "action_role": "STEP_PROGRESSION",
+                    "step_index": step_index,
+                    "attempted_labels": labels,
+                    "validation_messages": validation_lines,
+                    "instructions": "The portal rejected this step. Resolve the highlighted fields in the browser, then resume.",
+                },
+            ).emit()
+            return "blocked"
         return "advanced"
 
     WorkerEvent(
@@ -1009,7 +1426,7 @@ async def attempt_safe_step_progression(
             **result.payload,
         },
     ).emit()
-    control = wait_for_review_resume(work_dir, run_id=run_id, current_step="portal_step", context="portal step progression")
+    control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="portal_step", context="portal step progression")
     if control.command == "CANCEL":
         emit_worker_cancelled(run_id, control, message="Worker cancelled by local user during portal step progression")
         return "cancelled"
@@ -1046,6 +1463,15 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir")
     parser.add_argument("--work-dir", required=True)
     return parser
+
+
+def page_text_ready(navigation: object) -> bool:
+    """False when the adapter's readiness poll timed out before page text stabilized."""
+    payload = getattr(navigation, "payload", None)
+    readiness = payload.get("page_text") if isinstance(payload, dict) else None
+    if isinstance(readiness, dict):
+        return bool(readiness.get("ready", True))
+    return True
 
 
 async def run_url_observation_flow(
@@ -1090,7 +1516,7 @@ async def run_url_observation_flow(
         ui_state={"current_step": "browser_launch"},
         payload={**launch.payload, "attempted_adapters": launch_attempts},
     ).emit()
-    if handle_runtime_control(work_dir, run_id, context="browser launch"):
+    if await handle_runtime_control(work_dir, run_id, context="browser launch"):
         await adapter.close()
         return UrlObservationResult(should_stop=True)
 
@@ -1109,17 +1535,22 @@ async def run_url_observation_flow(
         await adapter.close()
         return UrlObservationResult(should_stop=True)
 
+    page_ready = page_text_ready(navigation)
     WorkerEvent(
         event_type=EventType.PAGE_NAVIGATED,
         run_id=run_id,
         step_id=None,
-        severity=Severity.INFO,
-        message="Application page navigated",
-        machine_state={"url": job_url},
+        severity=Severity.INFO if page_ready else Severity.WARN,
+        message=(
+            "Application page navigated"
+            if page_ready
+            else "Application page navigated, but its text did not stabilize; extracted content may be incomplete"
+        ),
+        machine_state={"url": job_url, "page_text_ready": page_ready},
         ui_state={"current_step": "page_review"},
         payload=navigation.payload,
     ).emit()
-    if handle_runtime_control(work_dir, run_id, context="page navigation"):
+    if await handle_runtime_control(work_dir, run_id, context="page navigation"):
         await adapter.close()
         return UrlObservationResult(should_stop=True)
 
@@ -1144,7 +1575,7 @@ async def run_url_observation_flow(
                 "captured_at": utc_now(),
             },
         ).emit()
-    if handle_runtime_control(work_dir, run_id, context="page diagnostics"):
+    if await handle_runtime_control(work_dir, run_id, context="page diagnostics"):
         await adapter.close()
         return UrlObservationResult(should_stop=True)
 
@@ -1183,7 +1614,7 @@ async def run_url_observation_flow(
             "jd_source": "SCRAPED",
         },
     ).emit()
-    if handle_runtime_control(work_dir, run_id, context="job description extraction"):
+    if await handle_runtime_control(work_dir, run_id, context="job description extraction"):
         await adapter.close()
         return UrlObservationResult(should_stop=True)
 
@@ -1209,7 +1640,7 @@ async def run_url_observation_flow(
                 "captured_at": utc_now(),
             },
         ).emit()
-    if handle_runtime_control(work_dir, run_id, context="screenshot capture"):
+    if await handle_runtime_control(work_dir, run_id, context="screenshot capture"):
         await adapter.close()
         return UrlObservationResult(should_stop=True)
 
@@ -1220,10 +1651,11 @@ async def run_url_observation_flow(
             return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
 
     portal_action = await execute_portal_entry_action(adapter=adapter, workflow=workflow, run_id=run_id, context="observation")
-    if handle_runtime_control(work_dir, run_id, context="portal entry action"):
+    if await handle_runtime_control(work_dir, run_id, context="portal entry action"):
         await adapter.close()
         return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
-    if portal_entry_requires_manual_action(workflow, portal_action.ok):
+    entry_fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    if portal_entry_requires_manual_action(workflow, portal_action.ok, fields_already_present=len(entry_fields) > 0):
         if await pause_for_portal_entry_action(adapter, work_dir, run_id, workflow, context="observation", action_payload=portal_action.payload):
             await adapter.close()
             return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
@@ -1233,7 +1665,7 @@ async def run_url_observation_flow(
             await adapter.close()
             return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
 
-    if handle_runtime_control(work_dir, run_id, context="field detection"):
+    if await handle_runtime_control(work_dir, run_id, context="field detection"):
         await adapter.close()
         return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
     fields = await adapter.detect_fields()
@@ -1252,7 +1684,7 @@ async def run_url_observation_flow(
         fields = await adapter.detect_fields()
     emit_cover_letter_requirement_from_fields(run_id, fields, context="post_entry_observation")
     for field in fields:
-        if handle_runtime_control(work_dir, run_id, context="field proposal"):
+        if await handle_runtime_control(work_dir, run_id, context="field proposal"):
             await adapter.close()
             return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
         field_payload = {
@@ -1273,7 +1705,7 @@ async def run_url_observation_flow(
             ui_state={"current_step": "field_review"},
             payload=field_payload,
         ).emit()
-        proposed_answer = proposed_answer_for_browser_field(field, canonical_profile)
+        proposed_answer = proposed_answer_for_browser_field(field, canonical_profile, jd_text=job_text)
         WorkerEvent(
             event_type=EventType.FIELD_VALUE_PROPOSED,
             run_id=run_id,
@@ -1302,7 +1734,7 @@ async def run_url_observation_flow(
         payload={"detected_field_count": len(fields)},
     ).emit()
     if os.getenv("APPLYO_WORKER_WAIT_FOR_REVIEW") == "1":
-        control = wait_for_review_resume(work_dir, run_id=run_id, current_step="field_review", context="initial browser field review")
+        control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="field_review", context="initial browser field review")
         if control.command == "CANCEL":
             emit_worker_cancelled(run_id, control, message="Worker cancelled by local user during initial browser field review")
             await adapter.close()
@@ -1362,7 +1794,7 @@ async def run_browser_apply_after_review(
         ui_state={"current_step": "automation"},
         payload={**launch.payload, "attempted_adapters": launch_attempts},
     ).emit()
-    if handle_runtime_control(work_dir, run_id, context="approved automation browser launch"):
+    if await handle_runtime_control(work_dir, run_id, context="approved automation browser launch"):
         await adapter.close()
         return
 
@@ -1381,13 +1813,18 @@ async def run_browser_apply_after_review(
         await adapter.close()
         return
 
+    reopened_ready = page_text_ready(navigation)
     WorkerEvent(
         event_type=EventType.PAGE_NAVIGATED,
         run_id=run_id,
         step_id=None,
-        severity=Severity.INFO,
-        message="Application page reopened for approved field application",
-        machine_state={"url": job_url},
+        severity=Severity.INFO if reopened_ready else Severity.WARN,
+        message=(
+            "Application page reopened for approved field application"
+            if reopened_ready
+            else "Application page reopened, but its text did not stabilize; field detection may be incomplete"
+        ),
+        machine_state={"url": job_url, "page_text_ready": reopened_ready},
         ui_state={"current_step": "automation"},
         payload=navigation.payload,
     ).emit()
@@ -1398,7 +1835,7 @@ async def run_browser_apply_after_review(
         screenshot_id="approved-application-reopened",
         current_step="automation",
     )
-    if handle_runtime_control(work_dir, run_id, context="approved automation navigation"):
+    if await handle_runtime_control(work_dir, run_id, context="approved automation navigation"):
         await adapter.close()
         return
 
@@ -1408,14 +1845,15 @@ async def run_browser_apply_after_review(
             await adapter.close()
             return
 
-    if handle_runtime_control(work_dir, run_id, context="pre-fill review"):
+    if await handle_runtime_control(work_dir, run_id, context="pre-fill review"):
         await adapter.close()
         return
     portal_action = await execute_portal_entry_action(adapter=adapter, workflow=workflow, run_id=run_id, context="apply_after_review")
-    if handle_runtime_control(work_dir, run_id, context="approved portal entry action"):
+    if await handle_runtime_control(work_dir, run_id, context="approved portal entry action"):
         await adapter.close()
         return
-    if portal_entry_requires_manual_action(workflow, portal_action.ok):
+    entry_fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    if portal_entry_requires_manual_action(workflow, portal_action.ok, fields_already_present=len(entry_fields) > 0):
         if await pause_for_portal_entry_action(adapter, work_dir, run_id, workflow, context="apply_after_review", action_payload=portal_action.payload):
             await adapter.close()
             return
@@ -1428,7 +1866,7 @@ async def run_browser_apply_after_review(
     approved_answers = control.payload.get("approvedAnswers") or control.payload.get("approved_answers")
     generated_files = control.payload.get("generatedFiles") or control.payload.get("generated_files")
     auto_submit_enabled = control_auto_submit_enabled(control)
-    if handle_runtime_control(work_dir, run_id, context="approved field detection"):
+    if await handle_runtime_control(work_dir, run_id, context="approved field detection"):
         await adapter.close()
         return
     fields = await adapter.detect_fields()
@@ -1447,9 +1885,25 @@ async def run_browser_apply_after_review(
         fields = await adapter.detect_fields()
     upload_attempt = 0
     progression_step_index = 0
+    blocked_progression_attempts = 0
+    uploads_settled = False
+    # How many pages this particular portal is expected to have. One global cap of 20
+    # was both too generous for a one-page Lever form and arbitrary for a Workday
+    # wizard, so the number now comes from the portal's own adapter plan.
+    runtime_policy = portal_runtime_policy_for_workflow(workflow)
+    # (generated file id, selector) pairs already uploaded. Re-reading the page after the
+    # portal parses the resume would otherwise attach the same file a second time, and
+    # Workday's attachment list appends rather than replaces.
+    uploaded_document_targets: set[tuple[str, str]] = set()
+    # Track which required-but-unanswered fields the user has already been shown, so we
+    # present them ONCE. If a resume surfaces no NEW missing field, we stop re-pausing and
+    # try to advance the wizard instead; the user fills any leftover blanks in the visible
+    # browser. This prevents the infinite FIELD_REVIEW loop on fields that have no profile
+    # value (Country, LinkedIn, work-auth, EEO, ...).
+    presented_missing_answer_keys: set[str] = set()
     while True:
         if upload_attempt > 0:
-            if handle_runtime_control(work_dir, run_id, context="required document retry field detection"):
+            if await handle_runtime_control(work_dir, run_id, context="required document retry field detection"):
                 await adapter.close()
                 return
             fields = await adapter.detect_fields()
@@ -1471,8 +1925,25 @@ async def run_browser_apply_after_review(
                 generated_files = [*(generated_files if isinstance(generated_files, list) else []), lazy_cl]
         missing_required_documents: list[dict[str, object]] = []
         missing_required_answers: list[dict[str, object]] = []
-        for field in fields:
-            if handle_runtime_control(work_dir, run_id, context=f"field application: {field.label}"):
+
+        # Uploads run first, and once, before anything is typed. Workday and
+        # several other portals parse the resume server-side and repopulate
+        # name, email and experience seconds after the file lands, silently
+        # overwriting whatever was written in the same pass. So upload, wait for
+        # the form to react, and restart the pass against a freshly read form.
+        upload_fields = [field for field in fields if field.field_type == "file"]
+        value_fields = [field for field in fields if field.field_type != "file"]
+        before_uploads = await capture_portal_page_fingerprint(adapter) if upload_fields and not uploads_settled else None
+        restart_after_uploads = False
+
+        for index, field in enumerate(upload_fields + value_fields):
+            if index == len(upload_fields) and before_uploads is not None:
+                uploads_settled = True
+                await wait_for_portal_page_change(adapter, before_uploads, timeout_s=RESUME_PARSE_SETTLE_S)
+                restart_after_uploads = True
+                upload_attempt += 1
+                break
+            if await handle_runtime_control(work_dir, run_id, context=f"field application: {field.label}"):
                 await adapter.close()
                 return
             if field.field_type == "file":
@@ -1512,9 +1983,19 @@ async def run_browser_apply_after_review(
                     ).emit()
                     continue
 
+                upload_target = (
+                    str(generated_file_value(generated_file, "id") or ""),
+                    field.selector or field.field_id,
+                )
+                # Only skip when the field still reports the file we put there. If the
+                # portal dropped it during a re-render, uploading again is the fix.
+                if upload_target in uploaded_document_targets and field_file_count(field) > 0:
+                    continue
+
                 local_path = Path(str(generated_file_value(generated_file, "local_path")))
                 result = await adapter.upload_file(field, local_path)
                 if result.ok:
+                    uploaded_document_targets.add(upload_target)
                     WorkerEvent(
                         event_type=EventType.FILE_UPLOADED,
                         run_id=run_id,
@@ -1552,7 +2033,60 @@ async def run_browser_apply_after_review(
                     ).emit()
                 continue
 
-            reviewed_value = approved_value_for_field(field, approved_answers)
+            if field.metadata.get("requires_human_label_review"):
+                # The page never gave this control a label; detection invented one
+                # so the field would not silently vanish. Matching an approved
+                # answer against an invented label is a guess, and a wrong guess
+                # writes a real value into a box nobody has identified.
+                WorkerEvent(
+                    event_type=EventType.USER_REVIEW_REQUIRED,
+                    run_id=run_id,
+                    step_id=None,
+                    severity=Severity.WARN,
+                    message="A field on this page has no label the page provided; it needs a person to identify it",
+                    machine_state={"selector": field.selector, "field_type": field.field_type},
+                    ui_state={"requires_user_review": True, "current_step": "field_review"},
+                    payload={
+                        "field_label": field.label,
+                        "field_type": field.field_type,
+                        "selector": field.selector,
+                        "reason": "SYNTHETIC_FIELD_LABEL",
+                        "label_source": field.metadata.get("label_source"),
+                    },
+                ).emit()
+                if field.required:
+                    missing_required_answers.append(required_answer_missing_payload(field))
+                continue
+
+            answer_match = match_approved_answer(field, approved_answers)
+            if answer_match.outcome == MATCH_OUTCOME_AMBIGUOUS:
+                # Two approved answers claim this field equally well. Picking one
+                # would write, say, the personal email into the work-email box and
+                # report success, so the choice goes back to the person.
+                WorkerEvent(
+                    event_type=EventType.USER_REVIEW_REQUIRED,
+                    run_id=run_id,
+                    step_id=None,
+                    severity=Severity.WARN,
+                    message=f"More than one reviewed answer could fill {field.label}",
+                    machine_state={"selector": field.selector, "field_type": field.field_type},
+                    ui_state={"requires_user_review": True, "current_step": "field_review"},
+                    payload={
+                        "field_label": field.label,
+                        "field_type": field.field_type,
+                        "selector": field.selector,
+                        "reason": "AMBIGUOUS_ANSWER_MATCH",
+                        "competing_labels": list(answer_match.competing_labels),
+                    },
+                ).emit()
+                if field.required:
+                    missing_required_answers.append(required_answer_missing_payload(field))
+                continue
+            reviewed_value = (
+                answer_match.match.value
+                if answer_match.outcome == MATCH_OUTCOME_MATCHED and answer_match.match
+                else None
+            )
             value, secret_source = resolve_secret_reviewed_value(field, reviewed_value)
             if value is None:
                 if field.required:
@@ -1594,7 +2128,21 @@ async def run_browser_apply_after_review(
                     payload={"field_label": field.label, "field_type": field.field_type, **result.payload},
                 ).emit()
 
-        if not missing_required_documents and not missing_required_answers:
+        if restart_after_uploads:
+            continue
+
+        current_missing_answer_keys = {
+            str(missing.get("selector") or missing.get("field_label") or "") for missing in missing_required_answers
+        }
+        has_new_missing_answers = bool(current_missing_answer_keys - presented_missing_answer_keys)
+
+        # Required answers that are still blank after being presented once have no
+        # saved profile value, so pausing again would loop forever. At that point
+        # the page is as complete as automation can make it and the wizard should
+        # still be advanced: breaking straight to the submit gate instead, as this
+        # used to, strands every page after the first on a multi-step portal and
+        # then asks for a submit button that only exists on the last one.
+        if not missing_required_documents and not (missing_required_answers and has_new_missing_answers):
             await capture_timeline_screenshot_if_available(
                 adapter=adapter,
                 work_dir=work_dir,
@@ -1602,7 +2150,7 @@ async def run_browser_apply_after_review(
                 screenshot_id=f"reviewed-fields-applied-{progression_step_index + 1}",
                 current_step="field_application",
             )
-            if progression_step_index >= MAX_AUTOMATED_PORTAL_STEPS:
+            if progression_step_index >= runtime_policy.max_automated_steps:
                 WorkerEvent(
                     event_type=EventType.PAUSED,
                     run_id=run_id,
@@ -1613,19 +2161,19 @@ async def run_browser_apply_after_review(
                         "reason": "MAX_PORTAL_STEPS_REACHED",
                         "portal_id": workflow.portal_id,
                         "workflow_kind": workflow.workflow_kind,
-                        "max_steps": MAX_AUTOMATED_PORTAL_STEPS,
+                        "max_steps": runtime_policy.max_automated_steps,
                     },
                     ui_state={"requires_user_review": True, "current_step": "portal_step"},
                     payload={
                         "portal_id": workflow.portal_id,
                         "workflow_kind": workflow.workflow_kind,
-                        "max_steps": MAX_AUTOMATED_PORTAL_STEPS,
+                        "max_steps": runtime_policy.max_automated_steps,
                         "instructions": "Inspect the current portal page before continuing. Applyocalypse stopped to avoid an uncontrolled multi-page loop.",
                     },
                 ).emit()
                 await adapter.close()
                 return
-            if handle_runtime_control(work_dir, run_id, context="safe step progression"):
+            if await handle_runtime_control(work_dir, run_id, context="safe step progression"):
                 await adapter.close()
                 return
             progression_result = await attempt_safe_step_progression(
@@ -1639,6 +2187,41 @@ async def run_browser_apply_after_review(
             if progression_result == "cancelled":
                 await adapter.close()
                 return
+            if progression_result == "blocked":
+                # The portal rejected the step and already told the user why. Give the
+                # human a bounded number of chances to clear it in the visible browser
+                # rather than clicking the same rejected button until the step budget
+                # runs out.
+                blocked_progression_attempts += 1
+                if blocked_progression_attempts > MAX_BLOCKED_PROGRESSION_ATTEMPTS:
+                    await adapter.close()
+                    return
+                if os.getenv("APPLYO_WORKER_WAIT_FOR_REVIEW") != "1":
+                    await adapter.close()
+                    return
+                control = await asyncio.to_thread(
+                    wait_for_review_resume,
+                    work_dir,
+                    run_id=run_id,
+                    current_step="portal_step",
+                    context="blocked step progression review",
+                )
+                if control.command == "CANCEL":
+                    WorkerEvent(
+                        event_type=EventType.FAILED,
+                        run_id=run_id,
+                        step_id=control.step_id,
+                        severity=Severity.WARN,
+                        message="Worker cancelled while the portal step was blocked",
+                        machine_state={"reason": control.reason or "USER_CANCELLED"},
+                        ui_state={"cancelled": True},
+                        payload={"code": "USER_CANCELLED"},
+                    ).emit()
+                    await adapter.close()
+                    return
+                fields = await adapter.detect_fields()
+                upload_attempt += 1
+                continue
             if progression_result == "advanced":
                 progression_step_index += 1
                 await capture_timeline_screenshot_if_available(
@@ -1648,7 +2231,7 @@ async def run_browser_apply_after_review(
                     screenshot_id=f"portal-step-{progression_step_index}",
                     current_step="portal_step",
                 )
-                if handle_runtime_control(work_dir, run_id, context="post-step field detection"):
+                if await handle_runtime_control(work_dir, run_id, context="post-step field detection"):
                     await adapter.close()
                     return
                 fields = await adapter.detect_fields()
@@ -1669,7 +2252,8 @@ async def run_browser_apply_after_review(
                 continue
             break
 
-        if missing_required_answers:
+        if missing_required_answers and has_new_missing_answers:
+            presented_missing_answer_keys |= current_missing_answer_keys
             WorkerEvent(
                 event_type=EventType.PAUSED,
                 run_id=run_id,
@@ -1683,7 +2267,7 @@ async def run_browser_apply_after_review(
             if os.getenv("APPLYO_WORKER_WAIT_FOR_REVIEW") != "1":
                 await adapter.close()
                 return
-            control = wait_for_review_resume(work_dir, run_id=run_id, current_step="field_review", context="required answer review")
+            control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="field_review", context="required answer review")
             if control.command == "CANCEL":
                 WorkerEvent(
                     event_type=EventType.FAILED,
@@ -1726,7 +2310,7 @@ async def run_browser_apply_after_review(
         if os.getenv("APPLYO_WORKER_WAIT_FOR_REVIEW") != "1":
             await adapter.close()
             return
-        control = wait_for_review_resume(work_dir, run_id=run_id, current_step="file_upload", context="required upload artifact review")
+        control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="file_upload", context="required upload artifact review")
         if control.command == "CANCEL":
             WorkerEvent(
                 event_type=EventType.FAILED,
@@ -1755,20 +2339,36 @@ async def run_browser_apply_after_review(
         auto_submit_enabled = control_auto_submit_enabled(control) or auto_submit_enabled
         upload_attempt += 1
 
-    ready_message = (
-        "Final submission is preapproved by the explicit auto-submit setting"
-        if auto_submit_enabled
-        else "Final submission is gated until explicit approval"
+    visible_before_submit: str | None = None
+    if runtime_policy.review_evidence_required:
+        visible = await adapter.extract_visible_text()
+        visible_before_submit = str(visible.payload.get("text") or "") if visible.ok else None
+    gate = evaluate_final_submit_gate(
+        policy=runtime_policy,
+        auto_submit_enabled=auto_submit_enabled,
+        visible_text=visible_before_submit,
     )
+    auto_submit_enabled = gate.auto_submit_enabled
     WorkerEvent(
         event_type=EventType.READY_TO_SUBMIT,
         run_id=run_id,
         step_id=None,
         severity=Severity.INFO if auto_submit_enabled else Severity.WARN,
-        message=ready_message,
-        machine_state={"gate": "FINAL_SUBMIT", "auto_submit_enabled": auto_submit_enabled},
+        message=gate.message,
+        machine_state={
+            "gate": "FINAL_SUBMIT",
+            "auto_submit_enabled": auto_submit_enabled,
+            "portal_id": runtime_policy.portal_id,
+            "review_evidence_required": runtime_policy.review_evidence_required,
+            "review_text_detected": gate.review_text_detected,
+            "auto_submit_withdrawn": gate.withdrawn,
+        },
         ui_state={"requires_user_review": not auto_submit_enabled},
-        payload={"auto_submit_enabled": auto_submit_enabled},
+        payload={
+            "auto_submit_enabled": auto_submit_enabled,
+            "review_text_detected": gate.review_text_detected,
+            "auto_submit_withdrawn": gate.withdrawn,
+        },
     ).emit()
     if auto_submit_enabled:
         auto_submit_control = WorkerControl(
@@ -1788,13 +2388,38 @@ async def run_browser_apply_after_review(
             ui_state={"current_step": "final_submit"},
             payload={"approval_type": "AUTO_SUBMIT"},
         ).emit()
-        await perform_final_submit_with_control(adapter, work_dir, run_id, auto_submit_control)
+        await perform_final_submit_with_control(adapter, work_dir, run_id, auto_submit_control, workflow=workflow)
     else:
-        await perform_final_submit_after_approval(adapter, work_dir, run_id)
+        await perform_final_submit_after_approval(adapter, work_dir, run_id, workflow=workflow)
     await adapter.close()
 
 
+def _run_id_from_argv(argv: list[str]) -> str | None:
+    for index, arg in enumerate(argv):
+        if arg == "--run-id" and index + 1 < len(argv):
+            return argv[index + 1]
+        if arg.startswith("--run-id="):
+            return arg.split("=", 1)[1]
+    return None
+
+
 def main() -> None:
+    try:
+        _main_impl()
+    except SystemExit:
+        raise
+    except Exception as exc:  # noqa: BLE001 - Electron only learns of failure via a terminal event
+        run_id = _run_id_from_argv(sys.argv)
+        if run_id:
+            fail_process(run_id, f"Automation worker crashed: {type(exc).__name__}: {exc}")
+        raise
+
+
+def _main_impl() -> None:
+    # Provider API keys arrive via the 0600 worker-secrets file, never spawn env;
+    # export them for LiteLLM/boto before any subcommand or pipeline work runs.
+    apply_provider_secrets_to_env()
+
     if len(sys.argv) > 1 and sys.argv[1] == "pdf-ingestion":
         from .documents.pdf_ingestion_cli import main as pdf_ingestion_main
 

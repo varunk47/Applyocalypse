@@ -45,14 +45,15 @@ def inspect_tex_regions(source_tex: Path) -> list[TexRegion]:
         regions: list[TexRegion] = []
         for command_name in ("section", "subsection", "item"):
             for index, node in enumerate(soup.find_all(command_name)):
-                preview = str(node)[:160]
+                node_source = str(node)
                 regions.append(
                     TexRegion(
                         region_id=f"tex:{command_name}:{index}",
                         command_name=command_name,
-                        source_preview=preview,
+                        source_preview=node_source[:160],
                         confidence=0.75,
-                        metadata={},
+                        # Full source is the mutation span key; the preview is display-only.
+                        metadata={"source": node_source},
                     )
                 )
         if regions:
@@ -101,10 +102,15 @@ def mutate_tex_regions(source_tex: Path, output_tex: Path, mutations: list[TexBl
             replacements.append((int(span[0]), int(span[1]), mutation.replacement_source))
             continue
 
-        start = source.find(region.source_preview)
-        if start == -1 or source.find(region.source_preview, start + 1) != -1:
+        # Match on the full region source; the truncated display preview would splice
+        # the replacement mid-block for any region longer than the preview window.
+        needle = region.metadata.get("source")
+        if not isinstance(needle, str) or not needle:
+            needle = region.source_preview
+        start = source.find(needle)
+        if start == -1 or source.find(needle, start + 1) != -1:
             raise RuntimeError(f"TEX region lacks a unique deterministic source span: {mutation.region_id}")
-        replacements.append((start, start + len(region.source_preview), mutation.replacement_source))
+        replacements.append((start, start + len(needle), mutation.replacement_source))
 
     for start, end, replacement in sorted(replacements, key=lambda item: item[0], reverse=True):
         source = f"{source[:start]}{replacement}{source[end:]}"

@@ -4,6 +4,9 @@ import { LlmProviderTypeSchema, ProviderConnectionSchema, ProviderTypeSchema, Se
 import type { z } from "zod";
 import { parseJsonColumn, stringifyJsonColumn } from "../json";
 
+// Derived from the canonical enum so a newly-supported provider can never be silently skipped.
+const LLM_PROVIDER_SQL_LIST = LlmProviderTypeSchema.options.map((provider) => `'${provider}'`).join(",");
+
 export type ProviderConnection = z.infer<typeof ProviderConnectionSchema>;
 export type ProviderType = z.infer<typeof ProviderTypeSchema>;
 export type LlmProviderType = z.infer<typeof LlmProviderTypeSchema>;
@@ -64,7 +67,7 @@ export class ProviderRepository {
         JOIN encrypted_secrets ON encrypted_secrets.id = provider_connections.secret_ref_id
         WHERE provider_connections.deleted_at IS NULL
           AND provider_connections.status = 'CONNECTED'
-          AND provider_connections.provider IN ('openai','anthropic','gemini','xai','groq','nvidia_nim','openrouter','azure_openai','aws_bedrock')
+          AND provider_connections.provider IN (${LLM_PROVIDER_SQL_LIST})
           AND encrypted_secrets.deleted_at IS NULL
         ORDER BY provider_connections.updated_at DESC
         LIMIT 1

@@ -78,7 +78,7 @@ const dateKicker = (): string => {
 
 export default function HomeScreen() {
   const { state: profileState } = useProfileStore()
-  const { state: queueState, enqueueJobText } = useQueueStore()
+  const { state: queueState, enqueueJobText, cancelPausedRuns } = useQueueStore()
   const { loadRunDetail } = useRunStore()
   const navigate = useNavigate()
 
@@ -198,7 +198,7 @@ export default function HomeScreen() {
               <span>
                 <strong>Auto-submit after review</strong>
                 You still review and approve the tailored documents. After that approval, this run
-                submits on its own — no second confirmation click.
+                submits on its own: no second confirmation click.
               </span>
             </label>
             <Show when={error() ?? queueState.error}>
@@ -272,7 +272,7 @@ export default function HomeScreen() {
                 )
               }}
             </For>
-            <Show when={workingRuns().length === 0 && queuedItems().length === 0}>
+            <Show when={!queueState.isLoading && workingRuns().length === 0 && queuedItems().length === 0}>
               <div class="empty-state">
                 <span>Nothing in flight. Paste a job link above and the machines get to work.</span>
               </div>
@@ -290,6 +290,15 @@ export default function HomeScreen() {
             <span class="kicker kicker-wax">AWAITING YOUR SIGNATURE</span>
             <Show when={signatureRuns().length > 0}>
               <span class="rail-count">{signatureRuns().length}</span>
+              <button
+                class="btn-mono"
+                type="button"
+                style={{ 'margin-left': 'auto' }}
+                title="Cancel all paused runs"
+                onClick={() => void cancelPausedRuns()}
+              >
+                CLEAR PAUSED
+              </button>
             </Show>
           </div>
           <For each={signatureRuns().slice(0, 8)}>
@@ -323,7 +332,7 @@ export default function HomeScreen() {
               +{signatureRuns().length - 8} MORE IN HISTORY
             </button>
           </Show>
-          <Show when={signatureRuns().length === 0}>
+          <Show when={!queueState.isLoading && signatureRuns().length === 0}>
             <div class="empty-state">
               <span>Nothing needs you right now.</span>
             </div>

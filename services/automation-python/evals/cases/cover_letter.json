@@ -1,0 +1,46 @@
+{
+  "stage": "cover_letter",
+  "artifact_kind": "cover_letter",
+  "sources": {
+    "profile": "Ada Byron. Senior Backend Engineer at Halcyon Systems, 2019 to 2025. Built the billing ingestion service in Python and PostgreSQL, moved it onto Kubernetes, and cut p95 latency by 38%. Before that, Backend Engineer at Ferrograph, 2017 to 2019. BSc Computing, Imperial College London. Skills: Python, PostgreSQL, Kubernetes, Terraform, gRPC.",
+    "job_description": "Northstar Labs is hiring a Platform Engineer for the payments group. You will own service reliability, work in Python against PostgreSQL, and run workloads on Kubernetes. We care about latency budgets and clean rollbacks."
+  },
+  "must_mention": ["Northstar Labs", "Platform Engineer"],
+  "cases": [
+    {
+      "id": "grounded-letter-passes",
+      "expect": "pass",
+      "output": "Dear Hiring Team,\n\nThe Platform Engineer opening at Northstar Labs lines up with the six years I spent on payment infrastructure at Halcyon Systems. I owned the billing ingestion service there, wrote it in Python against PostgreSQL, and moved it onto Kubernetes without a rollback.\n\nLatency budgets are the part of that work I liked most. Cutting p95 latency by 38% meant reading a lot of slow query plans and arguing for a smaller service boundary, and both of those are habits I would bring to the payments group.\n\nSincerely,\nAda Byron"
+    },
+    {
+      "id": "invented-employer-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["groundedness"],
+      "output": "Dear Hiring Team,\n\nThe Platform Engineer opening at Northstar Labs lines up with my years on payment infrastructure. At Stripe I owned a billing ingestion service in Python against PostgreSQL, and at Halcyon Systems I moved it onto Kubernetes.\n\nSincerely,\nAda Byron"
+    },
+    {
+      "id": "invented-metric-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["groundedness"],
+      "output": "Dear Hiring Team,\n\nThe Platform Engineer opening at Northstar Labs matches my work at Halcyon Systems, where I cut p95 latency by 94% and saved the company 2400000 dollars a year.\n\nSincerely,\nAda Byron"
+    },
+    {
+      "id": "banned-wording-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["style"],
+      "output": "Dear Hiring Team,\n\nI am thrilled to leverage my robust background for the Platform Engineer role at Northstar Labs. At Halcyon Systems I spearheaded a seamless migration onto Kubernetes.\n\nSincerely,\nAda Byron"
+    },
+    {
+      "id": "em-dash-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["style"],
+      "output": "Dear Hiring Team,\n\nThe Platform Engineer role at Northstar Labs is the same work I did at Halcyon Systems — billing ingestion in Python, on Kubernetes, against PostgreSQL.\n\nSincerely,\nAda Byron"
+    },
+    {
+      "id": "letter-about-the-wrong-job-fails",
+      "expect": "fail",
+      "expect_failing_graders": ["mentions"],
+      "output": "Dear Hiring Team,\n\nI spent six years on payment infrastructure at Halcyon Systems, where I owned a billing ingestion service written in Python against PostgreSQL and ran it on Kubernetes.\n\nSincerely,\nAda Byron"
+    }
+  ]
+}

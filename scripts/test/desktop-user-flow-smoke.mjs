@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const rootDir = resolve(import.meta.dirname, "../..");
 const defaultExe =
@@ -30,11 +31,12 @@ const child = spawn(executable, [], {
 });
 
 let output = "";
+const budgetMs = smokeBudgetMs();
 const timeout = setTimeout(() => {
   child.kill();
-  console.error(output || "user-flow-smoke:timeout");
+  console.error(timeoutMessage("user-flow-smoke", budgetMs, output));
   cleanup(1);
-}, 35_000);
+}, budgetMs);
 
 const onData = (chunk) => {
   output += chunk.toString("utf8");

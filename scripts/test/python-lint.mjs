@@ -34,7 +34,7 @@ const run = async (command, args, options = {}) => {
 };
 
 run(process.execPath, ["scripts/dev/ensure-python-env.mjs"], { cwd: rootDir })
-  .then(() => run(venvPython, ["-m", "ruff", "check", "applyocalypse_automation", "tests"]))
+  .then(() => run(venvPython, ["-m", "ruff", "check", "applyocalypse_automation", "evals", "tests"]))
   .catch((error) => {
     console.error(error instanceof Error ? error.message : error);
     process.exit(1);

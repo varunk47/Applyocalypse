@@ -5,7 +5,12 @@ from html.parser import HTMLParser
 from typing import Any
 
 from .adapter import BrowserBlocker, BrowserField
-from .field_detection import ControlCandidate, choose_safe_click_target, fields_from_dom_snapshot
+from .field_detection import (
+    ControlCandidate,
+    choose_safe_click_target,
+    fields_from_dom_snapshot,
+    resolve_field_label,
+)
 from .portal_state import PortalPageState, classify_portal_page_state
 from .portal_workflows import PortalWorkflow, workflow_for_url
 
@@ -20,25 +25,51 @@ class PortalReplayAnalysis:
     blockers: tuple[BrowserBlocker, ...]
 
 
+# `html.parser` never emits an end tag for these, so they never open a frame.
+_VOID_TAGS = frozenset(
+    {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
+)
+
+
 class _PortalHtmlParser(HTMLParser):
+    """Offline twin of the injected DOM discovery script.
+
+    The label chain here MUST match ``LABEL_RESOLUTION_JS`` in
+    ``field_detection.py``; both call :func:`resolve_field_label` with the same
+    source names, and ``tests/test_label_resolution.py`` pins them together.
+    """
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.title_parts: list[str] = []
         self.text_parts: list[str] = []
         self.raw_fields: list[dict[str, Any]] = []
         self.controls: list[ControlCandidate] = []
-        self._label_stack: list[dict[str, Any]] = []
+        self._frames: list[dict[str, Any]] = []
         self._control_stack: list[dict[str, Any]] = []
         self._title_depth = 0
+        self._next_frame_uid = 0
         self._label_by_for: dict[str, str] = {}
+        self._label_text_by_uid: dict[int, str] = {}
+        self._legend_by_fieldset_uid: dict[int, str] = {}
+        self._text_by_id: dict[str, str] = {}
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         attrs_map = {key.lower(): value for key, value in attrs}
         tag_name = tag.lower()
         if tag_name == "title":
             self._title_depth += 1
-        if tag_name == "label":
-            self._label_stack.append({"for": attrs_map.get("for"), "text": []})
+        if tag_name not in _VOID_TAGS:
+            self._next_frame_uid += 1
+            self._frames.append(
+                {
+                    "uid": self._next_frame_uid,
+                    "tag": tag_name,
+                    "id": attrs_map.get("id"),
+                    "for": attrs_map.get("for"),
+                    "text": [],
+                }
+            )
         if tag_name in {"button", "a"} or attrs_map.get("role") == "button":
             self._control_stack.append(
                 {
@@ -62,7 +93,15 @@ class _PortalHtmlParser(HTMLParser):
                 return
             self.raw_fields.append(
                 {
-                    "label": attrs_map.get("aria-label") or attrs_map.get("placeholder") or attrs_map.get("name") or attrs_map.get("id") or "",
+                    "_label_attrs": {
+                        "aria_label": attrs_map.get("aria-label") or "",
+                        "title": attrs_map.get("title") or "",
+                        "placeholder": attrs_map.get("placeholder") or "",
+                        "name_or_id": attrs_map.get("name") or attrs_map.get("id") or "",
+                    },
+                    "_aria_labelledby": attrs_map.get("aria-labelledby") or "",
+                    "_label_frame_uid": self._enclosing_uid("label"),
+                    "_fieldset_uid": self._enclosing_uid("fieldset"),
                     "field_type": field_type,
                     "selector": self._selector_for(tag_name, attrs_map, field_type),
                     "required": "required" in attrs_map or attrs_map.get("aria-required") == "true",
@@ -81,14 +120,50 @@ class _PortalHtmlParser(HTMLParser):
                 }
             )
 
+    def _enclosing_uid(self, tag_name: str) -> int | None:
+        for frame in reversed(self._frames):
+            if frame["tag"] == tag_name:
+                return int(frame["uid"])
+        return None
+
+    def _record_frame(self, frame: dict[str, Any]) -> None:
+        text = " ".join(str(part) for part in frame["text"]).strip()
+        if not text:
+            return
+        uid = int(frame["uid"])
+        frame_id = frame.get("id")
+        if frame_id:
+            self._text_by_id.setdefault(str(frame_id), text)
+        if frame["tag"] == "label":
+            self._label_text_by_uid.setdefault(uid, text)
+            target_id = frame.get("for")
+            if target_id:
+                self._label_by_for.setdefault(str(target_id), text)
+        elif frame["tag"] == "legend":
+            fieldset_uid = self._enclosing_uid("fieldset")
+            if fieldset_uid is not None:
+                self._legend_by_fieldset_uid.setdefault(fieldset_uid, text)
+
+    def _close_frame(self, tag_name: str) -> None:
+        index = next(
+            (position for position in range(len(self._frames) - 1, -1, -1) if self._frames[position]["tag"] == tag_name),
+            None,
+        )
+        if index is None:
+            return
+        closed = self._frames[index:]
+        self._frames = self._frames[:index]
+        for frame in reversed(closed):
+            self._record_frame(frame)
+
     def handle_data(self, data: str) -> None:
         if not data.strip():
             return
         if self._title_depth > 0:
             self.title_parts.append(data.strip())
         self.text_parts.append(data.strip())
-        if self._label_stack:
-            self._label_stack[-1]["text"].append(data.strip())
+        for frame in self._frames:
+            frame["text"].append(data.strip())
         if self._control_stack:
             self._control_stack[-1]["text"].append(data.strip())
 
@@ -96,12 +171,8 @@ class _PortalHtmlParser(HTMLParser):
         tag_name = tag.lower()
         if tag_name == "title" and self._title_depth > 0:
             self._title_depth -= 1
-        if tag_name == "label" and self._label_stack:
-            label = self._label_stack.pop()
-            target_id = label.get("for")
-            text = " ".join(label["text"]).strip()
-            if target_id and text:
-                self._label_by_for[str(target_id)] = text
+        if tag_name not in _VOID_TAGS:
+            self._close_frame(tag_name)
         if tag_name in {"button", "a"} and self._control_stack:
             control = self._control_stack.pop()
             text = " ".join(part for part in control["text"] if part).strip()
@@ -115,12 +186,35 @@ class _PortalHtmlParser(HTMLParser):
                 )
 
     def finalize_fields(self) -> list[dict[str, Any]]:
+        # Close anything the document left open so trailing text still counts.
+        for frame in reversed(self._frames):
+            self._record_frame(frame)
+        self._frames = []
         finalized: list[dict[str, Any]] = []
         for raw_field in self.raw_fields:
             metadata = raw_field.get("metadata") if isinstance(raw_field.get("metadata"), dict) else {}
             field_id = metadata.get("id")
-            label = self._label_by_for.get(str(field_id), "") if field_id else ""
-            finalized.append({**raw_field, "label": label or str(raw_field.get("label") or "Unlabeled field")})
+            attrs = raw_field.get("_label_attrs") or {}
+            label_frame_uid = raw_field.get("_label_frame_uid")
+            fieldset_uid = raw_field.get("_fieldset_uid")
+            references = str(raw_field.get("_aria_labelledby") or "").split()
+            sources = {
+                "label_for": self._label_by_for.get(str(field_id), "") if field_id else "",
+                "wrapping_label": self._label_text_by_uid.get(label_frame_uid, "") if label_frame_uid else "",
+                "aria_labelledby": " ".join(
+                    text for text in (self._text_by_id.get(reference, "") for reference in references) if text
+                ),
+                "aria_label": attrs.get("aria_label", ""),
+                "legend": self._legend_by_fieldset_uid.get(fieldset_uid, "") if fieldset_uid else "",
+                "title": attrs.get("title", ""),
+                "placeholder": attrs.get("placeholder", ""),
+                "name_or_id": attrs.get("name_or_id", ""),
+            }
+            label, label_source, synthetic = resolve_field_label(sources)
+            public = {key: value for key, value in raw_field.items() if not key.startswith("_")}
+            finalized.append(
+                {**public, "label": label, "label_source": label_source, "label_synthetic": synthetic}
+            )
         return finalized
 
     @staticmethod
@@ -174,8 +268,25 @@ def choose_entry_action_for_fixture(analysis: PortalReplayAnalysis):
 def _blockers_from_replay_text(text: str, fields: tuple[BrowserField, ...]) -> list[BrowserBlocker]:
     normalized = " ".join(text.lower().split())
     blockers: list[BrowserBlocker] = []
-    if "captcha" in normalized or "recaptcha" in normalized or "hcaptcha" in normalized:
-        blockers.append(BrowserBlocker("CAPTCHA", "CAPTCHA challenge detected", 0.72))
+    # Only an ACTIVE challenge blocks the run. A passive "protected by reCAPTCHA"
+    # notice (present on most application forms) must not pause automation — this
+    # mirrors the visibility-gated detection in DOM_BLOCKER_DISCOVERY_SCRIPT.
+    captcha_challenge_phrases = (
+        "i'm not a robot",
+        "i am not a robot",
+        "verify you are human",
+        "verify you're human",
+        "are you human",
+        "select all images",
+        "select each image",
+        "complete the captcha",
+        "solve the captcha",
+        "checking your browser before",
+        "just a moment",
+        "press and hold",
+    )
+    if any(phrase in normalized for phrase in captcha_challenge_phrases):
+        blockers.append(BrowserBlocker("CAPTCHA", "Interactive CAPTCHA or bot challenge detected", 0.9))
     if "multi-factor" in normalized or "multifactor" in normalized or "authenticator app" in normalized or " mfa " in f" {normalized} ":
         blockers.append(BrowserBlocker("MFA", "Multi-factor authentication detected", 0.82))
     if "one-time code" in normalized or "one time code" in normalized or "verification code" in normalized or " otp " in f" {normalized} ":

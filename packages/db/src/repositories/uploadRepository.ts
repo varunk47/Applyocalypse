@@ -82,6 +82,26 @@ export class UploadRepository {
     return this.getById(id);
   }
 
+  /**
+   * Claim uploads that were registered before any profile existed. Onboarding
+   * asks for the resume first, so on a fresh install the very first upload lands
+   * with a null profile_id and its parse would otherwise never merge into the
+   * profile created moments later.
+   */
+  adoptOrphanedFiles(profileId: string): UploadedFile[] {
+    const rows = this.db
+      .prepare("SELECT id FROM uploaded_files WHERE profile_id IS NULL AND deleted_at IS NULL")
+      .all() as Array<{ id: string }>;
+    if (rows.length === 0) {
+      return [];
+    }
+    const now = new Date().toISOString();
+    this.db
+      .prepare("UPDATE uploaded_files SET profile_id = ?, updated_at = ? WHERE profile_id IS NULL AND deleted_at IS NULL")
+      .run(profileId, now);
+    return rows.map((row) => this.getById(row.id));
+  }
+
   registerLocalFile(input: {
     profileId: string | null;
     localPath: string;

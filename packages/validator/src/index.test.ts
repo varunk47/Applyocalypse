@@ -9,6 +9,22 @@ describe("text artifact validation", () => {
     expect(report.blockingIssues.map((issue) => issue.code).sort()).toEqual(["BANNED_WORD", "EM_DASH"]);
   });
 
+  it.each(["—", "―", "⸺", "⸻", "﹘"])(
+    "blocks em-dash lookalike %s",
+    (variant) => {
+      const report = validateTextArtifact(`Shipped v2 ${variant} on time.`, { artifactKind: "cover_letter" });
+
+      expect(report.passed).toBe(false);
+      expect(report.blockingIssues.some((issue) => issue.code === "EM_DASH")).toBe(true);
+    }
+  );
+
+  it("allows en dashes in date ranges", () => {
+    const report = validateTextArtifact("Led the team 2019–2023 in Austin.", { artifactKind: "cover_letter" });
+
+    expect(report.blockingIssues.some((issue) => issue.code === "EM_DASH")).toBe(false);
+  });
+
   it("warns on long resume bullets without blocking", () => {
     const report = validateTextArtifact(
       "- Built a platform with many many many many many many many many many many many many many many many many many many many many many many many many many many many many many many many many words",

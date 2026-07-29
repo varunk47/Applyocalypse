@@ -267,24 +267,39 @@ def build_cover_letter_text(*, canonical_profile: dict[str, Any], job_metadata: 
     if not legal_name or not evidence_source:
         return None
 
-    role = str(job_metadata.get("role") or "the role").strip()
-    company = str(job_metadata.get("company") or "your team").strip()
-    evidence_title = str(evidence_source.get("title") or evidence_source.get("name") or "verified engineering work").strip()
+    role = str(job_metadata.get("role") or "").strip()
+    company = str(job_metadata.get("company") or "").strip()
+    evidence_title = str(evidence_source.get("title") or evidence_source.get("name") or "").strip()
     bullets = _string_list(evidence_source.get("bullets"))
-    evidence_sentence = bullets[0] if bullets else f"My closest verified evidence is {evidence_title}."
-    matched = [
-        str(item.get("keyword")).strip()
-        for item in tailoring_plan.get("matched_evidence", [])
-        if isinstance(item, dict) and str(item.get("keyword", "")).strip()
-    ][:4]
-    keyword_sentence = f"The strongest verified overlap is {', '.join(matched)}." if matched else "I only want to use claims that are already verified in my profile."
+    evidence_sentence = bullets[0].strip() if bullets else ""
+
+    # Grammatical opening whether or not the job description gave us a company/role
+    # (a missing company/role must never produce "your team's the role work maps to ...").
+    if company and role:
+        opening = f"I am writing to express my strong interest in the {role} role at {company}."
+    elif role:
+        opening = f"I am writing to express my strong interest in the {role} role."
+    elif company:
+        opening = f"I am excited about the opportunity to contribute to the team at {company}."
+    else:
+        opening = "I am excited about the opportunity this role represents."
+
+    if evidence_title and evidence_sentence:
+        evidence_para = f"My work on {evidence_title} is directly relevant. {evidence_sentence}"
+    elif evidence_sentence:
+        evidence_para = f"A recent example from my work: {evidence_sentence}"
+    elif evidence_title:
+        evidence_para = f"My most relevant experience is {evidence_title}."
+    else:
+        evidence_para = "My background centers on building reliable, production-grade software end to end."
 
     return (
         f"Dear Hiring Team,\n\n"
-        f"{company}'s {role} work maps to my verified background in {evidence_title}. "
-        f"{evidence_sentence} {keyword_sentence}\n\n"
-        "I would bring a careful engineering style, clear judgment around tradeoffs, and a bias toward systems that operators can inspect and control.\n\n"
-        f"Thank you,\n{legal_name}\n"
+        f"{opening} {evidence_para}\n\n"
+        "I bring a careful engineering style, clear judgment around tradeoffs, and a bias "
+        "toward systems that are reliable and easy to operate. I would welcome the chance to "
+        "discuss how my experience fits your team's needs.\n\n"
+        f"Thank you for your consideration,\n{legal_name}\n"
     )
 
 

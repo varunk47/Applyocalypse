@@ -33,7 +33,8 @@ export const BANNED_WORDS = [
   "deep dive"
 ] as const;
 
-const EM_DASH = "\u2014";
+// Em dash plus visually-equivalent variants; en dash (U+2013) stays legal for date ranges.
+const EM_DASH_VARIANTS = /[\u2014\u2015\u2e3a\u2e3b\ufe58]/g;
 const WEAK_BULLET_PATTERNS = [
   /\bresponsible for\b/i,
   /\bworked on\b/i,
@@ -63,7 +64,7 @@ export const validateTextArtifact = (content: string, options: ValidateTextOptio
   const warnings: ValidationIssue[] = [];
 
   for (const word of BANNED_WORDS) {
-    const pattern = new RegExp(`\\b${word.replace(" ", "\\s+")}\\b`, "i");
+    const pattern = new RegExp(`\\b${word.replaceAll(" ", "\\s+")}\\b`, "i");
     if (pattern.test(lower)) {
       blockingIssues.push({
         severity: "blocking",
@@ -73,7 +74,7 @@ export const validateTextArtifact = (content: string, options: ValidateTextOptio
     }
   }
 
-  const emDashCount = content.split(EM_DASH).length - 1;
+  const emDashCount = (content.match(EM_DASH_VARIANTS) ?? []).length;
   if (emDashCount > 0) {
     blockingIssues.push({
       severity: "blocking",

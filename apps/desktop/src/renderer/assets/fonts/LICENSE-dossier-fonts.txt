@@ -1,8 +1,6 @@
-Bundled fonts for the Dossier design system, all licensed under the
+Bundled fonts for the Instrument design system, all licensed under the
 SIL Open Font License 1.1 (https://openfontlicense.org):
 
-- Instrument Serif — Copyright 2022 The Instrument Serif Project Authors
-  (https://github.com/Instrument/instrument-serif)
 - Hanken Grotesk — Copyright 2020 The Hanken Grotesk Project Authors
   (https://github.com/marcologous/hanken-grotesk)
 - JetBrains Mono — Copyright 2020 The JetBrains Mono Project Authors

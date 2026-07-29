@@ -16,10 +16,12 @@
   /* Nothing must ever render blank: if the animation stack is missing or motion
      is reduced, show every hidden element at its resting state. */
   function ensureVisible() {
-    qa("[data-reveal],[data-hero-rise],[data-hero-fade],[data-hero-win-tilt],[data-hero-win-inner]").forEach(function (el) {
-      el.style.opacity = "1";
-      el.style.transform = "none";
-    });
+    qa("[data-reveal],[data-hero-rise],[data-hero-fade],[data-hero-win-tilt],[data-hero-win-inner]").forEach(
+      function (el) {
+        el.style.opacity = "1";
+        el.style.transform = "none";
+      }
+    );
     qa(".how-visual").forEach(function (el, i) {
       el.classList.toggle("is-active", i === 0);
     });
@@ -94,8 +96,11 @@
     gsap.set(rises, { yPercent: 115 });
     gsap.set(fades, { opacity: 0, y: 16 });
     var tl = gsap.timeline({ defaults: { ease: "power4.out" } });
-    tl.to(rises, { yPercent: 0, duration: 1.15, stagger: 0.11 }, 0.15)
-      .to(fades, { opacity: 1, y: 0, duration: 0.9, stagger: 0.09 }, 0.5);
+    tl.to(rises, { yPercent: 0, duration: 1.15, stagger: 0.11 }, 0.15).to(
+      fades,
+      { opacity: 1, y: 0, duration: 0.9, stagger: 0.09 },
+      0.5
+    );
   })();
 
   /* ---- Hero window: intro fade, scroll de-tilt, mouse parallax ---------- */
@@ -112,7 +117,10 @@
       tilt,
       { rotateX: 17, scale: 0.93, y: 34 },
       {
-        rotateX: 0, scale: 1, y: 0, ease: "none",
+        rotateX: 0,
+        scale: 1,
+        y: 0,
+        ease: "none",
         scrollTrigger: { trigger: hero, start: "top top", end: "bottom 55%", scrub: 0.5 }
       }
     );
@@ -134,7 +142,8 @@
     var bar = q("[data-progress]");
     if (bar) {
       gsap.to(bar, {
-        scaleX: 1, ease: "none",
+        scaleX: 1,
+        ease: "none",
         scrollTrigger: { trigger: document.body, start: "top top", end: "bottom bottom", scrub: 0.3 }
       });
     }
@@ -216,7 +225,9 @@
     setActive(0);
     panels.forEach(function (panel, i) {
       ST.create({
-        trigger: panel, start: "top 55%", end: "bottom 55%",
+        trigger: panel,
+        start: "top 55%",
+        end: "bottom 55%",
         onToggle: function (self) {
           if (self.isActive) {
             setActive(i);
@@ -228,7 +239,9 @@
     if (seal) {
       var last = panels[panels.length - 1];
       ST.create({
-        trigger: last, start: "top 60%", once: true,
+        trigger: last,
+        start: "top 60%",
+        once: true,
         onEnter: function () {
           gsap.fromTo(
             seal,
@@ -277,7 +290,11 @@
     });
     stage.addEventListener("pointerleave", function () {
       gsap.to(tilt, {
-        rotateX: 0, rotateY: 0, duration: 0.9, ease: "power3.out", overwrite: "auto",
+        rotateX: 0,
+        rotateY: 0,
+        duration: 0.9,
+        ease: "power3.out",
+        overwrite: "auto",
         onComplete: idle
       });
       depthEls.forEach(function (el) {
@@ -295,10 +312,14 @@
       }
       var o = { v: 0 };
       ST.create({
-        trigger: el, start: "top 88%", once: true,
+        trigger: el,
+        start: "top 88%",
+        once: true,
         onEnter: function () {
           gsap.to(o, {
-            v: to, duration: 1.6, ease: "power2.out",
+            v: to,
+            duration: 1.6,
+            ease: "power2.out",
             onUpdate: function () {
               el.textContent = Math.round(o.v).toLocaleString();
             }
@@ -328,7 +349,10 @@
             answer,
             { height: 0, opacity: 0 },
             {
-              height: "auto", opacity: 1, duration: 0.5, ease: "power2.out",
+              height: "auto",
+              opacity: 1,
+              duration: 0.5,
+              ease: "power2.out",
               onComplete: function () {
                 item.classList.remove("is-animating");
               }
@@ -336,7 +360,10 @@
           );
         } else {
           gsap.to(answer, {
-            height: 0, opacity: 0, duration: 0.4, ease: "power2.inOut",
+            height: 0,
+            opacity: 0,
+            duration: 0.4,
+            ease: "power2.inOut",
             onComplete: function () {
               item.open = false;
               gsap.set(answer, { clearProps: "height,opacity" });

@@ -24,6 +24,74 @@ COMMON_FINAL_SUBMIT_LABELS = (
     "Complete application",
 )
 
+# Review gates a step may demand. A gate outside this set is a typo that nothing
+# at runtime would ever honour.
+KNOWN_REVIEW_GATES: frozenset[str] = frozenset(
+    {
+        "PORTAL_ENTRY",
+        "LOGIN",
+        "MFA",
+        "OTP",
+        "CAPTCHA",
+        "ANSWER",
+        "SENSITIVE_QUESTION",
+        "DOCUMENT",
+        "PORTAL_STEP",
+        "FINAL_SUBMIT",
+    }
+)
+
+# Evidence a step expects to observe before the run may advance. Keeping the
+# vocabulary closed is what makes the metadata evaluable rather than decorative.
+KNOWN_EVIDENCE_SIGNALS: frozenset[str] = frozenset(
+    {
+        "application_form_detected",
+        "candidate_fields_detected",
+        "confirmation_required_after_click",
+        "file_inputs_detected",
+        "known_ashby_host",
+        "known_greenhouse_host",
+        "known_icims_host",
+        "known_lever_host",
+        "known_taleo_host",
+        "known_workday_host",
+        "password_field_absent_or_user_resolved",
+        "password_or_account_prompt_checked",
+        "portal_detected",
+        "questionnaire_detected",
+        "required_fields_detected",
+        "returning_candidate_prompt_checked",
+        "review_text_detected",
+    }
+)
+
+# Visible-text markers that satisfy the "review_text_detected" evidence signal.
+REVIEW_TEXT_MARKERS: tuple[str, ...] = (
+    "review your application",
+    "review your information",
+    "review and submit",
+    "review & submit",
+    "please review",
+    "application review",
+    "review application",
+    "summary of your application",
+)
+
+# How much is actually known about filling this portal's form. Reachability over
+# HTTP proves nothing here, so no probe may promote a portal into a better
+# status; only a live fill-and-read-back run can, and none has been performed.
+FILL_CAPABILITY_LIVE_VERIFIED = "LIVE_FILL_VERIFIED"
+FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY = "OFFLINE_FIXTURE_ONLY"
+FILL_CAPABILITY_UNPROVEN = "UNPROVEN_NO_LIVE_FILL_EVIDENCE"
+
+FILL_CAPABILITY_STATUSES: frozenset[str] = frozenset(
+    {
+        FILL_CAPABILITY_LIVE_VERIFIED,
+        FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        FILL_CAPABILITY_UNPROVEN,
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class PortalStepPolicy:
@@ -57,7 +125,8 @@ class PortalAdapterPlan:
     required_review_gates: tuple[str, ...]
     material_field_hints: tuple[str, ...]
     steps: tuple[PortalStepPolicy, ...]
-    live_certification_status: str
+    fill_capability_status: str
+    fill_capability_blockers: tuple[str, ...]
     notes: tuple[str, ...]
 
     def to_event_payload(self) -> dict[str, object]:
@@ -72,7 +141,8 @@ class PortalAdapterPlan:
             "required_review_gates": list(self.required_review_gates),
             "material_field_hints": list(self.material_field_hints),
             "steps": [step.to_event_payload() for step in self.steps],
-            "live_certification_status": self.live_certification_status,
+            "fill_capability_status": self.fill_capability_status,
+            "fill_capability_blockers": list(self.fill_capability_blockers),
             "notes": list(self.notes),
         }
 
@@ -114,7 +184,8 @@ ATS_ADAPTER_PLANS: dict[str, PortalAdapterPlan] = {
             _step("review", "Review application", ("Review", "Next"), "PORTAL_STEP", ("review_text_detected",)),
             _step("submit", "Submit application", ("Submit", "Submit application"), "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_ACCOUNT_FIXTURES",
+        fill_capability_status=FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        fill_capability_blockers=("REQUIRES_ACCOUNT_FIXTURES",),
         notes=("Workday flows are tenant-configurable. Account and questionnaire steps must remain review-gated.",),
     ),
     "greenhouse": PortalAdapterPlan(
@@ -133,7 +204,8 @@ ATS_ADAPTER_PLANS: dict[str, PortalAdapterPlan] = {
             _step("documents", "Resume and cover letter", ("Next", "Continue"), "DOCUMENT", ("file_inputs_detected",)),
             _step("submit", "Submit application", ("Submit application",), "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_LIVE_JOB_FIXTURES",
+        fill_capability_status=FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        fill_capability_blockers=("REQUIRES_LIVE_JOB_FIXTURES",),
         notes=("Greenhouse may expose all fields on one page or defer EEO questions to later panels.",),
     ),
     "lever": PortalAdapterPlan(
@@ -152,7 +224,8 @@ ATS_ADAPTER_PLANS: dict[str, PortalAdapterPlan] = {
             _step("review", "Review answers", ("Review application", "Continue"), "PORTAL_STEP", ("review_text_detected",)),
             _step("submit", "Submit application", ("Submit application",), "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_LIVE_JOB_FIXTURES",
+        fill_capability_status=FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        fill_capability_blockers=("REQUIRES_LIVE_JOB_FIXTURES",),
         notes=("Lever commonly mixes resume upload, profile fields, and optional questions on a compact form.",),
     ),
     "ashby": PortalAdapterPlan(
@@ -171,7 +244,8 @@ ATS_ADAPTER_PLANS: dict[str, PortalAdapterPlan] = {
             _step("documents", "Resume and cover letter", ("Next", "Continue"), "DOCUMENT", ("file_inputs_detected",)),
             _step("submit", "Submit application", ("Submit Application",), "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_LIVE_JOB_FIXTURES",
+        fill_capability_status=FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        fill_capability_blockers=("REQUIRES_LIVE_JOB_FIXTURES",),
         notes=("Ashby renders a single-page form and can autofill answers from the uploaded resume. Autofilled answers and EEO panels stay review-gated.",),
     ),
     "icims": PortalAdapterPlan(
@@ -192,7 +266,8 @@ ATS_ADAPTER_PLANS: dict[str, PortalAdapterPlan] = {
             _step("review", "Review profile", ("Review", "Next"), "PORTAL_STEP", ("review_text_detected",)),
             _step("submit", "Submit profile", ("Submit Profile", "Submit application"), "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_ACCOUNT_FIXTURES",
+        fill_capability_status=FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        fill_capability_blockers=("REQUIRES_ACCOUNT_FIXTURES",),
         notes=("iCIMS frequently requires account flows. Automation must pause for login and profile creation.",),
     ),
     "taleo": PortalAdapterPlan(
@@ -213,7 +288,8 @@ ATS_ADAPTER_PLANS: dict[str, PortalAdapterPlan] = {
             _step("review", "Review application", ("Review", "Next"), "PORTAL_STEP", ("review_text_detected",)),
             _step("submit", "Submit", ("Submit", "Submit application"), "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_ACCOUNT_FIXTURES",
+        fill_capability_status=FILL_CAPABILITY_OFFLINE_FIXTURE_ONLY,
+        fill_capability_blockers=("REQUIRES_ACCOUNT_FIXTURES",),
         notes=("Taleo tenants vary heavily. Keep six-step cap and manual review on each uncertain transition.",),
     ),
 }
@@ -227,7 +303,8 @@ def portal_adapter_plan_for_workflow(workflow: PortalWorkflow) -> PortalAdapterP
         portal_id=workflow.portal_id,
         display_name=workflow.display_name,
         workflow_kind=workflow.workflow_kind,
-        max_automated_steps=4 if workflow.workflow_kind == "ATS_DIRECT_FORM" else 2,
+        # Never below len(steps): a cap under the declared steps can never complete.
+        max_automated_steps=4 if workflow.workflow_kind == "ATS_DIRECT_FORM" else 3,
         entry_action_labels=workflow.entry_action_labels,
         step_progression_labels=COMMON_STEP_PROGRESSION_LABELS,
         final_submit_labels=COMMON_FINAL_SUBMIT_LABELS,
@@ -238,8 +315,44 @@ def portal_adapter_plan_for_workflow(workflow: PortalWorkflow) -> PortalAdapterP
             _step("review", "Review detected fields", COMMON_STEP_PROGRESSION_LABELS, "ANSWER", ("required_fields_detected",)),
             _step("submit", "Gate final submit", COMMON_FINAL_SUBMIT_LABELS, "FINAL_SUBMIT", ("confirmation_required_after_click",)),
         ),
-        live_certification_status="REQUIRES_PORTAL_SPECIFIC_ADAPTER",
+        fill_capability_status=FILL_CAPABILITY_UNPROVEN,
+        fill_capability_blockers=("REQUIRES_PORTAL_SPECIFIC_ADAPTER", "REQUIRES_LIVE_JOB_FIXTURES"),
         notes=("Generic adapter plan. Pause on every uncertain portal transition.",),
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class PortalRuntimePolicy:
+    """The parts of a portal plan the run loop must actually evaluate.
+
+    The plan itself is descriptive metadata. This is the narrow, typed view of it
+    that the runner consumes: how many automated steps this specific portal may
+    take, which step is the final-submit gate, and whether the portal promises a
+    review screen whose text must be observed before that gate is approached.
+    """
+
+    portal_id: str
+    max_automated_steps: int
+    final_submit_step_id: str
+    review_evidence_required: bool
+    review_text_markers: tuple[str, ...]
+
+    def review_signal_observed(self, visible_text: str) -> bool:
+        """True when ``visible_text`` satisfies the review-text evidence signal."""
+        haystack = " ".join(visible_text.lower().split())
+        return any(marker in haystack for marker in self.review_text_markers)
+
+
+def portal_runtime_policy_for_workflow(workflow: PortalWorkflow) -> PortalRuntimePolicy:
+    """Runtime policy for a workflow: the per-portal caps and gates, evaluable."""
+    plan = portal_adapter_plan_for_workflow(workflow)
+    review_required = any("review_text_detected" in step.evidence_signals for step in plan.steps)
+    return PortalRuntimePolicy(
+        portal_id=plan.portal_id,
+        max_automated_steps=plan.max_automated_steps,
+        final_submit_step_id=plan.steps[-1].step_id if plan.steps else "submit",
+        review_evidence_required=review_required,
+        review_text_markers=REVIEW_TEXT_MARKERS if review_required else (),
     )
 
 

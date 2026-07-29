@@ -4,19 +4,35 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Applyocalypse · Your job applications, done to the signature</title>
-  <meta name="description" content="Applyocalypse reads the posting, tailors your resume, writes the cover letter in your voice, and fills the portal. Then it stops and waits for you to sign. Local-first, for Windows, bring your own keys." />
-  <meta name="theme-color" content="#fbfaf7" />
-  <link rel="canonical" href="https://github.com/varunk47/Applyocalypse" />
+  <meta name="description" content="Applyocalypse reads the posting, tailors your resume, writes the cover letter in your voice, and fills the portal. Then it stops and waits for you to sign. Local-first for Windows, bring your own model keys." />
+  <meta name="theme-color" content="#eef1f6" />
   <link rel="icon" href="./assets/favicon.svg" type="image/svg+xml" />
+  <link rel="icon" href="./assets/favicon-32.png" sizes="32x32" type="image/png" />
+  <link rel="apple-touch-icon" href="./assets/apple-touch-icon.png" />
 
+  <!-- DEPLOY NOTE: og:image and og:url must be absolute URLs to render in social
+       previews. Set them (and a <link rel="canonical">) to the real production
+       origin at deploy time. They are intentionally left relative/absent here
+       because the production domain is not yet decided, and a wrong absolute URL
+       is worse than a missing one. -->
   <meta property="og:type" content="website" />
-  <meta property="og:title" content="Applyocalypse" />
-  <meta property="og:description" content="An evening of drudgery, reduced to a signature. Local-first job applications for Windows." />
-  <meta property="og:image" content="./assets/og.svg" />
+  <meta property="og:site_name" content="Applyocalypse" />
+  <meta property="og:title" content="Applyocalypse · Your job applications, done to the signature" />
+  <meta property="og:description" content="An evening of drudgery, reduced to a signature. It tailors, fills, and stops at the submit button so you sign every application yourself. Local-first for Windows." />
+  <meta property="og:image" content="./assets/og.png" />
+  <meta property="og:image:type" content="image/png" />
+  <meta property="og:image:width" content="1200" />
+  <meta property="og:image:height" content="630" />
+  <meta property="og:image:alt" content="Applyocalypse: an evening of drudgery, reduced to a signature." />
   <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Applyocalypse · Your job applications, done to the signature" />
+  <meta name="twitter:description" content="It tailors, fills, and stops at the submit button so you sign every application yourself. Local-first for Windows." />
+  <meta name="twitter:image" content="./assets/og.png" />
+  <meta name="twitter:image:alt" content="Applyocalypse: an evening of drudgery, reduced to a signature." />
 
   <link rel="preload" href="./assets/fonts/InstrumentSerif-Regular.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="preload" href="./assets/fonts/HankenGrotesk-Variable.woff2" as="font" type="font/woff2" crossorigin />
+  <link rel="preload" href="./assets/fonts/JetBrainsMono-Variable.woff2" as="font" type="font/woff2" crossorigin />
   <link rel="stylesheet" href="./styles.css" />
 </head>
 <body>
@@ -24,23 +40,25 @@
   <div class="scroll-progress" aria-hidden="true"><span class="scroll-progress-fill" data-progress></span></div>
 
   <!-- ============================ NAV ============================ -->
-  <nav class="nav" id="nav" aria-label="Primary">
-    <a class="nav-brand" href="#top" aria-label="Applyocalypse home">
-      <span class="mono-mark" aria-hidden="true">A</span>
-      Applyocalypse
-    </a>
-    <span class="nav-vault">LOCAL VAULT · ENCRYPTED</span>
-    <button class="nav-burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
-      <span></span>
-    </button>
-    <div class="nav-links" id="nav-links">
-      <a href="#how" data-nav-link="how">How it works</a>
-      <a href="#privacy" data-nav-link="privacy">Privacy</a>
-      <a href="#pricing" data-nav-link="pricing">Pricing</a>
-      <a href="#faq" data-nav-link="faq">FAQ</a>
-      <a class="nav-cta" href="https://github.com/varunk47/Applyocalypse/releases/latest">Download</a>
-    </div>
-  </nav>
+  <header class="nav" id="nav">
+    <nav class="nav-in" aria-label="Primary">
+      <a class="nav-brand" href="#top" aria-label="Applyocalypse home">
+        <span class="mono-mark" aria-hidden="true">A</span>
+        Applyocalypse
+      </a>
+      <span class="nav-vault">RUNS ON YOUR MACHINE</span>
+      <button class="nav-burger" id="burger" aria-label="Menu" aria-expanded="false" aria-controls="nav-links">
+        <span></span>
+      </button>
+      <div class="nav-links" id="nav-links">
+        <a href="#how" data-nav-link="how">How it works</a>
+        <a href="#privacy" data-nav-link="privacy">Privacy</a>
+        <a href="#pricing" data-nav-link="pricing">Pricing</a>
+        <a href="#faq" data-nav-link="faq">FAQ</a>
+        <a class="nav-cta" href="#get" data-nav-link="get">Get it</a>
+      </div>
+    </nav>
+  </header>
 
   <main id="main">
     <span id="top"></span>
@@ -60,14 +78,19 @@
             and waits for you to sign.
           </p>
           <div class="hero-cta" data-hero-fade>
-            <a class="btn btn-wax" href="https://github.com/varunk47/Applyocalypse/releases/latest">
-              Download for Windows
+            <a class="btn btn-wax" href="https://github.com/varunk47/Applyocalypse/releases">
+              Watch for the first release
             </a>
-            <a class="btn btn-ghost" href="#how">Watch it work</a>
+            <a class="btn btn-ghost" href="#how">See how it works</a>
           </div>
+          <p class="hero-status" data-hero-fade>
+            <span class="hero-status-tag">PRE-RELEASE</span>
+            No packaged build is published yet. The source is open and you can build
+            it today. <a href="#get">What shipping looks like</a>.
+          </p>
           <div class="hero-trust" data-hero-fade>
             <span class="dot" aria-hidden="true"></span>
-            FREE · 64-BIT · WINDOWS 10 AND 11 · 0 BYTES LEAVE YOUR MACHINE
+            FREE AND OPEN SOURCE · 64-BIT WINDOWS · NO ACCOUNT · NO SERVER OF OURS
           </div>
         </div>
 
@@ -78,7 +101,7 @@
             <div class="aw-bar">
               <span class="mono-mark">A</span>
               <span class="aw-title">Applyocalypse</span>
-              <span class="aw-vault">LOCAL VAULT · ENCRYPTED</span>
+              <span class="aw-vault">NO ACCOUNT · KEYS IN OS KEYCHAIN</span>
               <span class="aw-dots"><span>&minus;</span><span>&#9633;</span><span>&times;</span></span>
             </div>
             <div class="aw-body">
@@ -199,7 +222,7 @@
               <div>
                 <h3>It tailors your resume.</h3>
                 <p>Your real experience, reworded and re-prioritized to match. In your
-                  own format, always one page. Never invented.</p>
+                  own format, held to one page. Never invented.</p>
               </div>
             </article>
             <article class="how-step" data-step="2">
@@ -275,7 +298,7 @@
                   how teams hold knowledge, it landed. I have spent the last three years...
                 </p>
                 <div class="hv-voice">
-                  <span class="pct">92%</span> measured against your writing sample.
+                  <span class="pct">VOICE &#10003;</span> written against your writing sample.
                 </div>
               </div>
               <p class="hv-note">Sounds like you, or it does not ship.</p>
@@ -302,9 +325,10 @@
             <!-- v5: sign -->
             <div class="how-visual" data-visual="4">
               <div class="hv-tag">READY TO SIGN <span class="live" style="color:var(--wax)">GATE</span></div>
-              <div class="hv-card" style="border:1.5px solid var(--wax);box-shadow:0 3px 10px rgba(160,49,35,.12);position:relative">
+              <div class="hv-card" style="border:1.5px solid var(--wax);box-shadow:0 3px 10px rgba(27,63,216,.12);position:relative">
                 <span data-sign-seal class="stamp" style="position:absolute;top:12px;right:12px;width:42px;height:42px;border:1.6px solid var(--wax);border-radius:50%;color:var(--wax);display:grid;place-items:center;font:italic 400 10px var(--serif);transform:rotate(-8deg)">READY</span>
-                <div class="hv-title">Vercel, Design Engineer</div>
+                <!-- Room for the seal, which is absolutely positioned and so does not push the title aside. -->
+                <div class="hv-title" style="padding-right:44px">Vercel, Design Engineer</div>
                 <div class="hv-meta" style="margin-top:8px">FILLED · VERIFIED · ONE PAGE</div>
                 <div class="act" style="margin-top:16px;font:600 12px var(--sans);color:var(--on-wax);background:var(--wax);border-radius:8px;padding:9px 0;text-align:center;max-width:180px">Final review, then Submit</div>
               </div>
@@ -331,7 +355,7 @@
             <div class="aw-bar">
               <span class="mono-mark">A</span>
               <span class="aw-title">Applyocalypse</span>
-              <span class="aw-vault">LOCAL VAULT · ENCRYPTED · KEYS ON-DEVICE</span>
+              <span class="aw-vault">NO ACCOUNT · KEYS IN OS KEYCHAIN</span>
               <span class="aw-dots"><span>&minus;</span><span>&#9633;</span><span>&times;</span></span>
             </div>
             <div class="aw-body">
@@ -344,7 +368,7 @@
                 <div class="aw-engine">
                   <div class="k">ENGINE</div>
                   <div class="v">Claude Sonnet</div>
-                  <div class="s">2 workers idle · keys on-device</div>
+                  <div class="s">2 of 3 workers idle</div>
                 </div>
               </aside>
               <div class="aw-main">
@@ -393,7 +417,7 @@
                   <span class="pd live"></span>
                 </div>
                 <div class="aw-flightrow">
-                  <span class="k">0 BYTES LEAVE THIS MACHINE</span><span class="rule"></span><span class="k"><span data-count="11">0</span> SUBMITTED THIS WEEK</span>
+                  <span class="k">NO ACCOUNT · NO SERVER</span><span class="rule"></span><span class="k"><span data-count="11">0</span> SIGNED THIS WEEK</span>
                 </div>
               </div>
               <aside class="aw-sign">
@@ -414,13 +438,13 @@
             </div>
           </div>
           <div class="callout" data-depth="24" data-z="80" style="left:1%;top:19%">
-            <span class="callout-dot"></span>0 bytes leave this machine
+            <span class="callout-dot"></span>no account, no server of ours
           </div>
           <div class="callout" data-depth="18" data-z="70" style="right:1%;top:47%">
             <span class="callout-dot live"></span>keys stay on-device
           </div>
           <div class="callout" data-depth="26" data-z="95" style="right:5%;bottom:5%">
-            <span class="callout-seal">A</span>one page, always
+            <span class="callout-seal">A</span>held to one page
           </div>
           </div>
         </div>
@@ -440,29 +464,39 @@
         <div class="privacy-head">
           <div data-reveal>
             <span class="eyebrow">It lives on your computer</span>
-            <h2 class="display">Your whole life story, and it never leaves the building.</h2>
+            <h2 class="display">Your whole life story, and no account to keep it in.</h2>
           </div>
           <p data-reveal>Most application tools ask you to upload everything first.
-            This one is a desktop app. The uploading never happens.</p>
+            This one is a desktop app. There is no sign-up, and no copy of your
+            history sitting on someone else's disk.</p>
         </div>
 
         <div class="privacy-grid">
           <div class="pcard hero-stat" data-reveal>
-            <div class="k">DATA THAT LEAVES YOUR MACHINE</div>
-            <div class="big">0 bytes</div>
-            <p>No servers. No sync. No "anonymous telemetry." The number is zero and
-              it stays zero.</p>
+            <div class="k">SERVERS WE RUN</div>
+            <div class="big">Zero</div>
+            <p>No account, no sync, no "anonymous telemetry." Nothing is uploaded to
+              us, because there is no us to upload to.</p>
           </div>
           <div class="pcard" data-reveal>
-            <h3>Keys on-device</h3>
-            <p>Your API keys are sealed with the OS keychain and handed to the worker
-              through a locked temp file. Never the environment, never a log.</p>
+            <h3>Keys in the OS keychain</h3>
+            <p>Your API keys are encrypted with the operating system keychain before
+              they touch the database. The worker gets them from a temp file that is
+              deleted when the run ends. Never the environment, never a log.</p>
           </div>
           <div class="pcard" data-reveal>
-            <h3>Encrypted at rest</h3>
-            <p>Documents and the local vault sit encrypted on your disk. Deleted the
-              moment you say so, with nothing to delete anywhere else.</p>
+            <h3>Ordinary files you own</h3>
+            <p>Resumes and letters are written as normal documents in a folder you
+              pick, so you can open, edit or delete them without us. Nothing is
+              locked in a format only this app can read.</p>
           </div>
+        </div>
+
+        <div class="privacy-note" data-reveal>
+          <p><b>Where traffic does go.</b> Two places, both of your choosing: the
+            model provider whose key you entered, and the job portal you are applying
+            to. That is the whole list. Being straight with you about it matters more
+            than a rounder number.</p>
         </div>
 
         <div class="privacy-vow" data-reveal>
@@ -470,8 +504,8 @@
           <p><b>And it never fires without your go.</b> The sensitive questions
             (veteran status, disability, anything about a past employer) are always
             flagged for you to answer yourself. No exceptions, no auto-submit, ever.
-            Every action is written to an append-only ledger you own. If it is not in
-            the ledger, it did not happen.</p>
+            Every run appends to a local history you own, so you can see exactly what
+            the machine did and when.</p>
         </div>
       </div>
     </section>
@@ -481,41 +515,42 @@
       <div class="shell">
         <div class="pricing-head" data-reveal>
           <span class="eyebrow">Honest pricing</span>
-          <h2 class="display">You bring the keys. We keep it cheap.</h2>
-          <p>Because the work runs on your machine with your own API key, there is no
-            server bill to pass on to you.</p>
+          <h2 class="display">The app is free. You pay your own model bill.</h2>
+          <p>There is no paid tier, because the work runs on your machine with your own
+            API key. We have no server to bill you for.</p>
         </div>
 
         <div class="pricing-grid">
-          <div class="plan" data-reveal>
-            <div class="tier">PERSONAL</div>
-            <div class="price">Free</div>
-            <p class="blurb">The whole application engine, forever. You pay only your own
-              model provider, by usage.</p>
+          <div class="plan featured" data-reveal>
+            <div class="tier">THE APP</div>
+            <div class="price">Free <small>and open source</small></div>
+            <p class="blurb">The whole application engine. No account, no licence key,
+              nothing held back behind a purchase.</p>
             <ul>
               <li><span class="ck">&#10003;</span> Unlimited tailored applications</li>
-              <li><span class="ck">&#10003;</span> All six portals supported</li>
-              <li><span class="ck">&#10003;</span> Up to 2 concurrent workers</li>
-              <li><span class="ck">&#10003;</span> Local vault, encrypted</li>
+              <li><span class="ck">&#10003;</span> Six tuned ATS portals, plus generic form filling</li>
+              <li><span class="ck">&#10003;</span> Up to 3 applications at once, your choice</li>
+              <li><span class="ck">&#10003;</span> Light and dark themes, both included</li>
+              <li><span class="ck">&#10003;</span> Source you can read and build yourself</li>
             </ul>
-            <a class="btn btn-ghost" href="https://github.com/varunk47/Applyocalypse/releases/latest">Download free</a>
+            <a class="btn btn-wax" href="#get">How to get it</a>
           </div>
 
-          <div class="plan featured" data-reveal>
-            <div class="tier">PATRON SUPPORTER</div>
-            <div class="price">$49 <small>once</small></div>
-            <p class="blurb">Pay one time, keep it forever. Funds the work and unlocks the
-              finer things.</p>
+          <div class="plan" data-reveal>
+            <div class="tier">WHAT IT ACTUALLY COSTS</div>
+            <div class="price">Your keys</div>
+            <p class="blurb">Applyocalypse calls the model provider you choose, on your
+              account, at their usage rates. That bill goes to you, not through us.</p>
             <ul>
-              <li><span class="ck">&#10003;</span> Everything in Personal</li>
-              <li><span class="ck">&#10003;</span> 3 concurrent workers</li>
-              <li><span class="ck">&#10003;</span> Lamplight dark theme and accents</li>
-              <li><span class="ck">&#10003;</span> Priority updates, no subscription</li>
+              <li><span class="ck">&#10003;</span> Bring Anthropic, OpenAI or another provider</li>
+              <li><span class="ck">&#10003;</span> A strong model for tailoring, a fast one for triage</li>
+              <li><span class="ck">&#10003;</span> Swap or revoke the key whenever you like</li>
+              <li><span class="ck">&#10003;</span> No markup, because the call never touches us</li>
             </ul>
-            <a class="btn btn-wax" href="https://github.com/varunk47/Applyocalypse/releases/latest">Get Applyocalypse</a>
+            <a class="btn btn-ghost" href="#faq">Read the details</a>
           </div>
         </div>
-        <p class="pricing-foot">NO ACCOUNT · NO SUBSCRIPTION · NO CARD TO START</p>
+        <p class="pricing-foot">NO ACCOUNT · NO SUBSCRIPTION · NO CARD, EVER</p>
       </div>
     </section>
 
@@ -528,11 +563,13 @@
 
       <details class="faq-item" data-reveal>
         <summary>Is it really all local?<span class="plus" aria-hidden="true"></span></summary>
-        <div class="faq-answer"><p>Yes. Applyocalypse is a desktop app that runs entirely
-          on your computer. Your resumes, cover letters, personal details and API keys
-          live in an encrypted local vault. The only outbound traffic is the model calls
-          you make with your own key, straight to your chosen provider, plus the
-          application portals themselves.</p></div>
+        <div class="faq-answer"><p>The app, your files and your history are local. There
+          is no account and no server of ours. To be precise about the parts that are
+          not: your API keys are encrypted with the OS keychain, but your resumes and
+          letters are saved as ordinary documents on your disk, not inside an encrypted
+          container. And two kinds of traffic do go out, both to places you pick: the
+          model calls you make with your own key, straight to your chosen provider, and
+          the application portals themselves.</p></div>
       </details>
 
       <details class="faq-item" data-reveal>

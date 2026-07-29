@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 from .adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult, screenshot_payload
 from .field_detection import (
@@ -18,13 +19,22 @@ from .field_detection import (
     parse_click_by_text_result,
     parse_final_submit_result,
 )
+from .field_write import verify_or_repair_text_write
 from .page_readiness import (
     PAGE_TEXT_POLL_INTERVAL_S,
     PAGE_TEXT_TIMEOUT_S,
+    POST_CLICK_POLL_INTERVAL_S,
+    POST_CLICK_TIMEOUT_S,
+    POST_CLICK_UNCHANGED_GRACE_S,
+    wait_for_page_change,
     wait_for_page_text,
 )
 
 PAGE_TEXT_LENGTH_PROBE_FUNCTION = "() => (((document.body && document.body.innerText) || '').trim().length)"
+PAGE_FINGERPRINT_PROBE_FUNCTION = (
+    "() => (location.href + '|' + (document.title || '') + '|'"
+    " + String(((document.body && document.body.innerText) || '').trim().length))"
+)
 
 
 
@@ -183,9 +193,17 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "field value fill failed", {"field_id": field.field_id, "error": str(exc)})
         return BrowserStepResult(True, "field value applied", {"field_id": field.field_id})
 
+    async def _evaluate(self, script: str) -> Any:
+        if self._page is None:
+            raise RuntimeError("browser page is not available")
+        return await self._page.evaluate(script)
+
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
         if field.field_type not in {"select", "checkbox", "radio"}:
-            return await self.fill_field(field, value)
+            filled = await self.fill_field(field, value)
+            if not filled.ok:
+                return filled
+            return await verify_or_repair_text_write(self._evaluate, field, value, fill_payload=filled.payload)
         if self._page is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
         try:
@@ -194,25 +212,50 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "field value application failed", {"field_id": field.field_id, "error": str(exc)})
         return parse_apply_field_result(raw_result, field)
 
+    async def _probe_page_fingerprint(self) -> str:
+        if self._page is None:
+            return ""
+        try:
+            return str(await self._page.evaluate(PAGE_FINGERPRINT_PROBE_FUNCTION) or "")
+        except Exception:
+            return ""
+
+    async def _settle_after_click(self, baseline: str) -> dict[str, object]:
+        return await wait_for_page_change(
+            self._probe_page_fingerprint,
+            baseline=baseline,
+            timeout_s=POST_CLICK_TIMEOUT_S,
+            poll_interval_s=POST_CLICK_POLL_INTERVAL_S,
+            unchanged_grace_s=POST_CLICK_UNCHANGED_GRACE_S,
+        )
+
     async def click_by_text(self, labels: list[str]) -> BrowserStepResult:
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
+        baseline = await self._probe_page_fingerprint()
         try:
             raw_result = await self._page.evaluate(build_click_by_text_script(labels))
-            await self._page.wait_for_timeout(1500)
         except Exception as exc:
             return BrowserStepResult(False, "portal action click failed", {"error": str(exc)})
-        return parse_click_by_text_result(raw_result)
+        result = parse_click_by_text_result(raw_result)
+        if not result.ok:
+            return result
+        settle = await self._settle_after_click(baseline)
+        return BrowserStepResult(result.ok, result.message, {**result.payload, "page_settle": settle})
 
     async def click_final_submit(self, labels: list[str]) -> BrowserStepResult:
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
+        baseline = await self._probe_page_fingerprint()
         try:
             raw_result = await self._page.evaluate(build_final_submit_script(labels))
-            await self._page.wait_for_timeout(2000)
         except Exception as exc:
             return BrowserStepResult(False, "final submit click failed", {"error": str(exc)})
-        return parse_final_submit_result(raw_result)
+        result = parse_final_submit_result(raw_result)
+        if not result.ok:
+            return result
+        settle = await self._settle_after_click(baseline)
+        return BrowserStepResult(result.ok, result.message, {**result.payload, "page_settle": settle})
 
     async def upload_file(self, field: BrowserField, path: Path) -> BrowserStepResult:
         if not path.exists():

@@ -29,10 +29,39 @@ SECTION_ALIASES = {
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
 PHONE_RE = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d)")
 URL_RE = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
-LIST_PREFIX_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+[.)])\s+")
+BULLET_CHARS = "\u2022\u2023\u25aa\u25cf\u25e6\u00b7\u2043\u25a0\uf0a7\uf0b7"
+BULLET_SPLIT_RE = re.compile(f"[{re.escape(BULLET_CHARS)}]")
+LIST_PREFIX_RE = re.compile(rf"^\s*(?:[-*{re.escape(BULLET_CHARS)}]\s*|\d+[.)]\s+)")
 SKILL_SPLIT_RE = re.compile(r"[,|;/]")
 APPLYO_PLACEHOLDER_RE = re.compile(r"\{\{APPLYO_[A-Z0-9_]+\}\}")
 SHORT_HEADING_MAX_CHARS = 120
+
+# Word packs several visual lines into a single paragraph using soft breaks and
+# inline bullet glyphs, and uses tab runs as column gutters. Resumes carry the
+# company / date / location triple in those columns, so the layout has to be
+# recovered before any section or heading logic can see what a human sees.
+COLUMN_SEPARATOR = " | "
+SOFT_BREAK_RE = re.compile(r"[\r\n\v\f]+")
+TAB_RUN_RE = re.compile(r"\t+")
+COLUMN_RUN_RE = re.compile(r"(?:\s*\|\s*)+")
+
+_MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
+_DATE_TOKEN = rf"(?:{_MONTH}\s+\d{{4}}|{_MONTH}\s*'\d{{2}}|\d{{1,2}}/\d{{4}}|\d{{4}})"
+_OPEN_ENDED = r"(?:Present|Current|Ongoing|Now)"
+_DASH = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212~"
+DATE_RANGE_RE = re.compile(
+    rf"(?P<start>{_DATE_TOKEN})\s*(?:[{_DASH}]|to|through|until)\s*(?P<end>{_DATE_TOKEN}|{_OPEN_ENDED})",
+    re.IGNORECASE,
+)
+DATE_ONLY_RE = re.compile(rf"(?:{_DATE_TOKEN}|{_OPEN_ENDED})", re.IGNORECASE)
+LOCATION_RE = re.compile(r"[A-Z][\w.'-]*(?:[ .][A-Z][\w.'-]*)*,\s*(?:[A-Z]{2}|[A-Z][a-z]+(?: [A-Z][a-z]+)?)")
+DEGREE_RE = re.compile(
+    r"\b(?:bachelors?|masters?|associates?|doctorate|doctoral|ph\.?\s?d|b\.?\s?s\.?|b\.?\s?a\.?"
+    r"|m\.?\s?s\.?|m\.?\s?a\.?|b\.?\s?tech|m\.?\s?tech|b\.?\s?e\.?|m\.?\s?eng|mba|diploma)\b",
+    re.IGNORECASE,
+)
+HEADING_DATE_REMAINDER_MAX_WORDS = 6
+CERT_YEAR_RE = re.compile(r"\(\s*(?P<year>(?:19|20)\d{2})\s*\)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,64 +134,153 @@ def _normalize_line(value: str) -> str:
     return re.sub(r"\s+", " ", value.strip())
 
 
+def _tidy_columns(value: str) -> str:
+    collapsed = COLUMN_RUN_RE.sub(COLUMN_SEPARATOR, value)
+    return _normalize_line(collapsed).strip("|").strip()
+
+
+def _expand_layout_lines(value: str) -> list[str]:
+    """Recover the visual lines packed into one paragraph or table cell."""
+    lines: list[str] = []
+    for soft_line in SOFT_BREAK_RE.split(value):
+        for chunk in BULLET_SPLIT_RE.split(soft_line):
+            line = _tidy_columns(TAB_RUN_RE.sub(COLUMN_SEPARATOR, chunk))
+            if line:
+                lines.append(line)
+    return lines
+
+
+def _layout_lines(text: str) -> list[str]:
+    lines: list[str] = []
+    for raw in text.splitlines():
+        lines.extend(_expand_layout_lines(raw))
+    return lines
+
+
+def _run_segments(paragraph: Any) -> list[tuple[str, bool]]:
+    """(text, italic) per run, including runs nested inside hyperlink elements.
+
+    Word writes hyperlinks as a `w:hyperlink` wrapper whose inner `w:r` holds the
+    visible text. python-docx reads only direct `w:r` children, so certification
+    names and linked project titles vanish from `Paragraph.text`.
+    """
+    from docx.oxml.ns import qn  # type: ignore
+
+    segments: list[tuple[str, bool]] = []
+    for run in paragraph._p.iter(qn("w:r")):  # noqa: SLF001
+        text = ""
+        for node in run:
+            if node.tag == qn("w:t"):
+                text += node.text or ""
+            elif node.tag == qn("w:tab"):
+                text += "\t"
+            elif node.tag in {qn("w:br"), qn("w:cr")}:
+                text += "\n"
+        if not text:
+            continue  # wrapper run: its hyperlink child carries the text
+        run_properties = run.find(qn("w:rPr"))
+        italic_node = None if run_properties is None else run_properties.find(qn("w:i"))
+        italic = italic_node is not None and italic_node.get(qn("w:val")) not in {"0", "false"}
+        segments.append((text, italic))
+    return segments
+
+
+def _paragraph_layout_text(paragraph: Any) -> str:
+    segments = _run_segments(paragraph)
+    text = "".join(segment for segment, _ in segments)
+    if "\t" in text or len(text) > SHORT_HEADING_MAX_CHARS:
+        return text
+
+    # Resume templates mark the role in italics where another template would use
+    # a tab stop, so treat the switch into italics as a column gutter.
+    parts: list[str] = []
+    previous_italic = False
+    for index, (segment, italic) in enumerate(segments):
+        if italic and not previous_italic and index > 0 and "".join(parts).strip():
+            parts.append("\t")
+        previous_italic = italic
+        parts.append(segment)
+    return "".join(parts)
+
+
+def _cell_layout_lines(cell: Any) -> list[str]:
+    lines: list[str] = []
+    for paragraph in cell.paragraphs:
+        lines.extend(_expand_layout_lines(_paragraph_layout_text(paragraph)))
+    for nested in cell.tables:
+        lines.extend(_table_layout_lines(nested))
+    return lines
+
+
+def _table_layout_lines(table: Any) -> list[str]:
+    """Two-column resume tables read row by row, pairing each cell's Nth line."""
+    lines: list[str] = []
+    for row in table.rows:
+        columns: list[list[str]] = []
+        seen: set[Any] = set()
+        for cell in row.cells:
+            if cell._tc in seen:  # noqa: SLF001 - merged cells repeat in row.cells
+                continue
+            seen.add(cell._tc)  # noqa: SLF001
+            columns.append(_cell_layout_lines(cell))
+        depth = max((len(column) for column in columns), default=0)
+        for offset in range(depth):
+            parts = [column[offset] for column in columns if offset < len(column)]
+            line = _tidy_columns(COLUMN_SEPARATOR.join(parts))
+            if line:
+                lines.append(line)
+    return lines
+
+
 def _plain_text_from_docx(path: Path) -> tuple[str, dict[str, Any]]:
     try:
         from docx import Document  # type: ignore
+        from docx.oxml.ns import qn  # type: ignore
+        from docx.table import Table  # type: ignore
+        from docx.text.paragraph import Paragraph  # type: ignore
     except ImportError as exc:
         raise RuntimeError("python-docx is required for DOCX parsing") from exc
 
     document = Document(str(path))
     paragraphs: list[dict[str, Any]] = []
     text_lines: list[str] = []
-    for index, paragraph in enumerate(document.paragraphs):
-        text = _normalize_line(paragraph.text)
-        if not text:
-            continue
-        style = paragraph.style.name if paragraph.style is not None else ""
-        is_bullet = paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None  # noqa: SLF001
-        paragraphs.append(
-            {
-                "index": index,
-                "style": style,
-                "isBullet": is_bullet,
-                "runCount": len(paragraph.runs),
-                "textPreview": text[:160],
-            }
-        )
-        text_lines.append(text)
+    paragraph_index = 0
+    table_index = 0
 
-    for table_index, table in enumerate(document.tables):
-        for row_index, row in enumerate(table.rows):
-            cell_lines: list[str] = []
-            for cell_index, cell in enumerate(row.cells):
-                for paragraph_index, paragraph in enumerate(cell.paragraphs):
-                    text = _normalize_line(paragraph.text)
-                    if not text:
-                        continue
-                    cell_lines.append(text)
-                    style = paragraph.style.name if paragraph.style is not None else ""
-                    paragraphs.append(
-                        {
-                            "index": f"table:{table_index}:{row_index}:{cell_index}:{paragraph_index}",
-                            "style": style or "table-cell",
-                            "isBullet": paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None,  # noqa: SLF001
-                            "runCount": len(paragraph.runs),
-                            "textPreview": text[:160],
-                        }
-                    )
-                    text_lines.append(text)
-            row_line = " | ".join(cell_lines)
-            if len(cell_lines) > 1 and not any(_canonical_section_label(cell_line) for cell_line in cell_lines):
+    # Body order matters: python-docx exposes paragraphs and tables as separate
+    # collections, and flattening them that way moves every table to the end of
+    # the document, so section attribution lands on the wrong heading.
+    for child in document.element.body.iterchildren():
+        if child.tag == qn("w:p"):
+            paragraph = Paragraph(child, document)
+            expanded = _expand_layout_lines(_paragraph_layout_text(paragraph))
+            if expanded:
+                style = paragraph.style.name if paragraph.style is not None else ""
+                is_bullet = paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None  # noqa: SLF001
                 paragraphs.append(
                     {
-                        "index": f"table:{table_index}:{row_index}",
+                        "index": paragraph_index,
+                        "style": style,
+                        "isBullet": is_bullet,
+                        "runCount": len(paragraph.runs),
+                        "textPreview": expanded[0][:160],
+                    }
+                )
+                text_lines.extend(expanded)
+            paragraph_index += 1
+        elif child.tag == qn("w:tbl"):
+            for row_offset, line in enumerate(_table_layout_lines(Table(child, document))):
+                paragraphs.append(
+                    {
+                        "index": f"table:{table_index}:{row_offset}",
                         "style": "table-row",
                         "isBullet": False,
                         "runCount": 0,
-                        "textPreview": row_line[:160],
+                        "textPreview": line[:160],
                     }
                 )
-                text_lines.append(row_line)
+                text_lines.append(line)
+            table_index += 1
 
     return "\n".join(text_lines), {"paragraphs": paragraphs, "tableCount": len(document.tables)}
 
@@ -191,15 +309,17 @@ def _detect_applyo_placeholders(source: str) -> list[str]:
 
 
 def _canonical_section_label(line: str) -> tuple[str, float] | None:
-    cleaned = _normalize_line(line).strip(":").lower()
-    cleaned = re.sub(r"[^a-z0-9 &/+-]", "", cleaned)
+    raw = _normalize_line(line).strip(":")
+    cleaned = re.sub(r"[^a-z0-9 &/+-]", "", raw.lower())
     if len(cleaned) > 42:
         return None
     for canonical, aliases in SECTION_ALIASES.items():
         if cleaned in aliases:
             return canonical, 0.86
-    if cleaned.isupper() and 2 <= len(cleaned) <= 32:
-        return cleaned.lower(), 0.58
+    # Test the pre-lowercased text: an ALL-CAPS heading marks a section boundary
+    # even when it is not a known alias (e.g. AWARDS, PUBLICATIONS, LANGUAGES).
+    if raw.isupper() and 2 <= len(raw) <= 32 and cleaned:
+        return cleaned, 0.58
     return None
 
 
@@ -304,18 +424,102 @@ def _is_probable_heading(value: str) -> bool:
     return True
 
 
-def _experience_heading(item: str) -> tuple[str, str] | None:
+def _split_columns(item: str) -> list[str]:
+    return [segment for segment in (part.strip() for part in item.split("|")) if segment]
+
+
+def _heading_fields(
+    *,
+    company: str | None,
+    title: str | None,
+    location: str | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> dict[str, Any]:
+    return {
+        "company": company,
+        "title": title,
+        "location": location,
+        "startDate": start_date,
+        "endDate": end_date,
+    }
+
+
+def _date_range(segment: str) -> tuple[str, str, str] | None:
+    """Pull a date range out of one column, returning the leftover column text."""
+    match = DATE_RANGE_RE.search(segment)
+    if match is None:
+        return None
+    remainder = _normalize_line(f"{segment[: match.start()]} {segment[match.end() :]}")
+    if len(remainder.split()) > HEADING_DATE_REMAINDER_MAX_WORDS:
+        return None  # prose that merely mentions dates, not an entry heading
+    return _normalize_line(match.group("start")), _normalize_line(match.group("end")), remainder
+
+
+def _dated_heading(item: str) -> dict[str, Any] | None:
+    """A resume row carrying a date range is an entry heading; the other columns
+    are the company, title and location in whatever order the template used."""
+    dates: tuple[str, str] | None = None
+    columns: list[str] = []
+    for segment in _split_columns(item):
+        parsed = _date_range(segment) if dates is None else None
+        if parsed is None:
+            columns.append(segment)
+            continue
+        start, end, remainder = parsed
+        dates = (start, end)
+        if remainder:
+            columns.append(remainder)
+    if dates is None:
+        return None
+    location = next((segment for segment in columns[1:] if LOCATION_RE.fullmatch(segment)), None)
+    named = [segment for segment in columns if segment != location]
+    return _heading_fields(
+        company=named[0] if named else None,
+        title=named[1] if len(named) > 1 else None,
+        location=location,
+        start_date=dates[0],
+        end_date=dates[1],
+    )
+
+
+def _entry_detail_only(item: str) -> dict[str, str] | None:
+    """A row carrying only a location or only dates continues the entry above it."""
+    fields: dict[str, str] = {}
+    for segment in _split_columns(item):
+        parsed = _date_range(segment)
+        if parsed is not None:
+            start, end, remainder = parsed
+            if remainder or "startDate" in fields:
+                return None
+            fields["startDate"], fields["endDate"] = start, end
+        elif DATE_ONLY_RE.fullmatch(segment):
+            fields.setdefault("endDate", segment)
+        elif LOCATION_RE.fullmatch(segment):
+            fields.setdefault("location", segment)
+        else:
+            return None
+    return fields or None
+
+
+def _experience_heading(item: str) -> dict[str, Any] | None:
     if not _is_probable_heading(item):
         return None
+    dated = _dated_heading(item)
+    if dated and dated["company"]:
+        return dated
     at_match = re.match(r"^(?P<title>.+?)\s+(?:at|@)\s+(?P<company>.+)$", item, flags=re.IGNORECASE)
     if at_match:
-        return _normalize_line(at_match.group("company")), _normalize_line(at_match.group("title"))
+        return _heading_fields(
+            company=_normalize_line(at_match.group("company")),
+            title=_normalize_line(at_match.group("title")),
+        )
 
     split = _split_once(item, [" | ", " - "])
     if split:
         left, right = split
         if len(left.split()) <= 8 and len(right.split()) <= 10:
-            return right, left
+            return _heading_fields(company=right, title=left)
     return None
 
 
@@ -327,20 +531,21 @@ def _experience_from_section(section: ParsedSection) -> list[dict[str, Any]]:
         if heading:
             if current:
                 entries.append(current)
-            company, title = heading
             current = {
-                "company": company,
-                "title": title,
-                "location": None,
-                "startDate": None,
-                "endDate": None,
+                **heading,
                 "bullets": [],
                 "tools": [],
                 "confidence": min(section.confidence, 0.82),
             }
             continue
-        if current and item:
-            current["bullets"].append(item)
+        if not current or not item:
+            continue
+        detail = _entry_detail_only(item)
+        if detail:
+            for key, value in detail.items():
+                current[key] = current[key] or value
+            continue
+        current["bullets"].append(item)
     if current:
         entries.append(current)
     return entries
@@ -373,30 +578,104 @@ def _project_from_items(section: ParsedSection) -> list[dict[str, Any]]:
     return projects
 
 
+def _split_institution_and_degree(value: str) -> tuple[str, str | None]:
+    """Templates often run the institution and the degree together on one line."""
+    match = DEGREE_RE.search(value)
+    if match is None or match.start() == 0:
+        return value, None
+    institution = _normalize_line(value[: match.start()]).strip("|,-").strip()
+    degree = _normalize_line(value[match.start() :])
+    if not institution or not degree:
+        return value, None
+    return institution, degree
+
+
+def _education_columns(item: str) -> tuple[list[str], str | None, str | None, str | None]:
+    """Classify one education row into named columns, dates and a location."""
+    named: list[str] = []
+    start_date: str | None = None
+    end_date: str | None = None
+    location: str | None = None
+    for segment in _split_columns(item):
+        parsed = _date_range(segment) if end_date is None else None
+        if parsed is not None:
+            start_date, end_date, remainder = parsed
+            if remainder:
+                named.append(remainder)
+        elif DATE_ONLY_RE.fullmatch(segment):
+            end_date = end_date or segment
+        elif location is None and LOCATION_RE.fullmatch(segment):
+            location = segment
+        else:
+            named.append(segment)
+    return named, start_date, end_date, location
+
+
 def _education_from_section(section: ParsedSection) -> list[dict[str, Any]]:
     education: list[dict[str, Any]] = []
     for item in section.items:
         if not _is_probable_heading(item):
             continue
-        split = _split_once(item, [" | ", " - ", ", "])
-        institution = split[0] if split else item
-        degree = split[1] if split else None
+        named, start_date, end_date, location = _education_columns(item)
+        details = [location] if location else []
+
+        previous = education[-1] if education else None
+        # A row with no institution, or a degree-only row, continues the entry
+        # above it: two-column templates split one school across two lines.
+        continues = previous is not None and (
+            not named or (previous["degree"] is None and DEGREE_RE.match(named[0]) is not None)
+        )
+        if continues and previous is not None:
+            if named:
+                previous["degree"] = named[0]
+                details.extend(named[1:])
+            previous["startDate"] = previous["startDate"] or start_date
+            previous["endDate"] = previous["endDate"] or end_date
+            previous["details"].extend(details)
+            continue
+        if not named:
+            continue
+
+        institution, degree = _split_institution_and_degree(named[0])
+        if degree is None and len(named) > 1:
+            degree = named[1]
+            details.extend(named[2:])
+        else:
+            details.extend(named[1:])
         education.append(
             {
                 "institution": institution,
                 "degree": degree,
                 "field": None,
-                "startDate": None,
-                "endDate": None,
-                "details": [] if split else [item],
+                "startDate": start_date,
+                "endDate": end_date,
+                "details": details,
                 "confidence": min(section.confidence, 0.8),
             }
         )
     return education
 
 
+def _certification_from_item(item: str, confidence: float) -> dict[str, Any]:
+    """Split a certification line into its name and the year it was issued.
+
+    Resume templates commonly append "(2025)" plus a skill list to the
+    certification name; keeping that tail would store it as part of the name.
+    """
+    match = CERT_YEAR_RE.search(item)
+    name = _normalize_line(item[: match.start()]).rstrip(",;:-") if match else item
+    return {
+        "name": name.strip() or item,
+        "issuer": None,
+        "issuedAt": match.group("year") if match else None,
+        "expiresAt": None,
+        "credentialUrl": None,
+        "confidence": confidence,
+    }
+
+
 def _canonical_from_sections(*, source_format: str, document_kind: str, text: str, sections: list[ParsedSection]) -> dict[str, Any]:
-    lines = [_normalize_line(line) for line in text.splitlines() if _normalize_line(line)]
+    lines = _layout_lines(text)
     skill_groups = []
     for section in sections:
         if section.normalized_label == "skills":
@@ -423,14 +702,7 @@ def _canonical_from_sections(*, source_format: str, document_kind: str, text: st
         for entry in _project_from_items(section)
     ]
     certifications = [
-        {
-            "name": item,
-            "issuer": None,
-            "issuedAt": None,
-            "expiresAt": None,
-            "credentialUrl": None,
-            "confidence": min(section.confidence, 0.78),
-        }
+        _certification_from_item(item, min(section.confidence, 0.78))
         for section in sections
         if section.normalized_label == "certifications"
         for item in section.items
@@ -454,7 +726,7 @@ def _canonical_from_sections(*, source_format: str, document_kind: str, text: st
 def parse_document(path: Path, *, document_kind: str = "OTHER") -> ParsedDocumentResult:
     source_format = _source_format(path)
     text, style_map, warnings = _plain_text(path)
-    lines = [_normalize_line(line) for line in text.splitlines() if _normalize_line(line)]
+    lines = _layout_lines(text)
     sections = _extract_sections(lines)
     anchor_map: dict[str, Any] = {}
 

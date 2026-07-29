@@ -2,6 +2,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const rootDir = resolve(import.meta.dirname, "../..");
 const defaultExe =
@@ -64,10 +65,11 @@ const runPhase = (phase) =>
     });
 
     let output = "";
+    const budgetMs = smokeBudgetMs();
     const timeout = setTimeout(() => {
       child.kill();
-      rejectPromise(new Error(output || `full-e2e-smoke:${phase}:timeout`));
-    }, 45_000);
+      rejectPromise(new Error(timeoutMessage(`full-e2e-smoke:${phase}`, budgetMs, output)));
+    }, budgetMs);
 
     const onData = (chunk) => {
       output += chunk.toString("utf8");

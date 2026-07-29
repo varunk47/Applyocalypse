@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "../..");
@@ -80,10 +81,11 @@ const child = spawn(
 
 let stdout = "";
 let stderr = "";
+const budgetMs = smokeBudgetMs();
 const timeout = setTimeout(() => {
   child.kill();
-  finish(1, "worker-smoke:timeout");
-}, 45_000);
+  finish(1, timeoutMessage("worker-smoke", budgetMs, `${stdout}${stderr}`));
+}, budgetMs);
 
 child.stdout.on("data", (chunk) => {
   stdout += chunk.toString("utf8");

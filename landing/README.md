@@ -1,7 +1,9 @@
 # Applyocalypse landing page
 
-A self-contained static marketing page in the app's Dossier design language
-(paper and ink, sealing-wax accent). No build step, no framework, no CDN. The
+A self-contained static marketing page on the app's palette: cool slate
+surfaces, near-black ink, and a single electric-blue accent. (The accent
+variables are still named `--wax` from the earlier sealing-wax skin; only the
+values changed.) No build step, no framework, no CDN. The
 animation stack (GSAP, ScrollTrigger, Lenis) and every font are served from
 `assets/`, so it works offline and leaks nothing.
 
@@ -23,7 +25,7 @@ Netlify, S3). There is nothing to compile.
 ## Files
 
 - `index.html`: the page, semantic and accessible (skip link, aria, native `details` FAQ).
-- `styles.css`: the full Dossier system: tokens, components, responsive, reduced-motion.
+- `styles.css`: the full token system: palette, components, responsive, reduced-motion.
 - `main.js`: the full choreography (Lenis smooth scroll, hero masked-rise intro, scroll de-tilt, word-fill, scrolly steps, 3D showcase, count-ups, animated FAQ). Falls back to a fully static, readable page under `prefers-reduced-motion`.
 - `assets/fonts/`: Instrument Serif, Hanken Grotesk, JetBrains Mono (OFL, self-hosted).
 - `assets/vendor/`: GSAP 3.12.5, ScrollTrigger, Lenis 1.1.14 (self-hosted, no CDN).
