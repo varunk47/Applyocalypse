@@ -52,6 +52,9 @@ SAFE_STEP_PROGRESSION_LABELS = COMMON_STEP_PROGRESSION_LABELS
 
 MAX_AUTOMATED_PORTAL_STEPS = 20
 MAX_BLOCKED_PROGRESSION_ATTEMPTS = 3
+# Server-side resume parsing (Workday, iCIMS) repopulates the form well after
+# the upload request returns, so the wait after an upload is generous.
+RESUME_PARSE_SETTLE_S = 15.0
 
 SUBMISSION_CONFIRMATION_PATTERNS = (
     "application submitted",
@@ -1842,6 +1845,11 @@ async def run_browser_apply_after_review(
     upload_attempt = 0
     progression_step_index = 0
     blocked_progression_attempts = 0
+    uploads_settled = False
+    # (generated file id, selector) pairs already uploaded. Re-reading the page after the
+    # portal parses the resume would otherwise attach the same file a second time, and
+    # Workday's attachment list appends rather than replaces.
+    uploaded_document_targets: set[tuple[str, str]] = set()
     # Track which required-but-unanswered fields the user has already been shown, so we
     # present them ONCE. If a resume surfaces no NEW missing field, we stop re-pausing and
     # try to advance the wizard instead; the user fills any leftover blanks in the visible
@@ -1872,7 +1880,24 @@ async def run_browser_apply_after_review(
                 generated_files = [*(generated_files if isinstance(generated_files, list) else []), lazy_cl]
         missing_required_documents: list[dict[str, object]] = []
         missing_required_answers: list[dict[str, object]] = []
-        for field in fields:
+
+        # Uploads run first, and once, before anything is typed. Workday and
+        # several other portals parse the resume server-side and repopulate
+        # name, email and experience seconds after the file lands, silently
+        # overwriting whatever was written in the same pass. So upload, wait for
+        # the form to react, and restart the pass against a freshly read form.
+        upload_fields = [field for field in fields if field.field_type == "file"]
+        value_fields = [field for field in fields if field.field_type != "file"]
+        before_uploads = await capture_portal_page_fingerprint(adapter) if upload_fields and not uploads_settled else None
+        restart_after_uploads = False
+
+        for index, field in enumerate(upload_fields + value_fields):
+            if index == len(upload_fields) and before_uploads is not None:
+                uploads_settled = True
+                await wait_for_portal_page_change(adapter, before_uploads, timeout_s=RESUME_PARSE_SETTLE_S)
+                restart_after_uploads = True
+                upload_attempt += 1
+                break
             if await handle_runtime_control(work_dir, run_id, context=f"field application: {field.label}"):
                 await adapter.close()
                 return
@@ -1913,9 +1938,19 @@ async def run_browser_apply_after_review(
                     ).emit()
                     continue
 
+                upload_target = (
+                    str(generated_file_value(generated_file, "id") or ""),
+                    field.selector or field.field_id,
+                )
+                # Only skip when the field still reports the file we put there. If the
+                # portal dropped it during a re-render, uploading again is the fix.
+                if upload_target in uploaded_document_targets and field_file_count(field) > 0:
+                    continue
+
                 local_path = Path(str(generated_file_value(generated_file, "local_path")))
                 result = await adapter.upload_file(field, local_path)
                 if result.ok:
+                    uploaded_document_targets.add(upload_target)
                     WorkerEvent(
                         event_type=EventType.FILE_UPLOADED,
                         run_id=run_id,
@@ -1994,6 +2029,9 @@ async def run_browser_apply_after_review(
                     ui_state={"requires_user_review": True, "current_step": "field_review"},
                     payload={"field_label": field.label, "field_type": field.field_type, **result.payload},
                 ).emit()
+
+        if restart_after_uploads:
+            continue
 
         current_missing_answer_keys = {
             str(missing.get("selector") or missing.get("field_label") or "") for missing in missing_required_answers
