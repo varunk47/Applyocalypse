@@ -15,7 +15,9 @@ from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, Brows
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.portal_adapters import (
     COMMON_STEP_PROGRESSION_LABELS,
+    PortalRuntimePolicy,
     final_submit_labels_for_workflow,
+    portal_runtime_policy_for_workflow,
     progression_labels_for_workflow,
 )
 from .browser.portal_state import PortalPageState, classify_portal_page_state
@@ -24,7 +26,10 @@ from .control import WorkerControl, read_worker_control
 from .document_stage import _lazy_generate_cover_letter_for_portal, generate_application_documents
 from .event_protocol import EventType, Severity, WorkerEvent, fail_process, utc_now
 from .field_resolution import (
+    MATCH_OUTCOME_AMBIGUOUS,
+    MATCH_OUTCOME_MATCHED,
     is_otp_field,
+    match_approved_answer,
     normalize_field_label,
     proposed_answer_for_browser_field,
     resolve_secret_reviewed_value,
@@ -50,7 +55,6 @@ FINAL_SUBMIT_LABELS = (
 
 SAFE_STEP_PROGRESSION_LABELS = COMMON_STEP_PROGRESSION_LABELS
 
-MAX_AUTOMATED_PORTAL_STEPS = 20
 MAX_BLOCKED_PROGRESSION_ATTEMPTS = 3
 # Server-side resume parsing (Workday, iCIMS) repopulates the form well after
 # the upload request returns, so the wait after an upload is generous.
@@ -192,6 +196,69 @@ def wait_for_document_approval(work_dir: Path, run_id: str, *, poll_seconds: flo
             ui_state={"requires_user_review": True, "current_step": "document_review"},
             payload={"expected_approval_type": "DOCUMENT_APPROVAL"},
         ).emit()
+
+
+@dataclass(frozen=True, slots=True)
+class FinalSubmitGate:
+    """What the run decided at the last gate before a click that cannot be undone."""
+
+    auto_submit_enabled: bool
+    review_text_detected: bool | None
+    withdrawn: bool
+    message: str
+
+
+def evaluate_final_submit_gate(
+    *,
+    policy: PortalRuntimePolicy,
+    auto_submit_enabled: bool,
+    visible_text: str | None,
+) -> FinalSubmitGate:
+    """Decide whether a standing auto-submit preapproval applies to THIS page.
+
+    Portals whose plan declares a review step (Workday, iCIMS) always show a
+    summary page before the submit button. The plan listed that as evidence and
+    nothing ever checked it. A page with no review text is probably not the
+    submit page, so the preapproval does not apply to it and a person looks
+    first. ``visible_text`` is None when the page could not be read, which is
+    not evidence that the review screen is there.
+    """
+    if not policy.review_evidence_required:
+        return FinalSubmitGate(
+            auto_submit_enabled=auto_submit_enabled,
+            review_text_detected=None,
+            withdrawn=False,
+            message=(
+                "Final submission is preapproved by the explicit auto-submit setting"
+                if auto_submit_enabled
+                else "Final submission is gated until explicit approval"
+            ),
+        )
+
+    detected = policy.review_signal_observed(visible_text or "")
+    if detected:
+        return FinalSubmitGate(
+            auto_submit_enabled=auto_submit_enabled,
+            review_text_detected=True,
+            withdrawn=False,
+            message=(
+                "Final submission is preapproved by the explicit auto-submit setting"
+                if auto_submit_enabled
+                else "Final submission is gated until explicit approval"
+            ),
+        )
+
+    return FinalSubmitGate(
+        auto_submit_enabled=False,
+        review_text_detected=False,
+        withdrawn=auto_submit_enabled,
+        message=(
+            f"Final submission needs approval: {policy.portal_id} always shows a review page "
+            "and this one was not detected"
+            if auto_submit_enabled
+            else "Final submission is gated until explicit approval"
+        ),
+    )
 
 
 def final_submit_labels_for(workflow: PortalWorkflow | None) -> list[str]:
@@ -907,32 +974,6 @@ async def pause_for_portal_state_review(
     if blockers:
         return await pause_for_blockers(adapter, work_dir, run_id, blockers, context=f"{context} after portal state review")
     return False
-
-
-def approved_value_for_field(field: BrowserField, approved_answers: object) -> str | None:
-    if not isinstance(approved_answers, list):
-        return None
-    field_label = normalize_field_label(field.label)
-    type_fallback_values: list[str] = []
-    for answer in approved_answers:
-        if not isinstance(answer, dict):
-            continue
-        value = answer.get("value")
-        if not isinstance(value, str) or not value.strip():
-            continue
-        answer_label = normalize_field_label(str(answer.get("fieldLabel") or ""))
-        answer_type = normalize_field_label(str(answer.get("fieldType") or ""))
-        if not answer_label:
-            continue
-        if field_label == answer_label or answer_label in field_label or field_label in answer_label:
-            return value
-        if field.field_type in {"email", "tel", "url"} and field.field_type == answer_type:
-            type_fallback_values.append(value)
-    # A type-only match is safe only when unambiguous; with several approved answers
-    # of the same type, guessing could write one field's value into another field.
-    if len(set(type_fallback_values)) == 1:
-        return type_fallback_values[0]
-    return None
 
 
 def required_answer_missing_payload(field: BrowserField) -> dict[str, object]:
@@ -1846,6 +1887,10 @@ async def run_browser_apply_after_review(
     progression_step_index = 0
     blocked_progression_attempts = 0
     uploads_settled = False
+    # How many pages this particular portal is expected to have. One global cap of 20
+    # was both too generous for a one-page Lever form and arbitrary for a Workday
+    # wizard, so the number now comes from the portal's own adapter plan.
+    runtime_policy = portal_runtime_policy_for_workflow(workflow)
     # (generated file id, selector) pairs already uploaded. Re-reading the page after the
     # portal parses the resume would otherwise attach the same file a second time, and
     # Workday's attachment list appends rather than replaces.
@@ -1988,7 +2033,35 @@ async def run_browser_apply_after_review(
                     ).emit()
                 continue
 
-            reviewed_value = approved_value_for_field(field, approved_answers)
+            answer_match = match_approved_answer(field, approved_answers)
+            if answer_match.outcome == MATCH_OUTCOME_AMBIGUOUS:
+                # Two approved answers claim this field equally well. Picking one
+                # would write, say, the personal email into the work-email box and
+                # report success, so the choice goes back to the person.
+                WorkerEvent(
+                    event_type=EventType.USER_REVIEW_REQUIRED,
+                    run_id=run_id,
+                    step_id=None,
+                    severity=Severity.WARN,
+                    message=f"More than one reviewed answer could fill {field.label}",
+                    machine_state={"selector": field.selector, "field_type": field.field_type},
+                    ui_state={"requires_user_review": True, "current_step": "field_review"},
+                    payload={
+                        "field_label": field.label,
+                        "field_type": field.field_type,
+                        "selector": field.selector,
+                        "reason": "AMBIGUOUS_ANSWER_MATCH",
+                        "competing_labels": list(answer_match.competing_labels),
+                    },
+                ).emit()
+                if field.required:
+                    missing_required_answers.append(required_answer_missing_payload(field))
+                continue
+            reviewed_value = (
+                answer_match.match.value
+                if answer_match.outcome == MATCH_OUTCOME_MATCHED and answer_match.match
+                else None
+            )
             value, secret_source = resolve_secret_reviewed_value(field, reviewed_value)
             if value is None:
                 if field.required:
@@ -2052,7 +2125,7 @@ async def run_browser_apply_after_review(
                 screenshot_id=f"reviewed-fields-applied-{progression_step_index + 1}",
                 current_step="field_application",
             )
-            if progression_step_index >= MAX_AUTOMATED_PORTAL_STEPS:
+            if progression_step_index >= runtime_policy.max_automated_steps:
                 WorkerEvent(
                     event_type=EventType.PAUSED,
                     run_id=run_id,
@@ -2063,13 +2136,13 @@ async def run_browser_apply_after_review(
                         "reason": "MAX_PORTAL_STEPS_REACHED",
                         "portal_id": workflow.portal_id,
                         "workflow_kind": workflow.workflow_kind,
-                        "max_steps": MAX_AUTOMATED_PORTAL_STEPS,
+                        "max_steps": runtime_policy.max_automated_steps,
                     },
                     ui_state={"requires_user_review": True, "current_step": "portal_step"},
                     payload={
                         "portal_id": workflow.portal_id,
                         "workflow_kind": workflow.workflow_kind,
-                        "max_steps": MAX_AUTOMATED_PORTAL_STEPS,
+                        "max_steps": runtime_policy.max_automated_steps,
                         "instructions": "Inspect the current portal page before continuing. Applyocalypse stopped to avoid an uncontrolled multi-page loop.",
                     },
                 ).emit()
@@ -2241,20 +2314,36 @@ async def run_browser_apply_after_review(
         auto_submit_enabled = control_auto_submit_enabled(control) or auto_submit_enabled
         upload_attempt += 1
 
-    ready_message = (
-        "Final submission is preapproved by the explicit auto-submit setting"
-        if auto_submit_enabled
-        else "Final submission is gated until explicit approval"
+    visible_before_submit: str | None = None
+    if runtime_policy.review_evidence_required:
+        visible = await adapter.extract_visible_text()
+        visible_before_submit = str(visible.payload.get("text") or "") if visible.ok else None
+    gate = evaluate_final_submit_gate(
+        policy=runtime_policy,
+        auto_submit_enabled=auto_submit_enabled,
+        visible_text=visible_before_submit,
     )
+    auto_submit_enabled = gate.auto_submit_enabled
     WorkerEvent(
         event_type=EventType.READY_TO_SUBMIT,
         run_id=run_id,
         step_id=None,
         severity=Severity.INFO if auto_submit_enabled else Severity.WARN,
-        message=ready_message,
-        machine_state={"gate": "FINAL_SUBMIT", "auto_submit_enabled": auto_submit_enabled},
+        message=gate.message,
+        machine_state={
+            "gate": "FINAL_SUBMIT",
+            "auto_submit_enabled": auto_submit_enabled,
+            "portal_id": runtime_policy.portal_id,
+            "review_evidence_required": runtime_policy.review_evidence_required,
+            "review_text_detected": gate.review_text_detected,
+            "auto_submit_withdrawn": gate.withdrawn,
+        },
         ui_state={"requires_user_review": not auto_submit_enabled},
-        payload={"auto_submit_enabled": auto_submit_enabled},
+        payload={
+            "auto_submit_enabled": auto_submit_enabled,
+            "review_text_detected": gate.review_text_detected,
+            "auto_submit_withdrawn": gate.withdrawn,
+        },
     ).emit()
     if auto_submit_enabled:
         auto_submit_control = WorkerControl(

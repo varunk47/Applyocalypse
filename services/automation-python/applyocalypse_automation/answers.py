@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
 # Standard "highest level of education" ladder; matched against resume degree text.
@@ -201,6 +201,184 @@ _EEO_RULES: list[tuple[tuple[str, ...], str]] = [
 ]
 
 
+# ── Label matching ────────────────────────────────────────────────────────────
+# Raw ``keyword in label`` matching cross-assigns values: "city" matches
+# "ethnicity", "sex" matches "sexual orientation", "name" matches "name of
+# referrer". Every rule below matches whole tokens instead.
+
+
+def _stem(token: str) -> str:
+    """Strip a naive plural so "requirements" matches "requirement"."""
+    if len(token) > 3 and token.endswith("s") and not token.endswith(("ss", "us", "is")):
+        return token[:-1]
+    return token
+
+
+def label_tokens(value: str) -> tuple[str, ...]:
+    """Lowercased alphanumeric tokens of a field label, naively singularized."""
+    cleaned = "".join(character.lower() if character.isalnum() else " " for character in value)
+    return tuple(_stem(token) for token in cleaned.split())
+
+
+def _contains_phrase(tokens: tuple[str, ...], phrase: str) -> bool:
+    """True when ``phrase`` occurs as a contiguous run of whole tokens."""
+    needle = label_tokens(phrase)
+    if not needle or len(needle) > len(tokens):
+        return False
+    return any(tokens[index : index + len(needle)] == needle for index in range(len(tokens) - len(needle) + 1))
+
+
+def _matches_any(tokens: tuple[str, ...], phrases: tuple[str, ...]) -> bool:
+    return any(_contains_phrase(tokens, phrase) for phrase in phrases)
+
+
+# Qualifiers that say the field is about somebody or something other than the
+# applicant's own primary details ("Phone country code", "City of birth",
+# "Name of referrer"). They suppress the generic profile rules so the
+# applicant's own values are never cross-assigned to a neighbouring field.
+_FOREIGN_SUBJECT_QUALIFIERS: tuple[str, ...] = (
+    "of birth",
+    "birth",
+    "of citizenship",
+    "citizenship",
+    "country code",
+    "dialing code",
+    "dial code",
+    "calling code",
+    "phone type",
+    "type of phone",
+    "referrer",
+    "referral",
+    "reference",
+    "emergency contact",
+    "next of kin",
+    "supervisor",
+    "recruiter",
+    "spouse",
+    "parent",
+    "guardian",
+    "preferred name",
+    "email me",
+    "notify me",
+    "newsletter",
+    "subscribe",
+    "opt in",
+    "job alert",
+    "company name",
+    "employer name",
+    "organization name",
+    "school name",
+    "university name",
+    "college name",
+    "institution name",
+    "contact name",
+    "manager name",
+)
+
+
+# ── Always-review categories (CLAUDE.md safety invariant #2) ──────────────────
+SENSITIVE_REVIEW_CATEGORIES: tuple[str, ...] = ("EEO", "CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER")
+
+_EEO_PHRASES: tuple[str, ...] = tuple(alias for aliases, _ in _EEO_RULES for alias in aliases)
+
+# Yes/no screening questions get a conservative "No" default; every other label
+# in the category is a detail field that must be left blank for the reviewer.
+_CRIMINAL_HISTORY_YES_NO_PHRASES: tuple[str, ...] = ("criminal", "convicted", "felony", "misdemeanor")
+_CRIMINAL_HISTORY_PHRASES: tuple[str, ...] = _CRIMINAL_HISTORY_YES_NO_PHRASES + (
+    "conviction",
+    "arrested",
+    "arrest",
+    "background check",
+)
+
+_PREVIOUS_EMPLOYER_YES_NO_PHRASES: tuple[str, ...] = (
+    "previously employed",
+    "former employee",
+    "worked for us",
+    "worked here",
+    "previously worked",
+    "ever worked for",
+    "employed by",
+    "employed with",
+)
+_PREVIOUS_EMPLOYER_PHRASES: tuple[str, ...] = _PREVIOUS_EMPLOYER_YES_NO_PHRASES + (
+    "previous employer",
+    "prior employer",
+    "former employer",
+    "last employer",
+    "most recent employer",
+    "previous employment",
+    "prior employment",
+    "former employment",
+    "previous supervisor",
+    "former supervisor",
+    "previous manager",
+    "reason for leaving",
+)
+
+# "Do you consent to a background check?" must never be pre-answered "No":
+# declining is a materially different act from answering a history question.
+_CONSENT_PHRASES: tuple[str, ...] = ("consent", "authorize", "agree", "permission", "acknowledge")
+
+_INTERROGATIVE_OPENERS: tuple[str, ...] = (
+    "have you",
+    "has any",
+    "are you",
+    "do you",
+    "did you",
+    "were you",
+    "will you",
+)
+
+_CHOICE_FIELD_TYPES: frozenset[str] = frozenset({"radio", "checkbox", "select", "boolean"})
+
+
+def sensitive_review_category(field_label: str) -> str | None:
+    """Return the always-review category of a label, or ``None``.
+
+    CLAUDE.md safety invariant #2: EEO, criminal-history and previous-employer
+    answers are ALWAYS ``requires_review=True``. Classification happens up front,
+    before any generic profile rule runs, so that neither rule ordering nor
+    ``APPLYO_AUTOFILL_APPROVED_DEFAULTS`` can open a path around the gate.
+    """
+    tokens = label_tokens(field_label)
+    if _matches_any(tokens, _EEO_PHRASES):
+        return "EEO"
+    if _matches_any(tokens, _CRIMINAL_HISTORY_PHRASES):
+        return "CRIMINAL_HISTORY"
+    if _matches_any(tokens, _PREVIOUS_EMPLOYER_PHRASES):
+        return "PREVIOUS_EMPLOYER"
+    return None
+
+
+def _sensitive_history_answer(*, field_label: str, field_type: str, category: str) -> ProposedApplicationAnswer:
+    """Answer a criminal-history or previous-employer field.
+
+    Only a genuine yes/no screening question gets a proposed default ("No").
+    Detail fields ("Previous employer city", "Conviction details: name of court")
+    are left empty rather than filled from the profile, because the applicant's
+    own city or legal name is never the right answer there. Either way the
+    answer is review-gated.
+    """
+    tokens = label_tokens(field_label)
+    yes_no_phrases = (
+        _CRIMINAL_HISTORY_YES_NO_PHRASES if category == "CRIMINAL_HISTORY" else _PREVIOUS_EMPLOYER_YES_NO_PHRASES
+    )
+    is_yes_no_question = (
+        _matches_any(tokens, yes_no_phrases)
+        and not _matches_any(tokens, _CONSENT_PHRASES)
+        and (field_type in _CHOICE_FIELD_TYPES or _matches_any(tokens, _INTERROGATIVE_OPENERS))
+    )
+    return ProposedApplicationAnswer(
+        field_label=field_label,
+        field_type=field_type,
+        proposed_value="No" if is_yes_no_question else None,
+        confidence=0.90 if is_yes_no_question else 0.20,
+        source="PROFILE" if is_yes_no_question else "UNKNOWN",
+        requires_review=True,
+    )
+
+
 def propose_answer_for_detected_field(
     *,
     field_label: str,
@@ -209,11 +387,39 @@ def propose_answer_for_detected_field(
     autofill_approved_defaults: bool = False,
     jd_text: str | None = None,
 ) -> ProposedApplicationAnswer:
+    """Propose an answer for a detected field, enforcing the always-review gate."""
+    category = sensitive_review_category(field_label)
+    if category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
+        return _sensitive_history_answer(field_label=field_label, field_type=field_type, category=category)
+
+    answer = _propose_answer(
+        field_label=field_label,
+        field_type=field_type,
+        canonical_profile=canonical_profile,
+        autofill_approved_defaults=autofill_approved_defaults,
+        jd_text=jd_text,
+    )
+    if category is None:
+        return answer
+    # Defence in depth: whichever rule produced the answer, the gate still holds.
+    return replace(answer, requires_review=True)
+
+
+def _propose_answer(
+    *,
+    field_label: str,
+    field_type: str,
+    canonical_profile: dict[str, Any],
+    autofill_approved_defaults: bool = False,
+    jd_text: str | None = None,
+) -> ProposedApplicationAnswer:
     profile = _profile(canonical_profile)
-    label = field_label.lower()
+    tokens = label_tokens(field_label)
+    # Fields about somebody else never receive the applicant's own details.
+    foreign_subject = _matches_any(tokens, _FOREIGN_SUBJECT_QUALIFIERS)
 
     # ── First / last name ──────────────────────────────────────────────────────
-    if any(kw in label for kw in ("first name", "given name", "firstname")):
+    if not foreign_subject and _matches_any(tokens, ("first name", "given name", "firstname")):
         value = profile.get("firstName") or (
             profile.get("legalName", "").split(" ")[0] if profile.get("legalName") else None
         )
@@ -224,7 +430,7 @@ def propose_answer_for_detected_field(
             requires_review=not autofill_approved_defaults or not bool(value),
         )
 
-    if any(kw in label for kw in ("last name", "family name", "surname", "lastname")):
+    if not foreign_subject and _matches_any(tokens, ("last name", "family name", "surname", "lastname")):
         value = profile.get("lastName")
         if not value:
             legal = profile.get("legalName", "")
@@ -238,10 +444,9 @@ def propose_answer_for_detected_field(
         )
 
     # ── EEO fields — always requires_review (legal sensitivity) ──────────────────
-    # Must come before address rules because "ethnicity" contains "city"
     eeo = _eeo(profile)
     for aliases, eeo_key in _EEO_RULES:
-        if any(alias in label for alias in aliases):
+        if _matches_any(tokens, aliases):
             raw = eeo.get(eeo_key)
             if isinstance(raw, list):
                 value = ", ".join(str(v) for v in raw) if raw else None
@@ -257,7 +462,7 @@ def propose_answer_for_detected_field(
     # ── Address fields ────────────────────────────────────────────────────────────
     address = _address(profile)
     for aliases, addr_key in _ADDRESS_RULES:
-        if any(alias in label for alias in aliases):
+        if not foreign_subject and _matches_any(tokens, aliases):
             value = address.get(addr_key)
             return ProposedApplicationAnswer(
                 field_label=field_label, field_type=field_type,
@@ -266,36 +471,25 @@ def propose_answer_for_detected_field(
                 requires_review=not (autofill_approved_defaults and bool(value)),
             )
 
-    # ── Previously employed / former employee ──────────────────────────────────
-    if any(kw in label for kw in ("previously employed", "former employee", "worked for us", "worked here", "previously worked", "ever worked for", "employed by", "employed with")):
-        return ProposedApplicationAnswer(
-            field_label=field_label, field_type=field_type,
-            proposed_value="No", confidence=0.90, source="PROFILE", requires_review=True,
-        )
-
-    # ── Criminal / background ──────────────────────────────────────────────────
-    if any(kw in label for kw in ("criminal", "convicted", "felony", "misdemeanor")):
-        return ProposedApplicationAnswer(
-            field_label=field_label, field_type=field_type,
-            proposed_value="No", confidence=0.90, source="PROFILE", requires_review=True,
-        )
+    # Criminal-history and previous-employer labels never reach this function:
+    # propose_answer_for_detected_field routes them to _sensitive_history_answer.
 
     # ── Knockout-class screening questions — proposed but always review-gated ──
     # A wrong answer here commonly triggers immediate automatic ATS rejection,
     # so a sensible default is proposed where one exists but is never auto-filled.
-    if any(kw in label for kw in _KNOCKOUT_KEYWORDS):
+    if _matches_any(tokens, _KNOCKOUT_KEYWORDS):
         knockout_value: str | None = None
         knockout_source = "UNKNOWN"
-        if any(kw in label for kw in ("salary", "compensation")):
+        if _matches_any(tokens, ("salary", "compensation")):
             knockout_value = jd_salary_midpoint(jd_text)
             knockout_source = "JD_ANALYSIS" if knockout_value else "UNKNOWN"
-        elif "security clearance" in label:
+        elif _contains_phrase(tokens, "security clearance"):
             knockout_value = "N/A"
             knockout_source = "PROFILE"
-        elif "notice period" in label:
+        elif _contains_phrase(tokens, "notice period"):
             knockout_value = "0"
             knockout_source = "PROFILE"
-        elif any(kw in label for kw in ("highest level of education", "degree required")):
+        elif _matches_any(tokens, ("highest level of education", "degree required")):
             knockout_value = _highest_education_level(canonical_profile)
             knockout_source = "PROFILE" if knockout_value else "UNKNOWN"
         return ProposedApplicationAnswer(
@@ -314,7 +508,7 @@ def propose_answer_for_detected_field(
         (("location",), "location", 0.78),
     ]
     for aliases, profile_key, confidence in candidates:
-        if any(alias in label for alias in aliases):
+        if not foreign_subject and _matches_any(tokens, aliases):
             value = profile.get(profile_key) or (profile.get("email") if profile_key == "applicationEmail" else None)
             non_review_keys = {"applicationEmail", "phone", "legalName"}
             return ProposedApplicationAnswer(
@@ -329,9 +523,11 @@ def propose_answer_for_detected_field(
             )
 
     # ── LinkedIn / GitHub / portfolio ──────────────────────────────────────────
-    if "linkedin" in label or "portfolio" in label or "github" in label or "website" in label:
+    if not foreign_subject and _matches_any(tokens, ("linkedin", "portfolio", "github", "website")):
+        wants_linkedin = _contains_phrase(tokens, "linkedin")
+        wants_github = _contains_phrase(tokens, "github")
         # Check convenience fields first
-        if "linkedin" in label:
+        if wants_linkedin:
             direct = profile.get("linkedinUrl")
             if direct:
                 return ProposedApplicationAnswer(
@@ -339,7 +535,7 @@ def propose_answer_for_detected_field(
                     proposed_value=str(direct), confidence=0.90, source="PROFILE",
                     requires_review=not autofill_approved_defaults,
                 )
-        if "github" in label:
+        if wants_github:
             direct = profile.get("githubUrl")
             if direct:
                 return ProposedApplicationAnswer(
@@ -355,10 +551,11 @@ def propose_answer_for_detected_field(
                 continue
             url = str(link.get("url") or "")
             link_label = str(link.get("label") or "").lower()
-            if ("linkedin" in label and "linkedin" in url.lower()) or ("github" in label and "github" in url.lower()):
+            if (wants_linkedin and "linkedin" in url.lower()) or (wants_github and "github" in url.lower()):
                 selected_url = url
                 break
-            if not selected_url and (link_label in label or "portfolio" in label or "website" in label):
+            matches_link_label = bool(link_label) and _contains_phrase(tokens, link_label)
+            if not selected_url and (matches_link_label or _matches_any(tokens, ("portfolio", "website"))):
                 selected_url = url
         return ProposedApplicationAnswer(
             field_label=field_label, field_type=field_type,
@@ -369,7 +566,7 @@ def propose_answer_for_detected_field(
         )
 
     # ── Work-auth: free-text sponsorship detail ────────────────────────────────
-    if "authorization" in label or "sponsorship" in label or "visa" in label or "legally authorized" in label:
+    if _matches_any(tokens, ("authorization", "authorisation", "sponsorship", "visa", "legally authorized")):
         eeo = _eeo(profile)
         detail_text = eeo.get("sponsorshipDetailText") if field_type in ("textarea", "text") else None
         if detail_text:
@@ -388,7 +585,7 @@ def propose_answer_for_detected_field(
         )
 
     # ── Salary / compensation ──────────────────────────────────────────────────
-    if "salary" in label or "compensation" in label or "expected pay" in label:
+    if _matches_any(tokens, ("salary", "compensation", "expected pay")):
         defaults = profile.get("jobDefaults") if isinstance(profile.get("jobDefaults"), dict) else {}
         value = defaults.get("salaryExpectation") or defaults.get("compensationExpectation")
         return ProposedApplicationAnswer(

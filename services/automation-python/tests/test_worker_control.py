@@ -10,9 +10,9 @@ from applyocalypse_automation.browser.adapter import BrowserBlocker, BrowserFiel
 from applyocalypse_automation.browser.field_detection import build_click_by_text_script, build_final_submit_script
 from applyocalypse_automation.browser.portal_workflows import workflow_for_url
 from applyocalypse_automation.control import WorkerControl, read_worker_control
+from applyocalypse_automation.field_resolution import approved_value_for_field
 from applyocalypse_automation.otp import GmailOtpResult
 from applyocalypse_automation.runner import (
-    approved_value_for_field,
     control_auto_submit_enabled,
     cover_letter_requirement_from_fields,
     field_file_count,

@@ -161,9 +161,10 @@ ATS_PORTAL_QUIRKS: dict[str, tuple[str, ...]] = {
     "lever": (
         "Lever hCaptcha intercepts checkbox/radio clicks; fill text fields only and leave checkboxes and the captcha to the user.",
     ),
-    "workable": (
-        "Workable SPA re-renders invalidate element references; re-detect fields before every fill.",
-    ),
+    # Workable is deliberately absent: it is not a registered portal_id, so this
+    # quirk was unreachable. If Workable is ever registered, the known quirk is
+    # "SPA re-renders invalidate element references; re-detect fields before
+    # every fill." Keys here must stay a subset of PORTAL_DEFINITIONS.
     "ashby": (
         "Ashby dedupes applications by email per company; a repeat application needs an email alias.",
     ),
