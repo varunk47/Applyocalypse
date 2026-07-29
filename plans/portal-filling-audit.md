@@ -400,6 +400,23 @@ zero-size/opacity-0 inputs; they are still settable). Where no input exists, fal
 `DataTransfer` + `drop` event on the dropzone (Playwright and CDP can both do this). Then re-detect
 after upload.
 
+> **Status (discovery and the Selenium write are fixed).** The gate in
+> `_FIELD_DISCOVERY_BODY_JS` now exempts `input[type=file]`, so a zero-size or
+> `display:none` dropzone input is discovered and carries `visually_hidden: true` in its
+> metadata; a *disabled* hidden input is still dropped, since nothing can write to it
+> either way. Playwright's `set_input_files` and nodriver's `send_file` both go through a
+> driver API that ignores visibility and needed no change. Selenium's `send_keys` does
+> not, so `seleniumbase_adapter.upload_file` now retries behind a temporary reveal and
+> restores the inline style afterwards, on the failure path too — a run that leaves the
+> form altered is a run the human reviewer cannot trust. Covered by
+> `tests/test_hidden_file_input_discovery.py` (real JS against the DOM stub) and
+> `tests/test_seleniumbase_file_upload.py` (fake driver).
+>
+> **Still open from this finding:** the synthetic `DataTransfer` + `drop` fallback for a
+> dropzone with no `<input type="file">` at all, and the re-detect after upload (tracked
+> under F11). No evidence yet that a major ATS ships a dropzone without a backing input —
+> react-dropzone, which Greenhouse, Lever and Ashby build on, always renders one.
+
 ### F11. Workday's resume parse overwrites the fields we just filled, and nothing re-checks [HIGH]
 
 **Where:** `runner.py:1710-1797`, `browser/portal_workflows.py:157-163`
@@ -673,7 +690,7 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 12 | Fix the SeleniumBase readiness probe to use `text_length` | MEDIUM | XS | `browser/seleniumbase_adapter.py` | Fake-driver test: a page whose visible text is 10 chars is *not* declared ready despite a long JSON envelope |
 | 13 | Make the Cloudflare auto-solve path reachable | MEDIUM | XS | `browser/seleniumbase_adapter.py` or `browser/field_detection.py` | Test that a Cloudflare-vendor blocker satisfies `_is_cloudflare_blocker` |
 | 14 | Wire up or delete inert plan metadata (`review_text_detected`, per-portal `max_automated_steps`) | MEDIUM | M | `browser/portal_adapters.py`, `runner.py` | Test that `READY_TO_SUBMIT` is not emitted unless a review/confirmation signal was observed |
-| 15 | Add drag-drop dropzone upload fallback; relax the visibility gate for file inputs | HIGH | M | `browser/field_detection.py`, `browser/playwright_adapter.py` (+ others) | Fixture test: an `opacity:0` file input behind a styled dropzone is discovered and receives the file |
+| 15 | ~~Relax the visibility gate for file inputs~~ **(done: gate exempts file inputs, SeleniumBase reveals before `send_keys`, tests added)**; a true drag-drop event fallback is still open | HIGH | M | `browser/field_detection.py`, `browser/seleniumbase_adapter.py` | Fixture test: an `opacity:0` file input behind a styled dropzone is discovered and receives the file |
 | 16 | Build a real fixture suite: saved HTML from the 6 ATSes + a Playwright fixture-page E2E suite | MEDIUM | L | `tests/` (new `browser_e2e/`), `browser/html_replay.py` (align label chain) | The suite itself — it is what makes fixes 1-15 verifiable and non-regressing |
 | 17 | Rename `live_certification` to a reachability probe; define a real fill-only certification | MEDIUM | S | `browser/live_certification.py`, `browser/portal_adapters.py` | Test that a 200 OK alone cannot produce a "certified" status |
 | 18 | ~~Prune or implement: drop `workable` quirk (unregistered) or register Workable~~ **(done: registered, test added)** | LOW | XS | `browser/portal_workflows.py`, `browser/portal_registry.py` | Registry consistency test: every key in `ATS_PORTAL_QUIRKS` and `ATS_ENTRY_ACTIONS` is a registered `portal_id` |
