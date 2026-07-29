@@ -620,7 +620,7 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 6 | Stop dropping unlabeled fields; extend the label chain (`aria-labelledby`, `legend`, `title`) | CRITICAL | S | `browser/field_detection.py`, `browser/html_replay.py` (keep chains identical) | Replay test on saved real HTML: an `aria-labelledby`-only required input is discovered with a usable label |
 | 7 | Verify progression clicks actually advanced; surface portal validation errors | HIGH | M | `runner.py`, `browser/field_detection.py` | Fixture test: a "Next" click that the page rejects returns `"blocked"` with the extracted error text, and does not increment the step index |
 | 8 | Uploads first → settle via `wait_for_page_text` → re-detect → then text fields | HIGH | M | `runner.py` | Fixture test emulating Workday: values written after a resume-parse repopulation survive |
-| 9 | ARIA widget roles **(done, 69c898f)** / iframes + shadow roots **still open** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
+| 9 | ARIA widget roles **(done, 69c898f)** / cross-origin iframes **(done, Playwright)** / shadow roots **still open** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
 
 > **F9 status (2026-07-29).** The ARIA half shipped in `69c898f`: `role=combobox|listbox|radiogroup`
 > and the Workday `aria-haspopup` + `data-automation-id` pickers are discovered, options are harvested
@@ -628,11 +628,28 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > fallthrough so an `<input role="combobox">` can no longer report a false success. A picker whose
 > popup was never opened refuses with `requires_human` rather than guessing.
 >
-> **Still open:** cross-origin iframes. The Greenhouse `grnhse_iframe` is served from
-> `job-boards.greenhouse.io` on an employer domain, so walking `iframe.contentDocument` from the
-> injected script will NOT reach it. That half needs adapter-level frame enumeration (Playwright
-> `page.frames` / `frame.evaluate`), a frame identity on `BrowserField`, and writes routed back to the
-> originating frame, touching `adapter.py` and all three adapters. Open shadow roots are also untouched.
+> **Cross-origin iframes: done for the Playwright adapter.** The Greenhouse `grnhse_iframe` is served
+> from `job-boards.greenhouse.io` on an employer domain, so walking `iframe.contentDocument` from the
+> injected script never reaches it. `detect_fields` now sweeps the top document plus every subframe
+> that could hold form content (`frame_url_is_worth_scanning` skips CAPTCHA, analytics, chat and media
+> frames — the CAPTCHA exclusion matters most, since those frames really do contain inputs). Each field
+> records where it came from in `metadata.frame_url` / `frame_index`, and its id is frame-qualified
+> because discovery restarts its index at zero per frame. Writes, uploads and read-back verification
+> all resolve back to the originating frame; when that frame is gone or several frames share its URL
+> the adapter **refuses** rather than falling back to the top document, since a wrong-document write
+> would look like a success while leaving the real field empty. Clicks try the top document first and
+> only then the embedded frames, so a portal that hosts its own form behaves exactly as before.
+>
+> No protocol change was needed: `BrowserField.metadata` is already `dict[str, Any]`, so only
+> `playwright_adapter.py` changed. The SeleniumBase and nodriver adapters never set frame metadata and
+> keep their top-frame behaviour.
+>
+> **Known limitation:** `_probe_page_fingerprint` stays top-document-only. Making it frame-aware would
+> let a transient frame-evaluate failure register as a spurious "page changed" — a false positive in
+> the one direction that would wrongly claim a submit worked. Top-only reports "unchanged" on an
+> embedded portal, which routes to a human check instead.
+>
+> **Still open:** open shadow roots.
 
 | 10 | Rank option/answer matching, require a unique winner, pause on ties | HIGH | M | `browser/field_detection.py`, `runner.py`, `answers.py` | Table-driven test: `"India"` does not select `"Indiana"`; `"No, I do not require sponsorship"` does not select the first `"No"`-adjacent option; ambiguous cases return `ok:false` |
 | 11 | Replace fixed post-click sleeps with `wait_for_page_text` + change detection | MEDIUM | S | all three adapters, `runner.py` | Existing `tests/test_page_readiness.py` pattern, extended to the click paths with an injected clock |

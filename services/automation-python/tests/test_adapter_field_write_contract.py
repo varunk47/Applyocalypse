@@ -146,10 +146,32 @@ class FakePlaywrightLocator:
         self._control.do_type(value)
 
 
+class FakePlaywrightFrame:
+    """Playwright addresses every document through a frame, including the top one.
+
+    The adapter now does the same, so modelling the top document as a frame keeps
+    these single-document cases honest and leaves room for an embedded form.
+    """
+
+    def __init__(self, control: FakeControl, url: str, evaluated_scripts: list[str]) -> None:
+        self._control = control
+        self.url = url
+        self._evaluated_scripts = evaluated_scripts
+
+    def locator(self, selector: str) -> FakePlaywrightLocator:
+        return FakePlaywrightLocator(self._control)
+
+    async def evaluate(self, script: str) -> str:
+        self._evaluated_scripts.append(script)
+        return evaluate_script(self._control, script)
+
+
 class FakePlaywrightPage:
     def __init__(self, control: FakeControl) -> None:
         self._control = control
         self.evaluated_scripts: list[str] = []
+        self.main_frame = FakePlaywrightFrame(control, "https://portal.example/apply", self.evaluated_scripts)
+        self.frames = [self.main_frame]
 
     def locator(self, selector: str) -> FakePlaywrightLocator:
         return FakePlaywrightLocator(self._control)

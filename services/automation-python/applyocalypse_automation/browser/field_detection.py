@@ -9,6 +9,43 @@ from .adapter import BrowserBlocker, BrowserField, BrowserStepResult
 
 
 @dataclass(frozen=True, slots=True)
+class FrameRef:
+    """Where a field lives when the portal serves its form from an iframe.
+
+    Greenhouse embeds grnhse_iframe from job-boards.greenhouse.io onto an employer
+    domain, so the form is a cross-origin document: injected JS cannot reach it by
+    walking iframe.contentDocument, and a write aimed at the top document lands
+    nowhere while still looking like it succeeded. The adapter has to address the
+    frame directly, which means each field must remember where it came from.
+    """
+
+    url: str
+    index: int
+
+
+# Frames that never hold application questions. The CAPTCHA widgets matter most:
+# they really do contain inputs, so scanning them would hand the model a challenge
+# box to answer. The rest are analytics, chat and media frames that only add noise.
+_NON_FORM_FRAME_URL_RE = re.compile(
+    r"recaptcha|hcaptcha|turnstile|challenges\.cloudflare\.com|googletagmanager|"
+    r"google-analytics|doubleclick|googlesyndication|facebook\.com/(?:tr|plugins)|"
+    r"youtube\.com/embed|player\.vimeo\.com|hotjar|segment\.(?:io|com)|"
+    r"intercom|drift\.com|zendesk|fullstory|mixpanel",
+    re.IGNORECASE,
+)
+
+
+def frame_url_is_worth_scanning(url: str) -> bool:
+    """Whether a subframe could plausibly hold part of the application form."""
+    candidate = (url or "").strip()
+    # about:blank and about:srcdoc frames are wrappers a portal fills in later;
+    # there is nothing to read yet and no stable URL to address them by.
+    if not candidate.startswith(("http://", "https://")):
+        return False
+    return _NON_FORM_FRAME_URL_RE.search(candidate) is None
+
+
+@dataclass(frozen=True, slots=True)
 class ControlCandidate:
     label: str
     tag_name: str
@@ -548,7 +585,7 @@ DOM_VISIBLE_TEXT_SCRIPT = r"""
 """
 
 
-def fields_from_dom_snapshot(raw_fields: Any) -> list[BrowserField]:
+def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) -> list[BrowserField]:
     if not isinstance(raw_fields, list):
         return []
     parsed: list[BrowserField] = []
@@ -575,9 +612,16 @@ def fields_from_dom_snapshot(raw_fields: Any) -> list[BrowserField]:
         if synthetic:
             metadata["label_synthetic"] = True
             metadata["requires_human_label_review"] = True
+        field_id = f"field:{index}:{field_type}:{label[:40].lower()}"
+        if frame is not None:
+            metadata["frame_url"] = frame.url
+            metadata["frame_index"] = frame.index
+            # Discovery restarts its index at zero in every frame, so an unqualified
+            # id would collide between the top document and the embedded form.
+            field_id = f"frame:{frame.index}:{field_id}"
         parsed.append(
             BrowserField(
-                field_id=f"field:{index}:{field_type}:{label[:40].lower()}",
+                field_id=field_id,
                 label=label,
                 field_type=field_type,
                 selector=str(selector) if selector else None,

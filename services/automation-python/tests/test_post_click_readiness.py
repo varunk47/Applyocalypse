@@ -177,6 +177,22 @@ class ScriptedNodriverPage(ScriptedSurface):
 
 
 class ScriptedPlaywrightPage(ScriptedSurface):
+    """The click path evaluates through frames now, so the page exposes its own.
+
+    A single top-level frame that answers exactly as the page does keeps these
+    cases about settle timing rather than about frame plumbing.
+    """
+
+    url = "https://portal.example/apply"
+
+    @property
+    def main_frame(self) -> ScriptedPlaywrightPage:
+        return self
+
+    @property
+    def frames(self) -> list[ScriptedPlaywrightPage]:
+        return [self]
+
     async def evaluate(self, script: str) -> str:
         return self._result_for(script)
 

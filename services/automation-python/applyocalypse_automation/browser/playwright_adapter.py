@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -11,11 +12,13 @@ from .field_detection import (
     DOM_METADATA_CAPTURE_SCRIPT,
     DOM_VISIBLE_TEXT_SCRIPT,
     SCRIPTED_WRITE_FIELD_TYPES,
+    FrameRef,
     blockers_from_dom_snapshot,
     build_apply_field_value_script,
     build_click_by_text_script,
     build_final_submit_script,
     fields_from_dom_snapshot,
+    frame_url_is_worth_scanning,
     parse_apply_field_result,
     parse_click_by_text_result,
     parse_final_submit_result,
@@ -99,19 +102,74 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
         except (TypeError, ValueError):
             return 0
 
+    def _form_frames(self) -> list[Any]:
+        """The top document, then any subframe that could hold part of the form.
+
+        Greenhouse, Lever and Workable serve the real form from their own origin
+        and embed it, so on those portals the top document is a wrapper with no
+        questions in it at all.
+        """
+        if self._page is None:
+            return []
+        main_frame = self._page.main_frame
+        return [main_frame] + [
+            frame
+            for frame in self._page.frames
+            if frame is not main_frame and frame_url_is_worth_scanning(frame.url)
+        ]
+
     async def detect_fields(self) -> list[BrowserField]:
         if self._page is None:
             return []
-        try:
-            raw_result = await self._page.evaluate(DOM_FIELD_DISCOVERY_SCRIPT)
-        except Exception:
-            return []
-        if isinstance(raw_result, str):
+        main_frame = self._page.main_frame
+        frames = self._page.frames
+        fields: list[BrowserField] = []
+        for frame in self._form_frames():
             try:
-                raw_result = json.loads(raw_result)
-            except json.JSONDecodeError:
-                return []
-        return fields_from_dom_snapshot(raw_result)
+                raw_result = await frame.evaluate(DOM_FIELD_DISCOVERY_SCRIPT)
+            except Exception:
+                # A frame can navigate or detach mid-sweep. Whatever the other
+                # frames found is still worth reporting, so skip just this one.
+                continue
+            if isinstance(raw_result, str):
+                try:
+                    raw_result = json.loads(raw_result)
+                except json.JSONDecodeError:
+                    continue
+            # The top document keeps unqualified ids and no frame metadata, so a
+            # portal that does not embed anything behaves exactly as it did before.
+            ref = None
+            if frame is not main_frame:
+                index = frames.index(frame) if frame in frames else -1
+                ref = FrameRef(url=frame.url, index=index)
+            fields.extend(fields_from_dom_snapshot(raw_result, frame=ref))
+        return fields
+
+    def _frame_for(self, field: BrowserField) -> tuple[Any | None, str]:
+        """Resolve the frame a field was discovered in.
+
+        A field with no frame metadata belongs to the top document. When the
+        recorded frame cannot be identified we return an error rather than falling
+        back to the main frame: writing an answer into the wrong document would
+        report success while leaving the real field empty.
+        """
+        if self._page is None:
+            return None, "browser page is not available"
+        frame_url = field.metadata.get("frame_url")
+        if not frame_url:
+            return self._page.main_frame, ""
+        frames = self._page.frames
+        matches = [frame for frame in frames if frame.url == frame_url]
+        if len(matches) == 1:
+            return matches[0], ""
+        if not matches:
+            return None, "the frame holding this field is no longer on the page"
+        recorded_index = field.metadata.get("frame_index")
+        if isinstance(recorded_index, int) and 0 <= recorded_index < len(frames):
+            candidate = frames[recorded_index]
+            if candidate.url == frame_url:
+                return candidate, ""
+        return None, "several frames share this URL, so the field's frame is ambiguous"
 
     async def detect_blockers(self) -> list[BrowserBlocker]:
         if self._page is None:
@@ -188,27 +246,30 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
     async def fill_field(self, field: BrowserField, value: str) -> BrowserStepResult:
         if self._page is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        frame, frame_error = self._frame_for(field)
+        if frame is None:
+            return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
         try:
-            await self._page.locator(field.selector).fill(value, timeout=10_000)
+            await frame.locator(field.selector).fill(value, timeout=10_000)
         except Exception as exc:
             return BrowserStepResult(False, "field value fill failed", {"field_id": field.field_id, "error": str(exc)})
         return BrowserStepResult(True, "field value applied", {"field_id": field.field_id})
 
-    async def _evaluate(self, script: str) -> Any:
-        if self._page is None:
-            raise RuntimeError("browser page is not available")
-        return await self._page.evaluate(script)
-
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
+        if self._page is None or not field.selector:
+            return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        frame, frame_error = self._frame_for(field)
+        if frame is None:
+            return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
         if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES:
             filled = await self.fill_field(field, value)
             if not filled.ok:
                 return filled
-            return await verify_or_repair_text_write(self._evaluate, field, value, fill_payload=filled.payload)
-        if self._page is None or not field.selector:
-            return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+            # Read the value back from the same frame we wrote it to. Verifying
+            # against the top document would read a field that was never touched.
+            return await verify_or_repair_text_write(frame.evaluate, field, value, fill_payload=filled.payload)
         try:
-            raw_result = await self._page.evaluate(build_apply_field_value_script(field.selector, value))
+            raw_result = await frame.evaluate(build_apply_field_value_script(field.selector, value))
         except Exception as exc:
             return BrowserStepResult(False, "field value application failed", {"field_id": field.field_id, "error": str(exc)})
         return parse_apply_field_result(raw_result, field)
@@ -230,15 +291,40 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             unchanged_grace_s=POST_CLICK_UNCHANGED_GRACE_S,
         )
 
+    async def _click_across_frames(
+        self,
+        script: str,
+        parse: Callable[[Any], BrowserStepResult],
+        failure_message: str,
+    ) -> BrowserStepResult:
+        """Run a click script in the top document, then in each embedded form frame.
+
+        The top document is always tried first, so a portal that hosts its own form
+        behaves exactly as it did before. Only when nothing matched up there do we
+        look inside the embedded form, where a cross-origin portal keeps its buttons.
+        The first frame that reports success wins; otherwise the last refusal is
+        returned, because that is the one that explains why nothing was clicked.
+        """
+        last_result: BrowserStepResult | None = None
+        for frame in self._form_frames():
+            try:
+                raw_result = await frame.evaluate(script)
+            except Exception as exc:
+                last_result = BrowserStepResult(False, failure_message, {"error": str(exc)})
+                continue
+            result = parse(raw_result)
+            if result.ok:
+                return result
+            last_result = result
+        return last_result or BrowserStepResult(False, failure_message)
+
     async def click_by_text(self, labels: list[str]) -> BrowserStepResult:
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
         baseline = await self._probe_page_fingerprint()
-        try:
-            raw_result = await self._page.evaluate(build_click_by_text_script(labels))
-        except Exception as exc:
-            return BrowserStepResult(False, "portal action click failed", {"error": str(exc)})
-        result = parse_click_by_text_result(raw_result)
+        result = await self._click_across_frames(
+            build_click_by_text_script(labels), parse_click_by_text_result, "portal action click failed"
+        )
         if not result.ok:
             return result
         settle = await self._settle_after_click(baseline)
@@ -248,11 +334,9 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
         baseline = await self._probe_page_fingerprint()
-        try:
-            raw_result = await self._page.evaluate(build_final_submit_script(labels))
-        except Exception as exc:
-            return BrowserStepResult(False, "final submit click failed", {"error": str(exc)})
-        result = parse_final_submit_result(raw_result)
+        result = await self._click_across_frames(
+            build_final_submit_script(labels), parse_final_submit_result, "final submit click failed"
+        )
         if not result.ok:
             return result
         settle = await self._settle_after_click(baseline)
@@ -263,8 +347,11 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "upload file does not exist", {"path": str(path)})
         if self._page is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        frame, frame_error = self._frame_for(field)
+        if frame is None:
+            return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
         try:
-            await self._page.locator(field.selector).set_input_files(str(path), timeout=10_000)
+            await frame.locator(field.selector).set_input_files(str(path), timeout=10_000)
         except Exception as exc:
             return BrowserStepResult(False, "file upload failed", {"field_id": field.field_id, "error": str(exc)})
         return BrowserStepResult(True, "file uploaded", {"field_id": field.field_id, "path": str(path)})
