@@ -24,7 +24,11 @@ export default function DocumentsScreen() {
   } = useProfileStore()
   const { state: queueState } = useQueueStore()
 
+  // Constant source so the fetcher runs once on mount and thereafter only on an
+  // explicit refetch. Splitting source from fetcher also keeps the tracked scope
+  // synchronous, which is what Solid's reactivity actually requires.
   const [generated, { refetch: refetchGenerated }] = createResource(
+    () => 'generated',
     async () => (await window.applyocalypse.documents.listGenerated(50)).items,
     { initialValue: [] as GeneratedFile[] }
   )
@@ -170,7 +174,7 @@ export default function DocumentsScreen() {
             </For>
 
             <div class="validators-note">
-              HOUSE VALIDATORS: ONE PAGE · BANNED WORDS · EM-DASH GATE — ALL BLOCKING
+              HOUSE VALIDATORS: ONE PAGE · BANNED WORDS · EM-DASH GATE / ALL BLOCKING
             </div>
           </div>
 

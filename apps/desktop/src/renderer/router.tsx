@@ -17,7 +17,7 @@ const ScreenFault = (props: { error: unknown; reset: () => void }) => (
     <span class="screen-fault-detail">
       {props.error instanceof Error ? props.error.message : String(props.error)}
     </span>
-    <button class="secondary-action" type="button" onClick={props.reset}>
+    <button class="secondary-action" type="button" onClick={() => props.reset()}>
       Try again
     </button>
   </div>

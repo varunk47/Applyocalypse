@@ -17,7 +17,7 @@ type QueueState = {
 
 export const jobLabel = (target: JobTarget | undefined, fallbackId: string): string => {
   if (!target) return fallbackId.slice(0, 8)
-  if (target.company && target.role) return `${target.company} — ${target.role}`
+  if (target.company && target.role) return `${target.company} / ${target.role}`
   if (target.company) return target.company
   if (target.role) return target.role
   if (target.sourceKind === 'URL') {

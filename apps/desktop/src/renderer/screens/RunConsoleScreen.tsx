@@ -148,7 +148,7 @@ export default function RunConsoleScreen() {
   const statusPill = createMemo(() => {
     const detail = run()
     if (!detail) return { text: 'WAITING FOR QUEUE', kind: 'terminal' as const }
-    if (NEEDS_YOU_STATUSES.has(detail.status)) return { text: 'PAUSED — NEEDS YOU', kind: 'paused' as const }
+    if (NEEDS_YOU_STATUSES.has(detail.status)) return { text: 'PAUSED / NEEDS YOU', kind: 'paused' as const }
     if (TERMINAL_STATUSES.has(detail.status)) return { text: detail.status, kind: 'terminal' as const }
     return { text: detail.status.replace(/_/g, ' '), kind: 'working' as const }
   })
@@ -237,7 +237,7 @@ export default function RunConsoleScreen() {
           <div class="worker-note">
             <div class="kicker">WHAT THE WORKER MAY DO NEXT</div>
             <div class="note-body">
-              <Show when={nextPendingStep()} fallback={<>Nothing — this run is waiting on you or finished.</>}>
+              <Show when={nextPendingStep()} fallback={<>Nothing yet. This run is waiting on you or finished.</>}>
                 {(step) => <><strong>{prettyStep(step().stepType)}</strong>. Nothing submit-shaped. Ever.</>}
               </Show>
             </div>
@@ -295,7 +295,7 @@ export default function RunConsoleScreen() {
         <div class="gate-rail">
           <div class="rail-head">
             <span class="kicker kicker-wax">
-              THE GATE{openReviews().length > 0 ? ` — ${openReviews().length} OPEN` : ''}
+              THE GATE{openReviews().length > 0 ? ` / ${openReviews().length} OPEN` : ''}
             </span>
           </div>
 

@@ -68,7 +68,7 @@ export default function HistoryScreen() {
         </Show>
 
         <div class="validators-note" style={{ 'margin-top': '16px' }}>
-          EVERY RUN IS AUDIT-LOGGED AND ARCHIVED ON THIS MACHINE — NOTHING LEAVES IT
+          EVERY RUN IS AUDIT-LOGGED AND ARCHIVED ON THIS MACHINE / NOTHING LEAVES IT
         </div>
       </div>
     </section>

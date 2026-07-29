@@ -1,4 +1,4 @@
-import { createContext, onCleanup, useContext, type ParentProps } from 'solid-js'
+import { createContext, onCleanup, untrack, useContext, type ParentProps } from 'solid-js'
 import { createStore } from 'solid-js/store'
 import { useToast } from '../components/Toast'
 import type {
@@ -99,10 +99,15 @@ export const RunStoreProvider = (props: ParentProps) => {
       setState('activeRunId', runId)
       setState('runDetail', runDetail)
       runEventUnsubscribe?.()
-      runEventUnsubscribe = window.applyocalypse.logs.subscribe(runId, (event) => {
-        pushEvent(event)
-        void refreshActiveRunDetail(runId)
-      })
+      // The main-process log feed is an external push source, not a Solid signal.
+      // untrack keeps it from ever registering as a dependency of whatever
+      // computation happened to be running when the subscription was opened.
+      runEventUnsubscribe = window.applyocalypse.logs.subscribe(runId, (event) =>
+        untrack(() => {
+          pushEvent(event)
+          void refreshActiveRunDetail(runId)
+        })
+      )
       setState('error', null)
     } catch (error) {
       setState('error', error instanceof Error ? error.message : 'Unable to load run detail')

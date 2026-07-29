@@ -13,6 +13,30 @@ const PROVIDER_API_KEY_ENV: Record<LlmProviderType, string> = {
   aws_bedrock: "AWS_SECRET_ACCESS_KEY"
 };
 
+/**
+ * Fallback model id per provider, mirroring PROVIDER_MATRIX in
+ * services/automation-python/applyocalypse_automation/llm/provider_matrix.py.
+ *
+ * Leaving the model field blank in Onboarding/Settings used to leave
+ * LITELLM_MODEL unset, and the worker guards every LLM call on that variable,
+ * so JD analysis, resume tailoring and cover-letter generation all degraded to
+ * deterministic templates with no visible reason. A configured key must always
+ * produce a routable model id. Keep this table in sync with the Python matrix;
+ * tests/providerModelParity.test.ts asserts it.
+ */
+const PROVIDER_DEFAULT_MODEL: Record<LlmProviderType, string> = {
+  openai: "openai/gpt-5.5",
+  anthropic: "anthropic/claude-sonnet-4-6",
+  gemini: "gemini/gemini-3.1-pro-preview",
+  zai: "zai/glm-5",
+  xai: "xai/grok-4.3",
+  groq: "groq/openai/gpt-oss-120b",
+  nvidia_nim: "nvidia_nim/meta/llama-3.1-8b-instruct",
+  openrouter: "openrouter/openai/gpt-5.4-mini",
+  azure_openai: "azure/gpt-5.5",
+  aws_bedrock: "bedrock/anthropic.claude-sonnet-4-6"
+};
+
 const metadataString = (metadata: Record<string, unknown> | undefined, key: string): string | null => {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
@@ -38,10 +62,7 @@ export const buildProviderRuntimeEnv = (input: {
     LITELLM_PROVIDER: input.provider
   };
 
-  const defaultModel = metadataString(input.metadata, "defaultModel");
-  if (defaultModel) {
-    env.LITELLM_MODEL = defaultModel;
-  }
+  env.LITELLM_MODEL = metadataString(input.metadata, "defaultModel") ?? PROVIDER_DEFAULT_MODEL[input.provider];
 
   const strongModel = metadataString(input.metadata, "strongModel");
   if (strongModel) {

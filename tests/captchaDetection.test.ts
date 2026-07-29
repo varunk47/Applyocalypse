@@ -69,7 +69,9 @@ class StubElement {
 
   closest(selector: string): StubElement | null {
     const want = selector.replace(".", "");
-    let cur: StubElement | null = this;
+    // Real closest() considers the element itself before walking up.
+    if (this.classes.includes(want)) return this;
+    let cur: StubElement | null = this.parent;
     while (cur) {
       if (cur.classes.includes(want)) return cur;
       cur = cur.parent;

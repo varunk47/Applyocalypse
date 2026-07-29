@@ -144,6 +144,15 @@ export function ConfirmLedger(props: Props) {
               </span>
             </p>
           </Show>
+          <Show when={props.canonical && facts() === 0}>
+            <p class="ob-flagbar empty" role="status">
+              <AlertTriangle size={13} aria-hidden="true" />
+              <span>
+                We could not pull anything usable out of that file. It happens with scanned or
+                heavily designed resumes. Type the rows below in by hand: nothing else is lost.
+              </span>
+            </p>
+          </Show>
         </header>
       </Show>
 
@@ -243,7 +252,7 @@ export function ConfirmLedger(props: Props) {
               </article>
             )}
           </For>
-          <button class="ob-add" type="button" onClick={props.addExperience}>
+          <button class="ob-add" type="button" onClick={() => props.addExperience()}>
             <Plus size={13} aria-hidden="true" />
             <span>Add a role</span>
           </button>
@@ -299,7 +308,7 @@ export function ConfirmLedger(props: Props) {
               </article>
             )}
           </For>
-          <button class="ob-add" type="button" onClick={props.addEducation}>
+          <button class="ob-add" type="button" onClick={() => props.addEducation()}>
             <Plus size={13} aria-hidden="true" />
             <span>Add a school</span>
           </button>
@@ -342,10 +351,17 @@ export function ConfirmLedger(props: Props) {
         </Show>
       </div>
 
-      <button class="primary-action ob-advance" type="button" onClick={props.onConfirm}>
-        <Check size={17} aria-hidden="true" />
-        <span>Looks right</span>
-      </button>
+      <div class="ob-confirm-bar">
+        <p class="fine-print">
+          {props.experience.length} role{props.experience.length === 1 ? '' : 's'} and{' '}
+          {props.education.length} school{props.education.length === 1 ? '' : 's'} will be saved. You can
+          edit any of it later under Profile.
+        </p>
+        <button class="primary-action ob-advance" type="button" onClick={() => props.onConfirm()}>
+          <Check size={17} aria-hidden="true" />
+          <span>Looks right</span>
+        </button>
+      </div>
     </div>
   )
 }

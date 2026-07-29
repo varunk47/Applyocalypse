@@ -165,10 +165,21 @@ export function FinalDetails(props: Props) {
 
       <Show when={props.error}>{(message) => <div class="error-box">{message()}</div>}</Show>
 
-      <button class="primary-action ob-advance" type="button" disabled={!canFinish()} onClick={props.onFinish}>
-        <ShieldCheck size={17} aria-hidden="true" />
-        <span>{props.isSaving ? 'Saving…' : 'Create my profile'}</span>
-      </button>
+      <div class="ob-confirm-bar">
+        <p class="fine-print">
+          Nothing is submitted to an employer from this screen. Applyocalypse always stops for your
+          approval before it sends anything.
+        </p>
+        <button
+          class="primary-action ob-advance"
+          type="button"
+          disabled={!canFinish()}
+          onClick={() => props.onFinish()}
+        >
+          <ShieldCheck size={17} aria-hidden="true" />
+          <span>{props.isSaving ? 'Saving…' : 'Create my profile'}</span>
+        </button>
+      </div>
     </div>
   )
 }

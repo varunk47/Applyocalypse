@@ -61,6 +61,7 @@ function OnboardingScreen() {
 
   const [momentIndex, setMomentIndex] = createSignal(0)
   const [isSaving, setIsSaving] = createSignal(false)
+  const [isPicking, setIsPicking] = createSignal(false)
   const [prefilled, setPrefilled] = createSignal(false)
   let stageRef: HTMLDivElement | undefined
 
@@ -182,7 +183,12 @@ function OnboardingScreen() {
   }
 
   const handleChooseResume = async () => {
-    await pickAndRegisterResume()
+    setIsPicking(true)
+    try {
+      await pickAndRegisterResume()
+    } finally {
+      setIsPicking(false)
+    }
     if (profileState.uploadedFiles.some((file) => file.fileKind === 'RESUME')) go('review')
   }
 
@@ -328,7 +334,22 @@ function OnboardingScreen() {
     <div class="onboarding-shell">
       <div class="ob-frame">
         <nav class="ob-rail" aria-label="Onboarding progress">
-          <div class="wizard-progress-bar">
+          <div class="ob-rail-head">
+            <span class="ob-rail-count">
+              {String(momentIndex() + 1).padStart(2, '0')}
+              <em>/</em>
+              {String(MOMENTS.length).padStart(2, '0')}
+            </span>
+            <span class="ob-rail-now">{MOMENT_LABELS[moment()]}</span>
+          </div>
+          <div
+            class="wizard-progress-bar"
+            role="progressbar"
+            aria-valuemin={1}
+            aria-valuemax={MOMENTS.length}
+            aria-valuenow={momentIndex() + 1}
+            aria-valuetext={`Step ${momentIndex() + 1} of ${MOMENTS.length}: ${MOMENT_LABELS[moment()]}`}
+          >
             <div class="fill" style={{ width: progressPct() }} />
           </div>
           <ol class="ob-rail-stops">
@@ -353,7 +374,9 @@ function OnboardingScreen() {
           <Show when={moment() === 'resume'}>
             <ResumeDrop
               fileName={resumeFile()?.originalName ?? null}
+              isBusy={isPicking()}
               onChoose={() => void handleChooseResume()}
+              onContinue={() => go('review')}
               onManual={startManualEntry}
             />
           </Show>

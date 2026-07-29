@@ -9,6 +9,18 @@ const providerOptions = PROVIDER_OPTIONS
 
 type ProviderValue = ProviderOptionValue
 
+// Hoisted so <For> sees a stable array identity and does not rebuild the
+// segmented controls on every render pass.
+const THEME_PREFERENCES: ThemePreference[] = ['dark', 'light', 'system']
+const CONCURRENCY_CHOICES = [1, 2, 3]
+const TOGGLE_CHOICES = [false, true]
+const CONVERTER_KEYS = ['libreoffice', 'word', 'tectonic'] as const
+const CONVERTER_LABELS: Record<(typeof CONVERTER_KEYS)[number], string> = {
+  libreoffice: 'LibreOffice',
+  word: 'Microsoft Word',
+  tectonic: 'Tectonic (LaTeX)',
+}
+
 export default function SettingsScreen() {
   const {
     state,
@@ -203,67 +215,84 @@ export default function SettingsScreen() {
       </div>
 
       {/* Section 2: Theme */}
-      <div style={{ 'margin-top': '2rem' }}>
-        <div class="panel-kicker">Native theme</div>
-        <div class="segmented-control" aria-label="Theme mode">
-          {(['dark', 'light', 'system'] as ThemePreference[]).map((pref) => (
-            <button
-              classList={{ active: state.theme.preference === pref }}
-              type="button"
-              onClick={() => void setThemePreference(pref)}
-            >
-              {pref.charAt(0).toUpperCase() + pref.slice(1)}
-            </button>
-          ))}
+      <section class="settings-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Native theme</div>
+          <p class="settings-block-note">Currently rendering {state.theme.activeTheme}.</p>
         </div>
-        <p class="fine-print">Active: {state.theme.activeTheme}</p>
-      </div>
+        <div class="segmented-control" aria-label="Theme mode">
+          <For each={THEME_PREFERENCES}>
+            {(pref) => (
+              <button
+                classList={{ active: state.theme.preference === pref }}
+                type="button"
+                onClick={() => void setThemePreference(pref)}
+              >
+                {pref.charAt(0).toUpperCase() + pref.slice(1)}
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
 
       {/* Section 3: Automation */}
-      <div style={{ 'margin-top': '2rem' }}>
-        <div class="panel-kicker">Automation concurrency</div>
-        <div class="segmented-control" aria-label="Maximum concurrent application runs">
-          {([1, 2, 3] as const).map((n) => (
-            <button
-              classList={{ active: maxConcurrent() === n }}
-              type="button"
-              onClick={() => void setMaxConcurrentApplications(n)}
-            >
-              {n}
-            </button>
-          ))}
+      <section class="settings-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Automation concurrency</div>
+          <p class="settings-block-note">How many applications may run at once on this machine.</p>
         </div>
-      </div>
+        <div class="segmented-control" aria-label="Maximum concurrent application runs">
+          <For each={CONCURRENCY_CHOICES}>
+            {(n) => (
+              <button
+                classList={{ active: maxConcurrent() === n }}
+                type="button"
+                onClick={() => void setMaxConcurrentApplications(n)}
+              >
+                {n}
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
 
       {/* Section 3b: Autofill approved defaults */}
-      <div style={{ 'margin-top': '2rem' }}>
-        <div class="panel-kicker">Autofill approved defaults (name, address, links) without review</div>
-        <div class="segmented-control" aria-label="Autofill approved defaults">
-          {([false, true] as const).map((val) => (
-            <button
-              classList={{ active: autofillDefaults() === val }}
-              type="button"
-              onClick={() => void setAutofillApprovedDefaults(val)}
-            >
-              {val ? 'On' : 'Off'}
-            </button>
-          ))}
+      <section class="settings-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Autofill approved defaults</div>
+          <p class="settings-block-note">
+            Name, address and links get filled without stopping for review. EEO, criminal history and
+            previous-employer questions always stop, whatever this is set to.
+          </p>
         </div>
-        <p class="fine-print">EEO and sensitive questions always require review.</p>
-      </div>
+        <div class="segmented-control" aria-label="Autofill approved defaults">
+          <For each={TOGGLE_CHOICES}>
+            {(val) => (
+              <button
+                classList={{ active: autofillDefaults() === val }}
+                type="button"
+                onClick={() => void setAutofillApprovedDefaults(val)}
+              >
+                {val ? 'On' : 'Off'}
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
 
       {/* Section 4: Output dir */}
-      <div style={{ 'margin-top': '2rem' }}>
-        <div class="panel-kicker">Output directory</div>
-        <div style={{ display: 'flex', gap: '0.5rem', 'align-items': 'center' }}>
-          <code style={{ flex: '1', 'font-size': '0.78rem', color: 'var(--text-secondary)' }}>
-            {outputDir() || 'Default downloads folder'}
-          </code>
+      <section class="settings-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Output directory</div>
+          <p class="settings-block-note">Where tailored documents are written.</p>
+        </div>
+        <div class="settings-path-row">
+          <code class="settings-path">{outputDir() || 'Default downloads folder'}</code>
           <button class="secondary-action" type="button" disabled={state.isLoading} onClick={() => void chooseOutputDir()}>
             Change
           </button>
         </div>
-      </div>
+      </section>
 
       {/* Section 6: Converter diagnostics */}
       <div style={{ 'margin-top': '2rem' }}>
@@ -288,32 +317,33 @@ export default function SettingsScreen() {
             </button>
           }
         >
-          {(['libreoffice', 'word', 'tectonic'] as const).map((key) => {
-            const labels: Record<string, string> = { libreoffice: 'LibreOffice', word: 'Microsoft Word', tectonic: 'Tectonic (LaTeX)' }
-            const status = converters()![key]
-            return (
-              <div class="queue-row static-row" style={{ 'margin-top': '0.4rem' }}>
-                <span style={{ color: status.available ? 'var(--success)' : 'var(--danger)' }}>
-                  {status.available ? 'OK' : 'MISSING'}
-                </span>
-                <strong>{labels[key]}</strong>
-                <Show when={status.available && status.version}>
-                  <span style={{ color: 'var(--text-secondary)', 'font-size': '0.78rem' }}>{status.version}</span>
-                </Show>
-                <Show when={!status.available}>
-                  <a
-                    href={status.installUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    class="secondary-action"
-                    style={{ 'font-size': '0.78rem', padding: '2px 8px' }}
-                  >
-                    Install
-                  </a>
-                </Show>
-              </div>
-            )
-          })}
+          <For each={CONVERTER_KEYS}>
+            {(key) => {
+              const status = () => converters()![key]
+              return (
+                <div class="queue-row static-row" style={{ 'margin-top': '0.4rem' }}>
+                  <span style={{ color: status().available ? 'var(--success)' : 'var(--danger)' }}>
+                    {status().available ? 'OK' : 'MISSING'}
+                  </span>
+                  <strong>{CONVERTER_LABELS[key]}</strong>
+                  <Show when={status().available && status().version}>
+                    <span style={{ color: 'var(--text-secondary)', 'font-size': '0.78rem' }}>{status().version}</span>
+                  </Show>
+                  <Show when={!status().available}>
+                    <a
+                      href={status().installUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      class="secondary-action"
+                      style={{ 'font-size': '0.78rem', padding: '2px 8px' }}
+                    >
+                      Install
+                    </a>
+                  </Show>
+                </div>
+              )
+            }}
+          </For>
           <button
             class="secondary-action"
             type="button"

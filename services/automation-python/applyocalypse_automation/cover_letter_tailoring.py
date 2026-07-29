@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from typing import Any
 
@@ -144,5 +145,8 @@ async def generate_cover_letter(
             last_exc = exc
             break
 
-    _ = last_exc
+    if last_exc is not None:
+        # stderr is captured (and redacted) by the Electron supervisor and lands in
+        # run history, so the deterministic-template fallback stays diagnosable.
+        print(f"cover letter LLM path failed: {type(last_exc).__name__}: {last_exc}", file=sys.stderr)
     return None

@@ -1,4 +1,4 @@
-import { Show } from 'solid-js'
+import { For, Show } from 'solid-js'
 import { ChevronRight } from 'lucide-solid'
 
 export type EeoFields = {
@@ -21,94 +21,139 @@ type Props = {
   onNext?: () => void
 }
 
-const YesNo = (props: { label: string; value: string | null; onChange: (v: string) => void }) => (
-  <label>
-    <span>{props.label}</span>
-    <select value={props.value ?? ''} onChange={(e) => props.onChange(e.currentTarget.value)}>
-      <option value="">-- prefer not to say --</option>
-      <option value="Yes">Yes</option>
-      <option value="No">No</option>
-    </select>
-  </label>
-)
+const YES_NO = ['Yes', 'No']
+const YES_NO_PREFER = ['Yes', 'No', 'Prefer not to say']
 
-const YesNoPrefer = (props: { label: string; value: string | null; onChange: (v: string) => void }) => (
-  <label>
-    <span>{props.label}</span>
-    <select value={props.value ?? ''} onChange={(e) => props.onChange(e.currentTarget.value)}>
-      <option value="">-- prefer not to say --</option>
-      <option value="Yes">Yes</option>
-      <option value="No">No</option>
-      <option value="Prefer not to say">Prefer not to say</option>
-    </select>
-  </label>
+/**
+ * A three-way choice rendered as a segmented control rather than a select. These
+ * are the answers most worth being able to read back at a glance later, and a
+ * closed dropdown hides the one thing the user came here to check.
+ */
+const Choice = (props: {
+  label: string
+  hint?: string
+  options: string[]
+  value: string | null
+  onChange: (value: string | null) => void
+}) => (
+  <div class="eeo-field">
+    <span class="eeo-label">
+      {props.label}
+      <Show when={props.hint}>{(hint) => <em class="eeo-hint">{hint()}</em>}</Show>
+    </span>
+    <div class="eeo-choices" role="group" aria-label={props.label}>
+      <For each={props.options}>
+        {(option) => (
+          <button
+            class="eeo-choice"
+            classList={{ picked: props.value === option }}
+            type="button"
+            aria-pressed={props.value === option}
+            onClick={() => props.onChange(props.value === option ? null : option)}
+          >
+            {option}
+          </button>
+        )}
+      </For>
+      <Show when={props.value !== null}>
+        <button class="eeo-clear" type="button" onClick={() => props.onChange(null)}>
+          Clear
+        </button>
+      </Show>
+    </div>
+  </div>
 )
 
 export function EqualEmploymentStep(props: Props) {
-  const f = props.fields
-  const set = <K extends keyof EeoFields>(k: K) => (v: EeoFields[K]) => props.setField(k, v)
+  // Read through a function, never a hoisted alias: props are getters, and a
+  // snapshot taken at setup time would freeze these answers on first render.
+  const fields = () => props.fields
 
   return (
-    <div>
+    <div class="eeo-grid">
       <Show when={props.onNext}>
-        <h2 style={{ 'margin-bottom': '0.5rem' }}>Equal employment defaults</h2>
-        <p style={{ color: 'var(--text-secondary)', 'margin-bottom': '1.5rem' }}>
-          These are your default answers for EEO questions on job portals. You will always review them before submission.
-        </p>
+        <header class="eeo-head">
+          <h2>Equal employment defaults</h2>
+          <p class="fine-print">
+            These are your default answers for EEO questions on job portals. Every one of them is held
+            for your review before it is ever submitted.
+          </p>
+        </header>
       </Show>
 
-      <YesNo
-        label="Authorized to work in the US?"
-        value={f.eeoAuthorizedToWorkUS}
-        onChange={(v) => set('eeoAuthorizedToWorkUS')(v || null)}
+      <Choice
+        label="Authorized to work in the US"
+        options={YES_NO}
+        value={fields().eeoAuthorizedToWorkUS}
+        onChange={(value) => props.setField('eeoAuthorizedToWorkUS', value)}
       />
-      <YesNo
-        label="Requires visa sponsorship?"
-        value={f.eeoRequiresSponsorship}
-        onChange={(v) => set('eeoRequiresSponsorship')(v || null)}
+      <Choice
+        label="Requires visa sponsorship"
+        options={YES_NO}
+        value={fields().eeoRequiresSponsorship}
+        onChange={(value) => props.setField('eeoRequiresSponsorship', value)}
       />
-      <label>
-        <span>Work authorization detail (used in text boxes)</span>
+
+      <label class="eeo-field">
+        <span class="eeo-label">
+          Work authorization detail
+          <em class="eeo-hint">used verbatim when a portal asks in free text</em>
+        </span>
         <textarea
-          style={{ width: '100%', 'min-height': '4rem', resize: 'vertical' }}
-          value={f.eeoSponsorshipDetailText}
-          onInput={(e) => set('eeoSponsorshipDetailText')(e.currentTarget.value)}
+          class="eeo-text"
+          rows="3"
+          value={fields().eeoSponsorshipDetailText}
+          onInput={(event) => props.setField('eeoSponsorshipDetailText', event.currentTarget.value)}
         />
       </label>
 
-      <label>
-        <span>Gender identity</span>
-        <input value={f.eeoGender} onInput={(e) => set('eeoGender')(e.currentTarget.value)} />
-      </label>
-      <label>
-        <span>Race / ethnicity</span>
-        <input value={f.eeoRace} onInput={(e) => set('eeoRace')(e.currentTarget.value)} />
-      </label>
+      <div class="eeo-pair">
+        <label class="eeo-field">
+          <span class="eeo-label">Gender identity</span>
+          <input
+            value={fields().eeoGender}
+            onInput={(event) => props.setField('eeoGender', event.currentTarget.value)}
+          />
+        </label>
+        <label class="eeo-field">
+          <span class="eeo-label">Race or ethnicity</span>
+          <input
+            value={fields().eeoRace}
+            onInput={(event) => props.setField('eeoRace', event.currentTarget.value)}
+          />
+        </label>
+      </div>
 
-      <YesNo
-        label="Hispanic or Latino?"
-        value={f.eeoHispanicOrLatino}
-        onChange={(v) => set('eeoHispanicOrLatino')(v || null)}
+      <Choice
+        label="Hispanic or Latino"
+        options={YES_NO}
+        value={fields().eeoHispanicOrLatino}
+        onChange={(value) => props.setField('eeoHispanicOrLatino', value)}
       />
-      <YesNoPrefer
+      <Choice
         label="Disability status"
-        value={f.eeoDisability}
-        onChange={(v) => set('eeoDisability')(v || null)}
+        options={YES_NO_PREFER}
+        value={fields().eeoDisability}
+        onChange={(value) => props.setField('eeoDisability', value)}
       />
-      <YesNoPrefer
+      <Choice
         label="Veteran status"
-        value={f.eeoVeteran}
-        onChange={(v) => set('eeoVeteran')(v || null)}
+        options={YES_NO_PREFER}
+        value={fields().eeoVeteran}
+        onChange={(value) => props.setField('eeoVeteran', value)}
       />
-      <YesNoPrefer
+      <Choice
         label="LGBTQ+ identity"
-        value={f.eeoLgbtq}
-        onChange={(v) => set('eeoLgbtq')(v || null)}
+        options={YES_NO_PREFER}
+        value={fields().eeoLgbtq}
+        onChange={(value) => props.setField('eeoLgbtq', value)}
       />
+
+      <p class="fine-print">Leaving any of these blank means the portal answer is left unanswered.</p>
 
       <Show when={props.onNext}>
         {(next) => (
-          <button class="primary-action" type="button" style={{ 'margin-top': '1.5rem' }} onClick={next()}>
+          <button class="primary-action ob-advance" type="button" onClick={() => next()()}>
             <ChevronRight size={17} aria-hidden="true" />
             <span>Continue</span>
           </button>

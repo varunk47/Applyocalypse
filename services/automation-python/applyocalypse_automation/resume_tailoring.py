@@ -228,6 +228,6 @@ async def tailor_bullets_1to1(bullets: list[str], *, job_description: str, llm_c
         if isinstance(candidate, list) and len(candidate) == len(bullets):
             return [
                 (str(rewritten).strip() if rewritten is not None else "") or original
-                for original, rewritten in zip(bullets, candidate)
+                for original, rewritten in zip(bullets, candidate, strict=True)
             ]
     return None

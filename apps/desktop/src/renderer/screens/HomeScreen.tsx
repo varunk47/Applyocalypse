@@ -198,7 +198,7 @@ export default function HomeScreen() {
               <span>
                 <strong>Auto-submit after review</strong>
                 You still review and approve the tailored documents. After that approval, this run
-                submits on its own — no second confirmation click.
+                submits on its own: no second confirmation click.
               </span>
             </label>
             <Show when={error() ?? queueState.error}>
