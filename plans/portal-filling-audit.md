@@ -83,6 +83,23 @@ Recruitee, Teamtailor, Pinpoint, Rippling, Dover, Ripplematch, ADP Recruiting, U
 Paylocity, Paycom, Bullhorn, Avature. Between them these cover a large share of mid-market and
 enterprise postings.
 
+> **Status (registration done).** 18 of those 20 are now in `PORTALS`, with matching
+> `ATS_ENTRY_ACTIONS` and quirk notes; the registry is 44 portals. Dover and Ripplematch are
+> deliberately still out, because I could not confirm the hosts their postings are actually served
+> from and a wrong domain is worse than none. `_LOGIN_WALLED_PORTALS` now drives
+> `requires_login_watch` and covers the eight enterprise suites that gate the form behind a candidate
+> account, so a run that lands on a sign-in screen hands the page back instead of reporting an
+> application with no fields. The `workable` quirk note is no longer dead data.
+>
+> **What registration does and does not buy.** It stops an ordinary ATS form from falling through to
+> `GENERIC_REVIEW_FIRST` — Nodriver, high stealth, and no field detection at all until the user
+> confirms the page. It does not add portal-specific selectors, and it does not move any of these off
+> `FILL_CAPABILITY_UNPROVEN`: they get the conservative generic plan, every review gate, and the
+> submit gate. The rest of this matrix's honesty still stands — none of these has a completed live
+> application behind it. `tests/test_ats_registry_coverage.py` pins the routing, the unchanged gates,
+> and a domain-collision guard (`detect_portal` returns the first match, so an overlap would silently
+> pick a winner by tuple order).
+
 ## Findings
 
 ### F1. Wizard progression is abandoned and the run jumps to final submit on page 1 [CRITICAL]
@@ -659,7 +676,7 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 15 | Add drag-drop dropzone upload fallback; relax the visibility gate for file inputs | HIGH | M | `browser/field_detection.py`, `browser/playwright_adapter.py` (+ others) | Fixture test: an `opacity:0` file input behind a styled dropzone is discovered and receives the file |
 | 16 | Build a real fixture suite: saved HTML from the 6 ATSes + a Playwright fixture-page E2E suite | MEDIUM | L | `tests/` (new `browser_e2e/`), `browser/html_replay.py` (align label chain) | The suite itself — it is what makes fixes 1-15 verifiable and non-regressing |
 | 17 | Rename `live_certification` to a reachability probe; define a real fill-only certification | MEDIUM | S | `browser/live_certification.py`, `browser/portal_adapters.py` | Test that a 200 OK alone cannot produce a "certified" status |
-| 18 | Prune or implement: drop `workable` quirk (unregistered) or register Workable | LOW | XS | `browser/portal_workflows.py`, `browser/portal_registry.py` | Registry consistency test: every key in `ATS_PORTAL_QUIRKS` and `ATS_ENTRY_ACTIONS` is a registered `portal_id` |
+| 18 | ~~Prune or implement: drop `workable` quirk (unregistered) or register Workable~~ **(done: registered, test added)** | LOW | XS | `browser/portal_workflows.py`, `browser/portal_registry.py` | Registry consistency test: every key in `ATS_PORTAL_QUIRKS` and `ATS_ENTRY_ACTIONS` is a registered `portal_id` |
 | 19 | Confirm `APPLYO_AUTOFILL_APPROVED_DEFAULTS` cannot bypass the EEO/criminal/prior-employer review gates | LOW | XS | `field_resolution.py`, `answers.py` | Parametrized test asserting `requires_review=True` for all three categories with the env var set |
 
 ## What I could not verify, and what would prove it

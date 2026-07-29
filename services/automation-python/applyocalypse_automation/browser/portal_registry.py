@@ -40,6 +40,33 @@ PORTALS: tuple[PortalDefinition, ...] = (
     PortalDefinition("ashby", "Ashby", ("ashbyhq.com",), "playwright", False),
     PortalDefinition("icims", "iCIMS", ("icims.com",), "playwright", False),
     PortalDefinition("taleo", "Taleo", ("taleo.net",), "playwright", False),
+    # Mid-market and enterprise ATSes. Each is its own DOM, but all of them serve
+    # an ordinary form: leaving them unregistered was the expensive part, because
+    # an unknown host falls through to the stealth job-board path, which opens
+    # Nodriver and refuses to detect a single field until a human confirms the
+    # page. Registering one only says "this host is an ATS, here is its apply
+    # button" - the review gates and the submit gate are unchanged.
+    PortalDefinition("workable", "Workable", ("workable.com",), "playwright", False),
+    PortalDefinition("smartrecruiters", "SmartRecruiters", ("smartrecruiters.com",), "playwright", False),
+    PortalDefinition("jobvite", "Jobvite", ("jobvite.com",), "playwright", False),
+    PortalDefinition("bamboohr", "BambooHR", ("bamboohr.com",), "playwright", False),
+    # JazzHR boards are served from applytojob.com, not from a jazzhr.com host.
+    PortalDefinition("jazzhr", "JazzHR", ("applytojob.com",), "playwright", False),
+    PortalDefinition("breezy", "Breezy HR", ("breezy.hr",), "playwright", False),
+    PortalDefinition("recruitee", "Recruitee", ("recruitee.com",), "playwright", False),
+    PortalDefinition("teamtailor", "Teamtailor", ("teamtailor.com",), "playwright", False),
+    PortalDefinition("pinpoint", "Pinpoint", ("pinpointhq.com",), "playwright", False),
+    PortalDefinition("rippling", "Rippling", ("rippling.com",), "playwright", False),
+    PortalDefinition("successfactors", "SAP SuccessFactors", ("successfactors.com", "successfactors.eu"), "playwright", False),
+    # Oracle Recruiting Cloud lives under a tenant subdomain of oraclecloud.com;
+    # legacy iRecruitment instances still answer on oracle.com hosts.
+    PortalDefinition("oraclecloud", "Oracle Recruiting Cloud", ("oraclecloud.com",), "playwright", False),
+    PortalDefinition("adp", "ADP Recruiting", ("myjobs.adp.com", "workforcenow.adp.com"), "playwright", False),
+    PortalDefinition("ultipro", "UKG / UltiPro", ("ultipro.com", "ukg.com"), "playwright", False),
+    PortalDefinition("paylocity", "Paylocity", ("paylocity.com",), "playwright", False),
+    PortalDefinition("paycom", "Paycom", ("paycomonline.net",), "playwright", False),
+    PortalDefinition("avature", "Avature", ("avature.net",), "playwright", False),
+    PortalDefinition("bullhorn", "Bullhorn", ("bullhornstaffing.com", "bullhorncdn.com"), "playwright", False),
 )
 
 

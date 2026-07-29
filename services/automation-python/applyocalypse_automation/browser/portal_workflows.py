@@ -47,7 +47,49 @@ ATS_ENTRY_ACTIONS: dict[str, tuple[str, ...]] = {
     "governmentjobs": ("Apply", "Apply Online"),
     "usajobs": ("Apply", "Apply on company site"),
     "ncs": ("Apply", "Apply Now"),
+    "workable": ("Apply for this job", "Apply now", "Apply"),
+    # SmartRecruiters labels its primary action "I'm interested" on most boards.
+    "smartrecruiters": ("I'm interested", "Apply", "Apply Now"),
+    "jobvite": ("Apply Now", "Apply", "Apply for this job"),
+    "bamboohr": ("Apply for This Job", "Apply Now", "Apply"),
+    "jazzhr": ("Apply for this position", "Apply Now", "Apply"),
+    "breezy": ("Apply for this job", "Apply Now", "Apply"),
+    "recruitee": ("Apply for this job", "Apply now", "Apply"),
+    "teamtailor": ("Apply for this job", "Apply now", "Apply"),
+    "pinpoint": ("Apply for this role", "Apply now", "Apply"),
+    "rippling": ("Apply for this job", "Apply now", "Apply"),
+    "successfactors": ("Apply Now", "Apply"),
+    "oraclecloud": ("Apply Now", "Apply"),
+    "adp": ("Apply Now", "Apply"),
+    "ultipro": ("Apply Now", "Apply"),
+    "paylocity": ("Apply Now", "Apply"),
+    "paycom": ("Apply Now", "Apply"),
+    "avature": ("Apply Now", "Apply"),
+    "bullhorn": ("Apply Now", "Apply"),
 }
+
+# ATSes that put an account or sign-in wall between the apply click and the form.
+# Getting this wrong is not cosmetic: without the watch the run walks into a
+# login screen, sees no application fields, and reports an empty form rather
+# than handing the page back to the person who can sign in.
+_LOGIN_WALLED_PORTALS: frozenset[str] = frozenset(
+    {
+        "workday",
+        "taleo",
+        "governmentjobs",
+        "usajobs",
+        "ncs",
+        "successfactors",
+        "oraclecloud",
+        "adp",
+        "ultipro",
+        "paylocity",
+        "paycom",
+        "avature",
+        "bullhorn",
+        "icims",
+    }
+)
 
 HIGH_STEALTH_ENTRY_ACTIONS: dict[str, tuple[str, ...]] = {
     "careerbuilder": ("Apply Now", "Apply"),
@@ -102,7 +144,7 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
             default_adapter=portal.default_adapter,
             requires_high_stealth=portal.requires_high_stealth,
             entry_action_labels=ATS_ENTRY_ACTIONS[portal.portal_id],
-            requires_login_watch=portal.portal_id in {"workday", "taleo", "governmentjobs", "usajobs", "ncs"},
+            requires_login_watch=portal.portal_id in _LOGIN_WALLED_PORTALS,
             requires_external_redirect_watch=False,
             requires_manual_review_before_fill=True,
             expected_steps=(
@@ -161,10 +203,18 @@ ATS_PORTAL_QUIRKS: dict[str, tuple[str, ...]] = {
     "lever": (
         "Lever hCaptcha intercepts checkbox/radio clicks; fill text fields only and leave checkboxes and the captcha to the user.",
     ),
-    # Workable is deliberately absent: it is not a registered portal_id, so this
-    # quirk was unreachable. If Workable is ever registered, the known quirk is
-    # "SPA re-renders invalidate element references; re-detect fields before
-    # every fill." Keys here must stay a subset of PORTAL_DEFINITIONS.
+    "workable": (
+        "Workable SPA re-renders invalidate element references; re-detect fields before every fill.",
+    ),
+    "smartrecruiters": (
+        "The primary action reads \"I'm interested\", not \"Apply\"; a label-only search finds nothing.",
+    ),
+    "successfactors": (
+        "SuccessFactors gates the form behind an account; expect a sign-in wall before any field is visible.",
+    ),
+    "oraclecloud": (
+        "Oracle Recruiting Cloud runs the form as a single-page candidate experience; the URL does not change between steps.",
+    ),
     "ashby": (
         "Ashby dedupes applications by email per company; a repeat application needs an email alias.",
     ),
