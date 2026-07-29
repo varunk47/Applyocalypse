@@ -17,4 +17,11 @@ pypdf>=5.0
 # dev tooling (kept in the lock so maintainers can regenerate it)
 pip-tools>=7.4
 
+# Transitive pins that only exist to clear advisories pip-audit blocks on.
+# Both arrive through google-auth / google-api-python-client, which do not yet
+# require the fixed releases themselves. Drop a line once its parent floats past
+# the version named here on its own.
+httplib2>=0.32.0  # PYSEC-2026-3444
+pyasn1>=0.6.4  # PYSEC-2026-3455, PYSEC-2026-3456, PYSEC-2026-3457
+
 # tectonic>=0.15.0 is a binary tool, not a PyPI package — bundled via PyInstaller build script
