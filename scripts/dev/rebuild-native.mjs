@@ -20,6 +20,19 @@ const run = (args, options = {}) => {
   }
 };
 
+// node-gyp is a transitive dependency, so pnpm never links it into a `.bin`
+// directory on PATH. Spawning a bare "node-gyp" therefore only works when some
+// unrelated toolchain happens to have put one there. Resolve the real
+// entrypoint out of the store instead.
+const findNodeGypScript = () => {
+  if (!existsSync(pnpmStoreDir)) return null;
+  const candidates = readdirSync(pnpmStoreDir)
+    .filter((entry) => entry.startsWith("node-gyp@"))
+    .map((entry) => join(pnpmStoreDir, entry, "node_modules", "node-gyp", "bin", "node-gyp.js"))
+    .filter((candidate) => existsSync(candidate));
+  return candidates[0] ?? null;
+};
+
 const findBetterSqlitePackageDirs = () => {
   if (!existsSync(pnpmStoreDir)) {
     throw new Error(`pnpm store directory not found: ${pnpmStoreDir}`);
@@ -76,13 +89,18 @@ if (runtime === "electron") {
 
   if (result.status !== 0) {
     console.error("prebuild-install failed, falling back to node-gyp...");
+    const nodeGypScript = findNodeGypScript();
+    if (!nodeGypScript) {
+      console.error(`node-gyp not found in the pnpm store: ${pnpmStoreDir}`);
+      process.exit(1);
+    }
     const nodeGyp = spawnSync(
-      "node-gyp",
-      ["rebuild", "--release"],
+      process.execPath,
+      [nodeGypScript, "rebuild", "--release"],
       {
         cwd: sqlite3v12Dir,
         stdio: "inherit",
-        shell: process.platform === "win32",
+        shell: false,
         env: {
           ...process.env,
           npm_config_runtime: "electron",

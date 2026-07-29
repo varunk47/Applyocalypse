@@ -117,20 +117,34 @@ const boot = async (): Promise<void> => {
         .executeJavaScript(
           `
             new Promise((resolve) => {
-              requestAnimationFrame(() => {
-                requestAnimationFrame(() => {
-                  const bodyText = document.body?.innerText ?? "";
-                  const api = globalThis.applyocalypse;
-                  resolve({
-                    hasShell: Boolean(document.querySelector(".app-shell")),
-                    hasBrand: bodyText.includes("Applyocalypse"),
-                    navItemCount: document.querySelectorAll("[data-gsap='nav-item']").length,
-                    panelCount: document.querySelectorAll("[data-gsap='panel']").length,
-                    hasPreloadApi: Boolean(api?.theme?.getInitialState && api?.jobs?.enqueue && api?.runs?.approve),
-                    htmlTheme: document.documentElement.dataset.theme ?? null
-                  });
-                });
-              });
+              const sample = () => {
+                const bodyText = document.body?.innerText ?? "";
+                const api = globalThis.applyocalypse;
+                return {
+                  hasShell: Boolean(document.querySelector(".app-shell")),
+                  // innerText reflects text-transform, and the titlebar
+                  // brand is uppercased, so compare case-insensitively.
+                  hasBrand: bodyText.toLowerCase().includes("applyocalypse"),
+                  navItemCount: document.querySelectorAll("[data-gsap='nav-item']").length,
+                  panelCount: document.querySelectorAll("[data-gsap='panel']").length,
+                  hasPreloadApi: Boolean(api?.theme?.getInitialState && api?.jobs?.enqueue && api?.runs?.approve),
+                  htmlTheme: document.documentElement.dataset.theme ?? null
+                };
+              };
+              // The routed screen is a lazy chunk mounted behind Suspense, and
+              // first run waits on an async profile load before it even picks
+              // a route. Sampling one frame after load races both, so poll
+              // until a screen mounts and report the last sample either way.
+              const deadline = Date.now() + 10_000;
+              const poll = () => {
+                const smoke = sample();
+                if (smoke.panelCount >= 2 || Date.now() > deadline) {
+                  resolve(smoke);
+                  return;
+                }
+                setTimeout(poll, 100);
+              };
+              requestAnimationFrame(() => requestAnimationFrame(poll));
             });
           `,
           true

@@ -331,7 +331,7 @@ function OnboardingScreen() {
   })
 
   return (
-    <div class="onboarding-shell">
+    <div class="onboarding-shell" data-gsap="panel" data-view-panel>
       <div class="ob-frame">
         <nav class="ob-rail" aria-label="Onboarding progress">
           <div class="ob-rail-head">
