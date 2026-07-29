@@ -330,7 +330,19 @@ _INTERROGATIVE_OPENERS: tuple[str, ...] = (
     "will you",
 )
 
-_CHOICE_FIELD_TYPES: frozenset[str] = frozenset({"radio", "checkbox", "select", "boolean"})
+_CHOICE_FIELD_TYPES: frozenset[str] = frozenset(
+    {
+        "radio",
+        "checkbox",
+        "select",
+        "boolean",
+        # ARIA widget pickers ask the same questions a <select> does, so they must
+        # route through the same choice handling (audit finding F9).
+        "aria_combobox",
+        "aria_listbox",
+        "aria_radiogroup",
+    }
+)
 
 
 def sensitive_review_category(field_label: str) -> str | None:

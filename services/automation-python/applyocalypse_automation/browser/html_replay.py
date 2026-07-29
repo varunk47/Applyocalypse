@@ -49,6 +49,8 @@ class _PortalHtmlParser(HTMLParser):
         self._control_stack: list[dict[str, Any]] = []
         self._title_depth = 0
         self._next_frame_uid = 0
+        self._aria_stack: list[dict[str, Any]] = []
+        self._aria_option_stack: list[dict[str, Any]] = []
         self._label_by_for: dict[str, str] = {}
         self._label_text_by_uid: dict[int, str] = {}
         self._legend_by_fieldset_uid: dict[int, str] = {}
@@ -87,6 +89,61 @@ class _PortalHtmlParser(HTMLParser):
                     visible=not self._is_hidden(attrs_map),
                 )
             )
+        widget_role = self._aria_widget_role(attrs_map)
+        if widget_role is not None:
+            # Mirrors the ARIA sweep in ``field_detection.py``: a picker built from
+            # divs owns no value the browser can set, and an <input role="combobox">
+            # must NOT fall through to the plain-text path below or a write would
+            # read its own text back as proof (audit finding F9). Nested options are
+            # collected here; options a widget only references via aria-controls are
+            # resolved live, where the popup container actually exists.
+            self._aria_stack.append(
+                {
+                    "uid": None if tag_name in _VOID_TAGS else self._next_frame_uid,
+                    "index": len(self.raw_fields),
+                }
+            )
+            self.raw_fields.append(
+                {
+                    "_label_attrs": {
+                        "aria_label": attrs_map.get("aria-label") or "",
+                        "title": attrs_map.get("title") or "",
+                        "placeholder": attrs_map.get("placeholder") or "",
+                        "name_or_id": attrs_map.get("name") or attrs_map.get("id") or "",
+                    },
+                    "_aria_labelledby": attrs_map.get("aria-labelledby") or "",
+                    "_label_frame_uid": self._enclosing_uid("label"),
+                    "_fieldset_uid": self._enclosing_uid("fieldset"),
+                    "field_type": f"aria_{widget_role}",
+                    "selector": self._aria_selector_for(tag_name, attrs_map),
+                    "required": attrs_map.get("aria-required") == "true" or "required" in attrs_map,
+                    "metadata": {
+                        "tag_name": tag_name,
+                        "aria_role": widget_role,
+                        "aria_expanded": attrs_map.get("aria-expanded"),
+                        "automation_id": attrs_map.get("data-automation-id"),
+                        "id": attrs_map.get("id"),
+                        "name": attrs_map.get("name"),
+                        "placeholder": attrs_map.get("placeholder"),
+                        "options_rendered": False,
+                        "options": [],
+                    },
+                }
+            )
+            return
+        if self._aria_stack and (attrs_map.get("role") or "").lower() in {"option", "radio"}:
+            self._aria_option_stack.append(
+                {
+                    "uid": None if tag_name in _VOID_TAGS else self._next_frame_uid,
+                    "widget_index": self._aria_stack[-1]["index"],
+                    "text": [attrs_map.get("aria-label") or ""],
+                    "value": attrs_map.get("data-value") or attrs_map.get("value") or "",
+                    "selected": attrs_map.get("aria-selected") == "true"
+                    or attrs_map.get("aria-checked") == "true",
+                    "disabled": attrs_map.get("aria-disabled") == "true",
+                }
+            )
+            return
         if tag_name in {"input", "textarea", "select"}:
             field_type = (attrs_map.get("type") or "text").lower() if tag_name == "input" else tag_name
             if field_type in {"hidden", "submit", "button", "image", "reset"}:
@@ -119,6 +176,29 @@ class _PortalHtmlParser(HTMLParser):
                     },
                 }
             )
+
+    @staticmethod
+    def _aria_widget_role(attrs_map: dict[str, str | None]) -> str | None:
+        role = (attrs_map.get("role") or "").lower()
+        if role in {"combobox", "listbox", "radiogroup"}:
+            return role
+        # Workday wires its pickers to a popup listbox instead of declaring a role.
+        if "aria-haspopup" in attrs_map and "data-automation-id" in attrs_map:
+            return "combobox"
+        return None
+
+    @staticmethod
+    def _aria_selector_for(tag_name: str, attrs_map: dict[str, str | None]) -> str | None:
+        element_id = attrs_map.get("id")
+        if element_id:
+            return f"#{element_id}"
+        automation_id = attrs_map.get("data-automation-id")
+        if automation_id:
+            return f'[data-automation-id="{automation_id}"]'
+        name = attrs_map.get("name")
+        if not name:
+            return None
+        return f'{tag_name}[name="{name}"]'
 
     def _enclosing_uid(self, tag_name: str) -> int | None:
         for frame in reversed(self._frames):
@@ -166,6 +246,8 @@ class _PortalHtmlParser(HTMLParser):
             frame["text"].append(data.strip())
         if self._control_stack:
             self._control_stack[-1]["text"].append(data.strip())
+        if self._aria_option_stack:
+            self._aria_option_stack[-1]["text"].append(data.strip())
 
     def handle_endtag(self, tag: str) -> None:
         tag_name = tag.lower()
@@ -173,6 +255,23 @@ class _PortalHtmlParser(HTMLParser):
             self._title_depth -= 1
         if tag_name not in _VOID_TAGS:
             self._close_frame(tag_name)
+        # Close ARIA widgets and their options off the frame lifecycle rather than by
+        # tag name, so a plain <div> wrapper inside a listbox cannot end the widget.
+        live_uids = {int(frame["uid"]) for frame in self._frames}
+        while self._aria_option_stack and self._aria_option_stack[-1]["uid"] not in live_uids:
+            option = self._aria_option_stack.pop()
+            metadata = self.raw_fields[int(option["widget_index"])]["metadata"]
+            metadata["options"].append(
+                {
+                    "value": option["value"],
+                    "label": " ".join(part for part in option["text"] if part).strip(),
+                    "selected": option["selected"],
+                    "disabled": option["disabled"],
+                }
+            )
+            metadata["options_rendered"] = True
+        while self._aria_stack and self._aria_stack[-1]["uid"] not in live_uids:
+            self._aria_stack.pop()
         if tag_name in {"button", "a"} and self._control_stack:
             control = self._control_stack.pop()
             text = " ".join(part for part in control["text"] if part).strip()
