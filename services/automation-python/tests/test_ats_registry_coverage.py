@@ -52,7 +52,9 @@ def test_registered_ats_urls_route_to_the_direct_form_flow(portal_id: str, url: 
 
     assert workflow.portal_id == portal_id, f"{url} resolved to {workflow.portal_id}"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
-    assert workflow.default_adapter == "playwright"
+    # nodriver, not playwright: an ATS default has to be an adapter that ships with
+    # the packaged worker. See test_portal_registry.py for the guard that enforces it.
+    assert workflow.default_adapter == "nodriver"
     assert workflow.requires_high_stealth is False
     assert workflow.entry_action_labels, "an ATS with no apply label cannot be entered"
 

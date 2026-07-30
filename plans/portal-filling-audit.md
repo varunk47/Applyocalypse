@@ -41,6 +41,12 @@ ATSes defaults to `playwright`**, whose method bodies have zero executable test 
 playwright test (`tests/test_portal_registry.py:391`) early-returns when playwright *is* installed, so
 on any dev machine it asserts nothing at all.
 
+> **Update.** This understated the problem. Playwright is not installed *anywhere*: it is absent from
+> `requirements.in`, from the lock file, from `pyproject.toml` and from the packaged worker's hidden
+> imports. So the declared default could never launch, and every ATS run silently fell back to nodriver.
+> All defaults are now `nodriver`. Read the "Adapter" column below as "was playwright"; the correction
+> at row 9 has the details and the guard that stops it recurring.
+
 | Portal | Registered | Adapter | Workflow | Selectors | Tests | Genuinely usable? | Notes |
 |---|---|---|---|---|---|---|---|
 | workday | `portal_registry.py:37` | playwright | `ATS_DIRECT_FORM`, entry actions `portal_workflows.py:41` | none | ideal-HTML replay fixture `tests/test_portal_replay_fixtures.py:23-40` | **Partial** | ARIA comboboxes are now discovered and safely handled (`69c898f`); they were previously invisible. Still uncertified against a live posting, and the account-creation wall remains unhandled. Was: real Workday uses `data-automation-id` ARIA comboboxes, not `select`, so discovery could not see them. The repo's own quirk note says so (`portal_workflows.py:158-159`). Also an account-creation wall before the form, unhandled. |
@@ -650,6 +656,11 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > - **Row 9, open shadow roots.** ARIA widgets and cross-origin iframes shipped; shadow
 >   roots did not, because no major ATS is known to put form fields in one. Building for
 >   that would be speculative.
+> - **Row 9, same-origin iframes.** The discovery JS is a plain `document.querySelectorAll`
+>   that never descends into any iframe, and nodriver only reaches *out-of-process* frames,
+>   so a same-origin embed is still invisible. Worth doing, and cheap: recurse into
+>   `iframe.contentDocument` inside the discovery script, where the same-origin policy
+>   actually permits it.
 > - **Row 15, the synthetic `DataTransfer` drop.** Only needed for a dropzone with no
 >   backing `<input type="file">` at all, and react-dropzone always renders one.
 > - **Row 16, a Playwright fixture-page E2E suite.** The saved-HTML replay suite and the
@@ -669,7 +680,7 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 6 | ~~Stop dropping unlabeled fields; extend the label chain (`aria-labelledby`, `legend`, `title`)~~ **(done: `tests/test_label_resolution.py`)** | CRITICAL | S | `browser/field_detection.py`, `browser/html_replay.py` (keep chains identical) | Replay test on saved real HTML: an `aria-labelledby`-only required input is discovered with a usable label |
 | 7 | ~~Verify progression clicks actually advanced; surface portal validation errors~~ **(done: `tests/test_portal_step_progression.py`)** | HIGH | M | `runner.py`, `browser/field_detection.py` | Fixture test: a "Next" click that the page rejects returns `"blocked"` with the extracted error text, and does not increment the step index |
 | 8 | ~~Uploads first → settle via `wait_for_page_text` → re-detect → then text fields~~ **(done: `tests/test_upload_before_typing.py`)** | HIGH | M | `runner.py` | Fixture test emulating Workday: values written after a resume-parse repopulation survive |
-| 9 | ARIA widget roles **(done, 69c898f)** / cross-origin iframes **(done, Playwright)** / shadow roots **still open** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
+| 9 | ARIA widget roles **(done, 69c898f)** / cross-origin iframes **(done: Playwright, then nodriver — the adapter that actually ships)** / same-origin iframes and shadow roots **still open** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
 
 > **F9 status (2026-07-29).** The ARIA half shipped in `69c898f`: `role=combobox|listbox|radiogroup`
 > and the Workday `aria-haspopup` + `data-automation-id` pickers are discovered, options are harvested
@@ -677,7 +688,34 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > fallthrough so an `<input role="combobox">` can no longer report a false success. A picker whose
 > popup was never opened refuses with `requires_human` rather than guessing.
 >
-> **Cross-origin iframes: done for the Playwright adapter.** The Greenhouse `grnhse_iframe` is served
+> **Correction — the Playwright-only version of this shipped to nobody.** Every ATS in
+> `portal_registry.py` declared `default_adapter="playwright"`, and `adapter_candidates_for_workflow`
+> put it first. But playwright is not in `requirements.in`, not in the lock file, not in
+> `pyproject.toml` and not in the PyInstaller hidden-import list. On a real install
+> `create_browser_adapter("playwright").launch(...)` returned `ok=False | playwright is not installed`
+> and the run fell through to nodriver silently. Nothing looked broken, which is exactly why it
+> survived: the frame work below was never the code any user ran.
+>
+> The fix was not to add playwright. It ships its own Chromium (~150MB), needs an awkward
+> driver-node-binary story under PyInstaller, and its patched Chromium is *worse* against the bot
+> detection this app exists to survive — which is why nodriver, which drives the user's real installed
+> Chrome, is in the stack at all. So: every ATS default is now `nodriver`, the frame support below was
+> ported to `nodriver_adapter.py`, and `test_portal_registry.py` asserts against the **installed
+> environment** that every declared default is importable. A default that only works on a developer's
+> machine is the failure being pinned, so a comment would not have been enough.
+>
+> **Coverage difference between the two adapters.** Playwright's `page.frames` enumerates same-origin
+> frames too; nodriver reaches frames through Chrome's site isolation, where a cross-origin iframe gets
+> its own renderer and its own CDP target and comes back as a connectable `IFrame`. So the nodriver
+> port covers out-of-process frames only. That is not a regression: the discovery JS
+> (`field_detection.py:255`) is a plain `document.querySelectorAll` that never descends into any
+> iframe, so same-origin embeds were already missed by every adapter. It is a separate open gap.
+>
+> One nodriver-specific hazard: `get_frames()` is rebuilt from `Target.getTargets` on every call and
+> does not promise a stable order. The frame **URL** is therefore the key and `frame_index` is only a
+> tiebreaker between same-URL frames, and only when it agrees with the URL.
+>
+> **Cross-origin iframes: done for the Playwright adapter, and now for nodriver.** The Greenhouse `grnhse_iframe` is served
 > from `job-boards.greenhouse.io` on an employer domain, so walking `iframe.contentDocument` from the
 > injected script never reaches it. `detect_fields` now sweeps the top document plus every subframe
 > that could hold form content (`frame_url_is_worth_scanning` skips CAPTCHA, analytics, chat and media
@@ -689,9 +727,12 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > would look like a success while leaving the real field empty. Clicks try the top document first and
 > only then the embedded frames, so a portal that hosts its own form behaves exactly as before.
 >
-> No protocol change was needed: `BrowserField.metadata` is already `dict[str, Any]`, so only
-> `playwright_adapter.py` changed. The SeleniumBase and nodriver adapters never set frame metadata and
-> keep their top-frame behaviour.
+> No protocol change was needed: `BrowserField.metadata` is already `dict[str, Any]`, so only the two
+> adapters changed. SeleniumBase never sets frame metadata and keeps its top-frame behaviour.
+> `tests/test_nodriver_cross_origin_frames.py` mirrors the Playwright suite against nodriver's shape
+> (a fake tab whose `get_frames()` returns fakes carrying a `.target.url`), including the two failures
+> that must never be silent: a vanished frame refusing instead of writing to the top document, and
+> ambiguous same-URL frames refusing rather than guessing.
 >
 > **Known limitation:** `_probe_page_fingerprint` stays top-document-only. Making it frame-aware would
 > let a transient frame-evaluate failure register as a spurious "page changed" — a false positive in
