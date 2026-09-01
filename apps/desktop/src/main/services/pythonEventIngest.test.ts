@@ -1031,4 +1031,59 @@ describe("python event ingest", () => {
       closeApplyocalypseDatabase(db);
     }
   });
+
+  it("compiles each of its queries once per connection, not once per event", () => {
+    // A worker sends hundreds of events per application and every one of them ran
+    // the same handful of statements through `prepare` again. Compiling the SQL,
+    // not the transaction wrapped around it, is what an event costs, so the same
+    // query text arriving twice should be the same compiled statement.
+    const { db, runId } = createRun();
+    try {
+      const compiled: string[] = [];
+      const realPrepare = db.prepare.bind(db);
+      db.prepare = ((sql: string) => {
+        compiled.push(sql);
+        return realPrepare(sql);
+      }) as typeof db.prepare;
+
+      // Five different step types, so every one of them takes the insert branch
+      // rather than updating a step an earlier event already made. A step id of
+      // the worker's own invention cannot be used here: `run_events.step_id`
+      // references `application_steps`, and the event row is written first.
+      const eventTypes = [
+        "JD_SCRAPE_STARTED",
+        "PAGE_NAVIGATED",
+        "PORTAL_WORKFLOW_SELECTED",
+        "RESUMED",
+        "CLEANUP_COMPLETED"
+      ];
+      for (const eventType of eventTypes) {
+        ingestPythonEventLine({
+          db,
+          windows: () => [],
+          rawLine: JSON.stringify({
+            event_type: eventType,
+            run_id: runId,
+            step_id: null,
+            timestamp: "2026-01-01T00:00:00.000Z",
+            severity: "INFO",
+            message: `worker sent ${eventType}`,
+            machine_state: {},
+            ui_state: {},
+            payload: {}
+          })
+        });
+      }
+
+      // The events really did the work, so the counts below are not zero by default.
+      expect(new RunRepository(db).listSteps(runId)).toHaveLength(5);
+
+      const insertsCompiled = compiled.filter((sql) => sql.includes("INSERT INTO application_steps"));
+      const stepOrderCompiled = compiled.filter((sql) => sql.includes("MAX(step_order)"));
+      expect(insertsCompiled).toHaveLength(1);
+      expect(stepOrderCompiled).toHaveLength(1);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
 });

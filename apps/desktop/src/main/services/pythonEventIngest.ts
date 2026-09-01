@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { isAbsolute, normalize, relative, resolve } from "node:path";
+import type BetterSqlite3 from "better-sqlite3";
 import type { BrowserWindow } from "electron";
 import { AuditRepository, JobAnalysisRepository, RunRepository, TailoringRunRepository, type ApplyocalypseDatabase } from "@applyocalypse/db";
 import { IpcChannels } from "@applyocalypse/ipc-contracts";
@@ -21,6 +22,35 @@ type PythonEventIngestInput = {
 
 type PythonWorkerEvent = ReturnType<typeof PythonWorkerEventSchema.parse>;
 type BlockerReviewType = "CAPTCHA" | "MFA" | "OTP" | "AMBIGUOUS_QUESTION" | "LOGIN" | "PORTAL_ENTRY" | "PORTAL_STEP" | "ANSWER";
+
+type PreparedStatement = BetterSqlite3.Statement;
+
+const preparedStatements = new WeakMap<ApplyocalypseDatabase, Map<string, PreparedStatement>>();
+
+/**
+ * The same SQL, compiled once per connection.
+ *
+ * Every worker event runs a handful of statements, and better-sqlite3 recompiles
+ * each one on every `prepare` call: that compilation, not the transaction around
+ * it, is what an event actually costs. The cache is keyed weakly by connection so
+ * a closed database takes its statements with it, and it is only ever called with
+ * literal SQL, so each connection's map is bounded by the number of queries in
+ * this file rather than by how long the app has been running.
+ */
+const statement = (db: ApplyocalypseDatabase, sql: string): PreparedStatement => {
+  let byQuery = preparedStatements.get(db);
+  if (!byQuery) {
+    byQuery = new Map<string, PreparedStatement>();
+    preparedStatements.set(db, byQuery);
+  }
+  const cached = byQuery.get(sql);
+  if (cached) {
+    return cached;
+  }
+  const prepared = db.prepare(sql);
+  byQuery.set(sql, prepared);
+  return prepared;
+};
 
 const parsePayloadJson = (value: unknown): string => JSON.stringify(value ?? {});
 
@@ -128,11 +158,10 @@ const materializeApplicationStep = (db: ApplyocalypseDatabase, event: PythonWork
   }
 
   const existing = event.step_id
-    ? (db.prepare("SELECT id FROM application_steps WHERE id = ? AND application_run_id = ?").get(event.step_id, event.run_id) as
+    ? (statement(db, "SELECT id FROM application_steps WHERE id = ? AND application_run_id = ?").get(event.step_id, event.run_id) as
         | { id: string }
         | undefined)
-    : (db
-        .prepare(
+    : (statement(db, 
           `
           SELECT id
           FROM application_steps
@@ -152,7 +181,7 @@ const materializeApplicationStep = (db: ApplyocalypseDatabase, event: PythonWork
     payload: event.payload
   });
   if (existing) {
-    db.prepare(
+    statement(db, 
       `
       UPDATE application_steps
       SET status = @status,
@@ -173,11 +202,11 @@ const materializeApplicationStep = (db: ApplyocalypseDatabase, event: PythonWork
     return existing.id;
   }
 
-  const orderRow = db.prepare("SELECT COALESCE(MAX(step_order), -1) + 1 AS step_order FROM application_steps WHERE application_run_id = ?").get(event.run_id) as {
+  const orderRow = statement(db, "SELECT COALESCE(MAX(step_order), -1) + 1 AS step_order FROM application_steps WHERE application_run_id = ?").get(event.run_id) as {
     step_order: number;
   };
   const stepId = event.step_id ?? randomUUID();
-  db.prepare(
+  statement(db, 
     `
     INSERT INTO application_steps (
       id, application_run_id, step_order, step_type, status, page_url,
@@ -240,8 +269,7 @@ const createBlockerReviewRequest = (input: {
   if (!reviewType) {
     return;
   }
-  const existing = input.db
-    .prepare(
+  const existing = statement(input.db, 
       `
       SELECT id
       FROM review_requests
@@ -303,13 +331,12 @@ const persistValidationReport = (input: {
   report: Record<string, unknown>;
   createdAt: string;
 }): void => {
-  const runRow = input.db.prepare("SELECT tailoring_run_id FROM application_runs WHERE id = ?").get(input.applicationRunId) as
+  const runRow = statement(input.db, "SELECT tailoring_run_id FROM application_runs WHERE id = ?").get(input.applicationRunId) as
     | { tailoring_run_id: string | null }
     | undefined;
   const blockingIssues = Array.isArray(input.report["blocking_issues"]) ? input.report["blocking_issues"] : [];
   const warnings = Array.isArray(input.report["warnings"]) ? input.report["warnings"] : [];
-  input.db
-    .prepare(
+  statement(input.db, 
       `
       INSERT INTO validation_reports (
         id, tailoring_run_id, generated_file_id, source_kind, passed,
@@ -339,8 +366,7 @@ const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEv
     return;
   }
   const now = event.timestamp;
-  const providerConnection = db
-    .prepare(
+  const providerConnection = statement(db, 
       `
       SELECT id
       FROM provider_connections
@@ -352,8 +378,7 @@ const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEv
     `
     )
     .get() as { id: string } | undefined;
-  const openSession = db
-    .prepare(
+  const openSession = statement(db, 
       `
       SELECT id
       FROM otp_sessions
@@ -366,7 +391,7 @@ const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEv
     .get({ runId: event.run_id }) as { id: string } | undefined;
 
   if (event.event_type === "OTP_RETRIEVAL_STARTED") {
-    db.prepare(
+    statement(db, 
       `
       INSERT INTO otp_sessions (
         id, application_run_id, provider_connection_id, status, purpose,
@@ -394,7 +419,7 @@ const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEv
         ? "TIMEOUT"
         : "FAILED";
   if (openSession) {
-    db.prepare(
+    statement(db, 
       `
       UPDATE otp_sessions
       SET status = @status,
@@ -412,7 +437,7 @@ const persistOtpSessionEvent = (db: ApplyocalypseDatabase, event: PythonWorkerEv
     return;
   }
 
-  db.prepare(
+  statement(db, 
     `
     INSERT INTO otp_sessions (
       id, application_run_id, provider_connection_id, status, purpose,
@@ -539,7 +564,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
     const eventId = randomUUID();
     const createdAt = event.timestamp;
 
-    db.prepare(
+    statement(db, 
       `
       INSERT INTO run_events (
         id, application_run_id, step_id, event_type, severity, message,
@@ -568,7 +593,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
 
     if (preloaded.screenshot) {
       const { payload: screenshot, localPath, sha256 } = preloaded.screenshot;
-      db.prepare(
+      statement(db, 
         `
         INSERT INTO screenshots (
           id, application_run_id, step_id, screenshot_id, local_path,
@@ -603,7 +628,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
 
     if (preloaded.browserArtifact) {
       const { payload: artifact, localPath } = preloaded.browserArtifact;
-      db.prepare(
+      statement(db, 
         `
         INSERT INTO browser_artifacts (
           id, application_run_id, artifact_type, local_path, metadata_json, created_at
@@ -624,7 +649,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
 
     if (preloaded.generatedFile) {
       const { payload: generatedFile, localPath } = preloaded.generatedFile;
-      const runRow = db.prepare("SELECT profile_id, job_target_id, tailoring_run_id FROM application_runs WHERE id = ?").get(event.run_id) as
+      const runRow = statement(db, "SELECT profile_id, job_target_id, tailoring_run_id FROM application_runs WHERE id = ?").get(event.run_id) as
         | { profile_id: string; job_target_id: string; tailoring_run_id: string | null }
         | undefined;
       if (!runRow) {
@@ -698,7 +723,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
         failureCode: event.event_type === "FAILED" ? String(event.payload["code"] ?? "WORKER_FAILED") : null,
         failureMessage: event.event_type === "FAILED" ? event.message : null
       });
-      db.prepare(
+      statement(db, 
         `
         UPDATE queue_items
         SET status = @status,
@@ -749,8 +774,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
         });
       } else {
         const reviewType = event.event_type === "READY_TO_SUBMIT" ? "FINAL_SUBMIT" : "DOCUMENT";
-        const existingReview = db
-          .prepare(
+        const existingReview = statement(db, 
             `
             SELECT id
             FROM review_requests
@@ -780,8 +804,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
       const source = ["PROFILE", "JD_ANALYSIS", "USER_EDIT", "LLM_PROPOSAL", "UNKNOWN"].includes(proposedSource)
         ? (proposedSource as "PROFILE" | "JD_ANALYSIS" | "USER_EDIT" | "LLM_PROPOSAL" | "UNKNOWN")
         : "LLM_PROPOSAL";
-      const existing = db
-        .prepare(
+      const existing = statement(db, 
           `
           SELECT id
           FROM application_answers
@@ -818,7 +841,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
         selectedValueLength: typeof event.payload["selected_value_length"] === "number" ? event.payload["selected_value_length"] : null,
         source: typeof event.payload["source"] === "string" ? event.payload["source"] : null
       };
-      db.prepare(
+      statement(db, 
         `
         UPDATE application_answers
         SET status = 'APPLIED',
@@ -841,7 +864,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
       const generatedFileId = typeof event.payload["generated_file_id"] === "string" ? event.payload["generated_file_id"] : null;
       const localPath = preloaded.uploadedLocalPath ?? null;
       if (generatedFileId !== null || localPath !== null) {
-        db.prepare(
+        statement(db, 
           `
           UPDATE generated_files
           SET upload_status = 'UPLOADED',
