@@ -34,6 +34,7 @@ from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent
 from .jd_analysis import analyze_with_optional_llm
+from .llm import usage as llm_usage
 from .llm.litellm_client import LiteLlmClient
 from .resume_tailoring import tailor_resume_sections
 from .tailoring.engine import TailoringEngine
@@ -854,3 +855,28 @@ def generate_application_documents(
                 ui_state={"current_step": "document_review", "requires_user_review": True},
                 payload={"artifact_kind": "cover_letter", "blocking_issues": [{"code": "INSUFFICIENT_VERIFIED_EVIDENCE"}]},
             ).emit()
+
+    # Every LLM call in this run went through one client, so the ledger is complete
+    # by the time the last document is written. Emitted here rather than per stage
+    # because the tailoring path can call the model three times on its own (initial,
+    # a retry when the bullets fail validation, another when the PDF runs to two
+    # pages), and a per-stage number would report the first of those as the total.
+    #
+    # Skipped entirely when nothing was called, which is the ordinary case for a run
+    # with no provider configured. An all-zeros event is noise in the feed.
+    usage_snapshot = llm_usage.snapshot()
+    if usage_snapshot["calls"]:
+        WorkerEvent(
+            event_type=EventType.LLM_USAGE_REPORTED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.INFO,
+            message=(
+                f"LLM usage: {usage_snapshot['calls']} calls, "
+                f"{usage_snapshot['prompt_tokens']} prompt tokens, "
+                f"{usage_snapshot['cached_prompt_tokens']} served from cache"
+            ),
+            machine_state={"cost_is_partial": usage_snapshot["cost_is_partial"]},
+            ui_state={"current_step": "document_review"},
+            payload=usage_snapshot,
+        ).emit()

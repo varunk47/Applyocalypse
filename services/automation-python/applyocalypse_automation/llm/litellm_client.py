@@ -4,6 +4,8 @@ import os
 from dataclasses import dataclass
 from typing import Any
 
+from . import usage
+
 # OpenAI-compatible providers whose API key lives under a provider-specific env var.
 # When a custom base URL is configured (e.g. NVIDIA NIM), the request must be driven
 # through litellm's openai-compatible path with that base + key, or the model id has
@@ -151,6 +153,10 @@ class LiteLlmClient:
                 call_kwargs["api_key"] = api_key
 
         response = await acompletion(**call_kwargs)
+        # Recorded before the response is validated, because a completion that came
+        # back malformed was still billed. Counting only the calls that parsed would
+        # report a spend lower than the one on the invoice.
+        usage.record(schema_name=schema_name, model=self.model, response=response)
         content = response["choices"][0]["message"]["content"]
         if not isinstance(content, str):
             raise RuntimeError(f"{schema_name} response did not contain text content")

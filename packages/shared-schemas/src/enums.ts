@@ -97,7 +97,8 @@ export const RunEventTypeSchema = z.enum([
   "READY_TO_SUBMIT",
   "SUBMITTED",
   "FAILED",
-  "CLEANUP_COMPLETED"
+  "CLEANUP_COMPLETED",
+  "LLM_USAGE_REPORTED"
 ]);
 
 export const ReviewStatusSchema = z.enum(["OPEN", "APPROVED", "REJECTED", "EXPIRED", "CANCELLED"]);

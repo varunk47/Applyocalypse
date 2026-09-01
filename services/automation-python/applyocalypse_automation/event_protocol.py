@@ -48,6 +48,7 @@ class EventType(StrEnum):
     SUBMITTED = "SUBMITTED"
     FAILED = "FAILED"
     CLEANUP_COMPLETED = "CLEANUP_COMPLETED"
+    LLM_USAGE_REPORTED = "LLM_USAGE_REPORTED"
 
 
 JsonObject = dict[str, Any]
