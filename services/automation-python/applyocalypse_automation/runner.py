@@ -13,6 +13,7 @@ from typing import Literal
 
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
+from .browser.field_detection import is_secret_field
 from .browser.greenhouse_schema import GreenhouseQuestion, fetch_questions, unanswered_required
 from .browser.portal_adapters import (
     COMMON_STEP_PROGRESSION_LABELS,
@@ -38,6 +39,13 @@ from .field_resolution import (
 )
 from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
 from .secret_env import apply_provider_secrets_to_env
+from .submission_receipt import (
+    ReceiptAnswer,
+    ReceiptDocument,
+    SubmissionRecord,
+    sha256_of,
+    write_receipt,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -275,6 +283,74 @@ def final_submit_labels_for(workflow: PortalWorkflow | None) -> list[str]:
     return list(dict.fromkeys(labels))
 
 
+def emit_submission_receipt(
+    work_dir: Path,
+    run_id: str,
+    submission_record: SubmissionRecord | None,
+    *,
+    step_id: str | None,
+    confirmed: bool,
+    confirmation_url: object,
+    confirmation_title: object,
+) -> None:
+    """Write the record of what was sent, beside the run's other artifacts.
+
+    Written on both outcomes, not only the confirmed one. When the click landed
+    but no confirmation could be verified, the application may well have gone
+    through, and that is exactly the case where the user needs a record of what
+    was in it. The receipt says which of the two happened rather than assuming.
+
+    Called before the outcome event is emitted, so the file is already on disk by
+    the time anything reacts to that event and SUBMITTED stays the last word on a
+    submitted run.
+
+    Nothing here may change the outcome of a submission that has already
+    happened, so a failure to write the file is reported and dropped.
+    """
+    if submission_record is None:
+        return
+    try:
+        receipt_path, receipt_sha256 = write_receipt(
+            work_dir,
+            submission_record,
+            run_id=run_id,
+            submitted_at=utc_now(),
+            confirmed=confirmed,
+            confirmation_url=confirmation_url,
+            confirmation_title=confirmation_title,
+        )
+    except OSError as error:
+        WorkerEvent(
+            event_type=EventType.SUBMISSION_RECEIPT_WRITTEN,
+            run_id=run_id,
+            step_id=step_id,
+            severity=Severity.WARN,
+            message="The application was submitted, but its receipt could not be written",
+            machine_state={"written": False},
+            ui_state={"current_step": "submitted"},
+            payload={"written": False, "error": str(error)},
+        ).emit()
+        return
+    WorkerEvent(
+        event_type=EventType.SUBMISSION_RECEIPT_WRITTEN,
+        run_id=run_id,
+        step_id=step_id,
+        severity=Severity.INFO,
+        message=f"Wrote a receipt for this application: {len(submission_record.documents)} document(s), "
+        f"{len(submission_record.answers)} answer(s)",
+        machine_state={"written": True, "confirmed": confirmed},
+        ui_state={"current_step": "submitted"},
+        payload={
+            "written": True,
+            "local_path": str(receipt_path),
+            "sha256": receipt_sha256,
+            "document_count": len(submission_record.documents),
+            "answer_count": len(submission_record.answers),
+            "captured_at": utc_now(),
+        },
+    ).emit()
+
+
 async def perform_final_submit_with_control(
     adapter: BrowserAdapter,
     work_dir: Path,
@@ -282,6 +358,7 @@ async def perform_final_submit_with_control(
     final_submit_control: WorkerControl,
     *,
     workflow: PortalWorkflow | None = None,
+    submission_record: SubmissionRecord | None = None,
 ) -> bool:
     blockers = await adapter.detect_blockers()
     if blockers:
@@ -315,6 +392,15 @@ async def perform_final_submit_with_control(
     visible_text = await adapter.extract_visible_text()
     text = str(visible_text.payload.get("text") or "") if visible_text.ok else ""
     if submission_confirmation_detected(text):
+        emit_submission_receipt(
+            work_dir,
+            run_id,
+            submission_record,
+            step_id=final_submit_control.step_id,
+            confirmed=True,
+            confirmation_url=visible_text.payload.get("url"),
+            confirmation_title=visible_text.payload.get("title"),
+        )
         WorkerEvent(
             event_type=EventType.SUBMITTED,
             run_id=run_id,
@@ -334,6 +420,15 @@ async def perform_final_submit_with_control(
         ).emit()
         return True
 
+    emit_submission_receipt(
+        work_dir,
+        run_id,
+        submission_record,
+        step_id=final_submit_control.step_id,
+        confirmed=False,
+        confirmation_url=visible_text.payload.get("url") if visible_text.ok else None,
+        confirmation_title=visible_text.payload.get("title") if visible_text.ok else None,
+    )
     WorkerEvent(
         event_type=EventType.PAUSED,
         run_id=run_id,
@@ -360,11 +455,19 @@ async def perform_final_submit_after_approval(
     run_id: str,
     *,
     workflow: PortalWorkflow | None = None,
+    submission_record: SubmissionRecord | None = None,
 ) -> bool:
     final_submit_control = await asyncio.to_thread(wait_for_final_submit_decision, work_dir, run_id)
     if final_submit_control is None:
         return False
-    return await perform_final_submit_with_control(adapter, work_dir, run_id, final_submit_control, workflow=workflow)
+    return await perform_final_submit_with_control(
+        adapter,
+        work_dir,
+        run_id,
+        final_submit_control,
+        workflow=workflow,
+        submission_record=submission_record,
+    )
 
 
 def emit_worker_cancelled(run_id: str, control: WorkerControl, *, message: str) -> None:
@@ -1933,6 +2036,11 @@ async def run_browser_apply_after_review(
     # were left blank are already reported by the FIELD_REVIEW_REQUIRED pause, so the two
     # signals cover different failures rather than repeating one.
     observed_field_names: set[str] = set()
+    # What the receipt is built from. Keyed by field so a form that is re-read
+    # after a re-render, or a wizard page revisited, records what finally landed
+    # in each control rather than one line per attempt.
+    receipt_documents: dict[tuple[str, str], ReceiptDocument] = {}
+    receipt_answers: dict[tuple[str, str], ReceiptAnswer] = {}
     while True:
         if upload_attempt > 0:
             if await handle_runtime_control(work_dir, run_id, context="required document retry field detection"):
@@ -2029,6 +2137,21 @@ async def run_browser_apply_after_review(
                 result = await adapter.upload_file(field, local_path)
                 if result.ok:
                     uploaded_document_targets.add(upload_target)
+                    try:
+                        uploaded_sha256 = sha256_of(local_path)
+                        uploaded_size_bytes = local_path.stat().st_size
+                    except OSError:
+                        # The upload itself already succeeded. Failing to read the
+                        # file back afterwards is not a reason to fail the run.
+                        uploaded_sha256, uploaded_size_bytes = "unavailable", 0
+                    receipt_documents[(field.label or "", field.selector or "")] = ReceiptDocument(
+                        field_label=field.label or "Document",
+                        filename=str(generated_file_value(generated_file, "filename") or local_path.name),
+                        file_kind=str(generated_file_value(generated_file, "file_kind") or "DOCUMENT"),
+                        file_format=str(generated_file_value(generated_file, "format") or ""),
+                        size_bytes=uploaded_size_bytes,
+                        sha256=uploaded_sha256,
+                    )
                     WorkerEvent(
                         event_type=EventType.FILE_UPLOADED,
                         run_id=run_id,
@@ -2043,6 +2166,7 @@ async def run_browser_apply_after_review(
                             "format": generated_file_value(generated_file, "format"),
                             "filename": generated_file_value(generated_file, "filename"),
                             "local_path": str(local_path),
+                            "sha256": uploaded_sha256,
                             "field_label": field.label,
                             "field_type": field.field_type,
                             "selector": field.selector,
@@ -2128,6 +2252,13 @@ async def run_browser_apply_after_review(
             result = await adapter.apply_field_value(field, value)
             if result.ok:
                 is_secret_value = secret_source is not None
+                receipt_answers[(field.label or "", field.selector or "")] = ReceiptAnswer(
+                    field_label=field.label or "Unlabelled field",
+                    # Stricter than the event log on purpose. A receipt is a file the
+                    # user can hand to someone else, so a field that merely looks like
+                    # it holds a secret is withheld as well as one that provably does.
+                    value=None if is_secret_value or is_secret_field(field) else value,
+                )
                 WorkerEvent(
                     event_type=EventType.FIELD_VALUE_APPLIED,
                     run_id=run_id,
@@ -2457,6 +2588,13 @@ async def run_browser_apply_after_review(
             "unseen_required_questions": [question.label for question in unanswered_questions],
         },
     ).emit()
+    submission_record = SubmissionRecord(
+        job_url=job_url,
+        portal_id=runtime_policy.portal_id,
+        auto_submit=auto_submit_enabled,
+        documents=tuple(receipt_documents.values()),
+        answers=tuple(receipt_answers.values()),
+    )
     if auto_submit_enabled:
         auto_submit_control = WorkerControl(
             command="RESUME",
@@ -2475,9 +2613,22 @@ async def run_browser_apply_after_review(
             ui_state={"current_step": "final_submit"},
             payload={"approval_type": "AUTO_SUBMIT"},
         ).emit()
-        await perform_final_submit_with_control(adapter, work_dir, run_id, auto_submit_control, workflow=workflow)
+        await perform_final_submit_with_control(
+            adapter,
+            work_dir,
+            run_id,
+            auto_submit_control,
+            workflow=workflow,
+            submission_record=submission_record,
+        )
     else:
-        await perform_final_submit_after_approval(adapter, work_dir, run_id, workflow=workflow)
+        await perform_final_submit_after_approval(
+            adapter,
+            work_dir,
+            run_id,
+            workflow=workflow,
+            submission_record=submission_record,
+        )
     await adapter.close()
 
 

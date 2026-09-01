@@ -1359,7 +1359,7 @@ _SECRET_WORD_PATTERN = re.compile(
 )
 
 
-def _is_secret_field(field: BrowserField) -> bool:
+def is_secret_field(field: BrowserField) -> bool:
     """True when read-back values for this field must never be reported verbatim.
 
     Deliberately over-inclusive: ``runner.py`` spreads this payload straight into
@@ -1408,7 +1408,7 @@ def parse_apply_field_result(raw_result: Any, field: BrowserField) -> BrowserSte
     # The runner spreads this payload into emitted events, so the verification
     # values must never carry a password or a one-time code (CLAUDE.md #3).
     verification_keys = ("expected", "actual", "expected_length", "actual_length")
-    if _is_secret_field(field):
+    if is_secret_field(field):
         if any(key in payload for key in verification_keys):
             safe_payload["values_redacted"] = True
     else:

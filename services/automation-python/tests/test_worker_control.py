@@ -917,6 +917,7 @@ def test_multi_page_progression_refills_next_page_before_final_submit(tmp_path, 
     assert progression_events[0]["payload"]["clicked_label"] == "Next"
     assert screenshot_ids == ["approved-application-reopened", "reviewed-fields-applied-1", "portal-step-1", "reviewed-fields-applied-2"]
     assert "READY_TO_SUBMIT" in event_types
+    assert "SUBMISSION_RECEIPT_WRITTEN" in event_types
     assert event_types[-1] == "SUBMITTED"
 
 
