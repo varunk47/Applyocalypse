@@ -25,6 +25,7 @@ from .field_detection import (
     parse_final_submit_result,
 )
 from .field_write import verify_or_repair_text_write
+from .human_typing import clear_element, type_into_element
 from .page_readiness import (
     PAGE_TEXT_POLL_INTERVAL_S,
     PAGE_TEXT_TIMEOUT_S,
@@ -263,11 +264,22 @@ class NodriverBrowserAdapter(BrowserAdapter):
     async def _clear_element(self, element: object, selector: str, frame: Any = None) -> None:
         """Empty a control before typing so a write replaces rather than appends.
 
-        Prefers nodriver's own clear_input(); falls back to a native-setter reset
-        via the page when the element does not expose it. Raises when the field
-        could not be emptied, because appending to a prefilled portal field
-        corrupts the value.
+        Select-all-then-delete as keystrokes is preferred, because it is a real
+        edit: the resulting `input` event is trusted and every framework's value
+        tracker observes the reset. nodriver's own clear_input() assigns
+        `element.value = ""` from page script and raises no event at all, so a
+        React-controlled field keeps the state it had and replays it. Both the
+        driver call and the native-setter script remain as fallbacks. Raises when
+        the field could not be emptied, because appending to a prefilled portal
+        field corrupts the value.
         """
+        try:
+            await clear_element(element)
+            return
+        except Exception:
+            # Older driver, detached frame, or a control that refuses focus. The
+            # value still has to go somewhere, so fall through rather than fail.
+            pass
         clear_input = getattr(element, "clear_input", None)
         if callable(clear_input):
             await clear_input()
@@ -298,10 +310,23 @@ class NodriverBrowserAdapter(BrowserAdapter):
                 {"field_id": field.field_id, "error": str(exc)},
             )
         try:
-            await element.send_keys(value)
-        except Exception as exc:
-            return BrowserStepResult(False, "field value fill failed", {"field_id": field.field_id, "error": str(exc)})
-        return BrowserStepResult(True, "field value applied", {"field_id": field.field_id, "cleared_before_typing": True})
+            strategy = await type_into_element(element, value)
+        except Exception:
+            # Keystroke emission is the better path, not the only one. If it
+            # fails we still owe the run a filled field, so fall back to the
+            # driver's own char-only typing rather than abandoning the answer.
+            try:
+                await element.send_keys(value)
+            except Exception as exc:
+                return BrowserStepResult(
+                    False, "field value fill failed", {"field_id": field.field_id, "error": str(exc)}
+                )
+            strategy = "send_keys"
+        return BrowserStepResult(
+            True,
+            "field value applied",
+            {"field_id": field.field_id, "cleared_before_typing": True, "input_strategy": strategy},
+        )
 
     async def _evaluate(self, script: str) -> Any:
         if self._page is None:
