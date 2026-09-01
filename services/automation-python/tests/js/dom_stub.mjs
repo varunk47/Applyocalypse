@@ -43,6 +43,32 @@ class StubHTMLElement {
     this.blurCount = 0;
     this.scrollIntoViewCount = 0;
     this.clickCount = 0;
+    this.textContentWrites = 0;
+  }
+
+  /**
+   * Editability inherits, and `contenteditable="false"` stops it again, so this has
+   * to be answered by walking rather than by reading one attribute. Form controls
+   * are separated from editing surfaces by owning a `value`, not by this flag.
+   */
+  get isContentEditable() {
+    let node = this;
+    while (node) {
+      const raw = node.getAttribute("contenteditable");
+      if (raw !== null) return ["", "true", "plaintext-only"].includes(raw.toLowerCase());
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  /** What `execCommand("insertText")` does to a plain editable element. */
+  __insertText(text, replacesSelection) {
+    if (replacesSelection) {
+      this._childNodes = [];
+      this._text = text;
+    } else {
+      this._text = `${this._text}${text}`;
+    }
   }
 
   get children() {
@@ -108,6 +134,12 @@ class StubHTMLElement {
     return [own, nested].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   }
 
+  set textContent(next) {
+    this.textContentWrites += 1;
+    this._childNodes = [];
+    this._text = next == null ? "" : String(next);
+  }
+
   get innerText() {
     return this.textContent;
   }
@@ -135,14 +167,16 @@ class StubHTMLElement {
     return false;
   }
 
+  // Both take a selector list, exactly as querySelectorAll below does. Matching the
+  // raw string instead quietly answers "no" to every comma-separated question.
   matches(selector) {
-    return matchesSelector(this, selector);
+    return splitSelector(selector).some((part) => matchesSelector(this, part));
   }
 
   closest(selector) {
     let node = this;
     while (node) {
-      if (matchesSelector(node, selector)) return node;
+      if (node.matches(selector)) return node;
       node = node.parentElement;
     }
     return null;
@@ -361,6 +395,32 @@ const installReactTracker = (node, property) => {
 };
 
 /**
+ * Simulates Quill, ProseMirror, TipTap, Lexical or Draft.js.
+ *
+ * All of them keep their own document model and treat the DOM as a projection of
+ * it. Assigning textContent updates only the projection, and the editor's next
+ * render paints the model straight back over it, so that write silently loses --
+ * the field looks filled for an instant and is empty by the time anyone checks.
+ * `execCommand("insertText")` raises the real beforeinput they listen for, which
+ * is why it is the one write all of them accept. Modelling that here is the whole
+ * reason this stub can tell a correct fill from a plausible-looking one.
+ */
+const installRichTextEditor = (node) => {
+  let model = node._text || "";
+  Object.defineProperty(node, "textContent", {
+    configurable: true,
+    get: () => model,
+    set: () => {
+      node.textContentWrites += 1;
+    },
+  });
+  Object.defineProperty(node, "innerText", { configurable: true, get: () => model });
+  node.__insertText = (text, replacesSelection) => {
+    model = replacesSelection ? text : `${model}${text}`;
+  };
+};
+
+/**
  * Simulates a controlled component that refuses (or reformats) the value it was
  * given: on `change` the framework writes its own value straight back through
  * the native prototype setter, exactly as a React re-render would.
@@ -435,6 +495,8 @@ const createElement = (spec, document, root = document) => {
     });
   }
 
+  if (spec.richTextEditor) installRichTextEditor(element);
+
   if (spec.react) {
     const type = (element.getAttribute("type") || "").toLowerCase();
     installReactTracker(element, type === "checkbox" || type === "radio" ? "checked" : "value");
@@ -447,7 +509,17 @@ const createElement = (spec, document, root = document) => {
   return element;
 };
 
-const VIEW = { getComputedStyle: (element) => ({ ...element.styleMap }) };
+const computedStyleOf = (element) => ({ ...element.styleMap });
+
+/**
+ * Selection is per-document in a real browser, which is exactly why the fill
+ * script reaches for it through the element's own view rather than through the
+ * top window.
+ */
+const makeView = (root) => ({
+  getComputedStyle: computedStyleOf,
+  getSelection: () => root.__selection,
+});
 
 /**
  * Build a queryable root and fill it from `spec.elements`.
@@ -469,7 +541,36 @@ const buildRoot = (spec, options) => {
     // Injected scripts reach getComputedStyle through the element's own view, so a
     // frame document with no defaultView silently falls back to the top window and
     // reads the wrong styles. Every document here has one.
-    root.defaultView = VIEW;
+    root.defaultView = makeView(root);
+    root.__selection = {
+      __range: null,
+      removeAllRanges() {
+        this.__range = null;
+      },
+      addRange(range) {
+        this.__range = range;
+      },
+    };
+    root.createRange = () => ({
+      __node: null,
+      selectNodeContents(node) {
+        this.__node = node;
+      },
+    });
+    // Only insertText is modelled, because it is the only command the fill script
+    // issues. `spec.execCommandFails` is how a test asks for the browser that
+    // refuses, so the script's fallback is exercised rather than assumed.
+    root.execCommand = (command, showUI, value) => {
+      if (spec.execCommandFails || command !== "insertText") return false;
+      const target = root.activeElement;
+      if (!target || target.isContentEditable !== true) return false;
+      const range = root.__selection.__range;
+      // A real insertion replaces the selection. Whether the script selected the
+      // node's contents first is the difference between replacing a pre-filled
+      // draft and appending the answer to the end of it.
+      target.__insertText(String(value == null ? "" : value), Boolean(range) && range.__node === target);
+      return true;
+    };
   }
 
   const body = new StubHTMLElement(isShadow ? "shadow-root" : "body");
@@ -529,7 +630,8 @@ export const buildDom = (spec) => {
     HTMLTextAreaElement: StubHTMLTextAreaElement,
     HTMLSelectElement: StubHTMLSelectElement,
     HTMLAnchorElement: StubHTMLAnchorElement,
-    getComputedStyle: VIEW.getComputedStyle,
+    getComputedStyle: computedStyleOf,
+    getSelection: () => document.__selection,
   };
 
   const location = { origin: document.__origin, href: document.__origin + (spec.path || "/") };
@@ -537,7 +639,11 @@ export const buildDom = (spec) => {
   const snapshot = () =>
     reachableRoots(document)
       .flatMap((root) => descendants(root.__body).map((element) => ({ element, root })))
-      .filter(({ element }) => ["input", "textarea", "select"].includes(element.tagName.toLowerCase()))
+      .filter(
+        ({ element }) =>
+          ["input", "textarea", "select"].includes(element.tagName.toLowerCase()) ||
+          (element.isContentEditable === true && !("value" in element)),
+      )
       .map(({ element, root }) => ({
         root: rootLabel(root, document),
         id: element.getAttribute("id"),
@@ -549,6 +655,9 @@ export const buildDom = (spec) => {
         selected_labels: (element.options || [])
           .filter((option) => option.selected === true)
           .map((option) => option.textContent),
+        text: element.innerText,
+        editable: element.isContentEditable === true,
+        text_content_writes: element.textContentWrites ?? 0,
         native_value_writes: element.nativeValueWrites ?? 0,
         native_checked_writes: element.nativeCheckedWrites ?? 0,
         focus_count: element.focusCount,

@@ -335,8 +335,20 @@ const labelSourcesFor = (element) => {
 # ARIA pickers are here for a sharp reason: an <input role="combobox"> accepts a plain
 # fill() and reads the typed text straight back, so a naive write would report a
 # success the portal never saw (audit finding F9).
+# ``richtext`` is here for a different reason: keystrokes would in fact be the
+# stealthier write, but every adapter clears before typing and ``clear()`` on a
+# contenteditable does nothing at all, so the answer would be appended to whatever
+# draft the box already holds -- audit row 1's bug wearing a different element.
 SCRIPTED_WRITE_FIELD_TYPES: frozenset[str] = frozenset(
-    {"select", "checkbox", "radio", "aria_combobox", "aria_listbox", "aria_radiogroup"}
+    {
+        "select",
+        "checkbox",
+        "radio",
+        "aria_combobox",
+        "aria_listbox",
+        "aria_radiogroup",
+        "richtext",
+    }
 )
 
 
@@ -417,6 +429,25 @@ _FIELD_DISCOVERY_BODY_JS = r"""
     const name = element.getAttribute('name');
     if (!name) return null;
     return `${element.tagName.toLowerCase()}[name=${attrValue(name)}]`;
+  };
+  const RICH_TEXT_HOSTS =
+    '[contenteditable=""], [contenteditable="true"], [contenteditable="plaintext-only"]';
+  const NATIVE_FIELD_TAGS = new Set(['input', 'textarea', 'select']);
+  // A rich-text host is usually a bare styled div, so the id and name a form control
+  // would carry are often simply absent. aria-label is how these actually get named,
+  // and it is checked for uniqueness inside the root for the same reason
+  // hostSelectorFor checks: a selector matching two editors has decided nothing.
+  const richTextSelectorFor = (element, root) => {
+    const direct = ariaSelectorFor(element);
+    if (direct) return direct;
+    const tag = element.tagName.toLowerCase();
+    for (const attribute of ['aria-label', 'data-testid', 'aria-labelledby']) {
+      const value = element.getAttribute(attribute);
+      if (!value) continue;
+      const selector = `${tag}[${attribute}=${attrValue(value)}]`;
+      if (root.querySelectorAll(selector).length === 1) return selector;
+    }
+    return null;
   };
   // How to name the frame or shadow host we descended through, so the write and the
   // verify script can descend the same way. Uniqueness is checked inside the parent
@@ -529,6 +560,48 @@ _FIELD_DISCOVERY_BODY_JS = r"""
         // honestly is what lets the write path pause instead of guessing.
         options_rendered: options.length > 0,
         options: options
+      }
+    });
+  }
+  // Quill, ProseMirror, TipTap and Lexical all render their editing surface as a
+  // contenteditable host rather than a <textarea>, so the native sweep above cannot
+  // see one. Undiscovered, a required "why do you want to work here" leaves a form
+  // that reads as having nothing missing, and the run walks to the submit gate with
+  // the question blank -- the silent failure F3 exists to name.
+  const richTextCandidates = Array.from(root.querySelectorAll(RICH_TEXT_HOSTS));
+  for (const element of richTextCandidates) {
+    // An editable combobox belongs to the sweep above, which knows to pick an option
+    // rather than type prose into it.
+    if (ariaWidgetRoleFor(element)) continue;
+    // A <textarea contenteditable> is pathological, but the native sweep above has
+    // already reported it and a second entry for one control is a real defect.
+    if (NATIVE_FIELD_TAGS.has(element.tagName.toLowerCase())) continue;
+    // Editability inherits, so in an ordinary editor only the host carries the
+    // attribute. Where one editable region genuinely nests inside another, the outer
+    // one is the surface a person types into, so the inner is not a second field.
+    if (element.parentElement && element.parentElement.closest(RICH_TEXT_HOSTS)) continue;
+    const rect = element.getBoundingClientRect();
+    const style = viewOf(element).getComputedStyle(element);
+    if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
+    const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
+    if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
+    const resolved = resolveLabelFromSources(labelSourcesFor(element));
+    fields.push({
+      label: resolved.label,
+      label_source: resolved.label_source,
+      label_synthetic: resolved.label_synthetic,
+      field_type: 'richtext',
+      selector: richTextSelectorFor(element, root),
+      dom_path: domPath,
+      required: element.getAttribute('aria-required') === 'true' || element.hasAttribute('required'),
+      metadata: {
+        tag_name: element.tagName.toLowerCase(),
+        id: element.getAttribute('id'),
+        name: element.getAttribute('name'),
+        aria_role: element.getAttribute('role'),
+        // A portal that pre-fills a draft is exactly the case where appending rather
+        // than replacing would corrupt the answer, so the reviewer gets to see it.
+        current_length: String(element.innerText || element.textContent || '').length
       }
     });
   }
@@ -975,6 +1048,11 @@ _FIELD_WRITE_HELPERS_JS = r"""
       message: matched ? 'field value applied' : 'the field did not keep the value that was written'
     }, base);
   };
+  // What a person actually sees in a rich-text box. An editor renders paragraphs as
+  // block elements, and textContent would run them together with no break at all;
+  // the verdict's normalized tier then absorbs whatever whitespace the editor chose.
+  const richTextValueOf = (element) =>
+    String(element.innerText == null ? (element.textContent || '') : element.innerText);
   const MATCH_TIERS = ['exact', 'prefix', 'token'];
   const tokensOf = (value) => normalize(value).split(' ').filter(Boolean);
   const isTokenPrefix = (haystack, needle) => {
@@ -1234,6 +1312,44 @@ _FIELD_WRITE_BODY_JS = r"""
     }));
   }
 
+  if (element.isContentEditable === true && !('value' in element)) {
+    // A rich-text editor keeps its own document model and treats the DOM as a
+    // projection of it, so assigning textContent leaves the model holding the old
+    // text and the editor paints that straight back over ours. execCommand's
+    // insertText is the browser's own insertion and raises the beforeinput/input
+    // that Quill, ProseMirror, Lexical and Draft.js listen to, which is why it is
+    // the one write all of them accept.
+    focusSafely(element);
+    const ownerDocument = element.ownerDocument;
+    const view = viewOf(element);
+    const selection = view.getSelection ? view.getSelection() : null;
+    if (selection && ownerDocument.createRange) {
+      // Select what is already there so the insertion replaces the draft instead of
+      // appending to it.
+      const range = ownerDocument.createRange();
+      range.selectNodeContents(element);
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+    let inserted = false;
+    try {
+      inserted = ownerDocument.execCommand('insertText', false, reviewedValue) === true;
+    } catch (error) {
+      inserted = false;
+    }
+    if (!inserted) {
+      // A plain contenteditable with no editor behind it: nothing is listening for
+      // beforeinput, so writing the text directly is both correct and all there is.
+      element.textContent = reviewedValue;
+      fireInputEvents(element);
+    }
+    blurSafely(element);
+    return JSON.stringify(verdict(reviewedValue, richTextValueOf(element), {
+      action: inserted ? 'insert_text' : 'set_text',
+      field_type: 'richtext'
+    }));
+  }
+
   if ('value' in element) {
     focusSafely(element);
     setNativeValue(element, 'value', reviewedValue);
@@ -1334,6 +1450,11 @@ _FIELD_VERIFY_BODY_JS = r"""
   }
   const tag = element.tagName.toLowerCase();
   const type = tag === 'input' ? (element.getAttribute('type') || 'text').toLowerCase() : tag;
+  if (element.isContentEditable === true && !('value' in element)) {
+    return JSON.stringify(
+      verdict(reviewedValue, richTextValueOf(element), { action: 'verify', field_type: 'richtext' })
+    );
+  }
   if (!('value' in element)) {
     return JSON.stringify({
       ok: false, action: 'verify', field_type: type, verified: false, value_matched: false,

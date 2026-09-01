@@ -629,7 +629,11 @@ def _propose_answer(
     # ── Work-auth: free-text sponsorship detail ────────────────────────────────
     if _matches_any(tokens, ("authorization", "authorisation", "sponsorship", "visa", "legally authorized")):
         eeo = _eeo(profile)
-        detail_text = eeo.get("sponsorshipDetailText") if field_type in ("textarea", "text") else None
+        detail_text = (
+            eeo.get("sponsorshipDetailText")
+            if field_type in ("textarea", "text", "richtext")
+            else None
+        )
         if detail_text:
             return ProposedApplicationAnswer(
                 field_label=field_label, field_type=field_type,

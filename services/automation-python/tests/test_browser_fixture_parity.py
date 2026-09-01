@@ -80,6 +80,12 @@ FIXTURE_HTML = """<!doctype html>
         <label for="why">Why do you want to work here?</label>
         <textarea id="why" name="why" required></textarea>
 
+        <span id="pitch-label">Tell us about a system you have owned</span>
+        <div class="ql-container" style="border:1px solid #ccc">
+          <div id="pitch" class="ql-editor" contenteditable="true" aria-labelledby="pitch-label"
+               aria-required="true" style="min-height:120px"></div>
+        </div>
+
         <label for="relocate">I am willing to relocate</label>
         <input id="relocate" name="relocate" type="checkbox" value="yes">
 
@@ -114,11 +120,13 @@ FIXTURE_PATH = "/careers/northstar/apply"
 # option's visible label, the way a reviewed answer arrives in production.
 ANSWERS: dict[str, str] = {
     "#first_name": "Jane",
+    "#pitch": "I ran the deploy pipeline for a fleet of about four hundred services.",
     "#why": "Because the platform team owns the thing I want to build.",
     "#pronouns": "They/them",
 }
 EXPECTED_DOM_VALUES: dict[str, str] = {
     "#first_name": "Jane",
+    "#pitch": "I ran the deploy pipeline for a fleet of about four hundred services.",
     "#why": "Because the platform team owns the thing I want to build.",
     "#pronouns": "they",
 }
@@ -203,7 +211,12 @@ async def _drive(url: str, user_data_dir: Path) -> _BrowserRun:
         dom_values = {
             selector: str(
                 await adapter._page.evaluate(  # noqa: SLF001 - deliberate: see above
-                    f"document.querySelector({selector!r}).value"
+                    # An editing surface has no ``value``; what a person sees in it
+                    # is its rendered text. Trimmed because a browser is entitled to
+                    # leave a trailing break behind an insertion, which is a
+                    # rendering detail and not a difference in the answer.
+                    f"(() => {{ const el = document.querySelector({selector!r}); "
+                    "return el.isContentEditable ? el.innerText.trim() : el.value; })()"
                 )
             )
             for selector in ANSWERS
