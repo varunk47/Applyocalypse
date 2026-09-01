@@ -154,5 +154,16 @@ def test_a_killed_run_releases_its_slot(tmp_path: Path) -> None:
             child.kill()
             child.wait(timeout=30)
 
-    with lease_profile(root, fallback=tmp_path / "unused") as reclaimed:
-        assert reclaimed == held
+    # The kernel frees the lock while it tears the killed process down, which is
+    # not synchronous with wait() returning on Windows: the process object is
+    # signalled and the lock can still be held for a few milliseconds. Poll for
+    # it. The claim under test is that no userspace cleanup has to run, not that
+    # teardown finishes before the next instruction.
+    deadline = time.monotonic() + 30
+    while True:
+        with lease_profile(root, fallback=tmp_path / "unused") as reclaimed:
+            if reclaimed == held:
+                break
+            if time.monotonic() > deadline:
+                pytest.fail(f"the killed run's slot never came back: got {reclaimed}, want {held}")
+        time.sleep(0.05)
