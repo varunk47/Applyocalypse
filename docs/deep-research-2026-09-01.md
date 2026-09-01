@@ -113,7 +113,85 @@ New `profile_pool.py` leases one of **3 persistent profiles** (matching `HARD_MA
 
 ### 4.1  Ranked, cheapest first
 
-1. **The profile pool above is also the biggest speed win.** A cold Chrome profile means zero HTTP cache, zero compiled-JS cache, and a full TLS plus asset fetch for a Workday SPA on every single run.
+**Ahead of everything in this list: the worker paid about eleven seconds of pure process startup on every
+invocation.** This was not in the ranking below because the ranking was written by reading the source, and
+nothing in the source says it. It only appears when the packaged binary is timed, and it is larger than
+every item beneath it combined.
+
+`scripts/build/build-python-worker.mjs` built the worker with PyInstaller `--onefile`, which produces a
+single executable that unpacks itself into a fresh temp directory on each launch. That worker is 148 MB.
+Measured against the packaged binary:
+
+| Subcommand | `--onefile` | `--onedir` |
+|---|---|---|
+| `self-check` (imports two browser drivers, no browser, no network, no file work) | 12,854 ms / 12,503 ms | 3,000 ms / 2,277 ms |
+| `pipeline parse-source` on a `.tex` resume (cold / warm) | 10,770 ms / 10,919 ms | 1,266 ms / 1,124 ms |
+
+The diagnostic is the first row against the second. Under `--onefile`, the subcommand that deliberately does
+nothing was *slower* than the one that parses a document, which is only possible if nearly all of the time is
+paid before either of them starts running. Under `--onedir` the ordering flips and becomes explicable:
+`self-check` is now the slower of the two because importing nodriver and seleniumbase is real work, and the
+parse is genuinely cheap. The two `--onefile` runs of each subcommand differ by 2.7% and 1.4%, which is
+what rules out a cold disk as the explanation: the second run had every byte cached and still paid the same
+twelve seconds, because the extraction is redone from scratch each time regardless of what the page cache
+holds. The `--onedir` runs do improve on repeat, by 24% and 11%, which is the ordinary filesystem cache
+warming across a 2,448-file directory, and the slower of the two numbers is still four to eight times faster
+than the faster `--onefile` one.
+
+The cost was paid at five spawn sites, not one: `runPdfConversion`, `runDocumentParse` and the anchor-repair
+call in `documentIngestionService.ts`, plus the per-run process in `pythonWorkerSupervisor.ts`. So every PDF
+conversion, every resume parse, every anchor repair and every application run each paid it separately, and a
+single resume upload paid it twice.
+
+It was invisible during development, which is why it lasted. `resolvePythonWorkerLaunch` only resolves the
+bundled executable when `app.isPackaged` is true; unpackaged it runs the venv interpreter with
+`-m applyocalypse_automation.runner`, which imports from the filesystem and starts in well under a second.
+So `pnpm dev` never paid this at all, and no amount of using the app in dev would have surfaced it.
+
+**How it surfaced.** `test:desktop-e2e` failed with `full-e2e-smoke:phase1:timeout`. Phase 1 ingests a resume
+and a supporting-details file, so it spends two worker cold starts, about 22 seconds, inside a hardcoded 25
+second budget, on top of Electron boot and first-run migrations. That is a deterministic failure rather than a
+flake, and re-running it alone on an idle machine reproduced it exactly. Raising the budget would have made
+the build green while leaving an eleven-second stall in front of every document the user uploads, which is why
+the budget was left alone. With the flag changed and the budget untouched at 25 seconds, `full-e2e-smoke`
+reports `passed`, and all five packaged smokes are green against the onedir build: `worker-smoke:ok`,
+`adapter-smoke:ok (nodriver, seleniumbase)`, `boot-smoke:alive`, `user-flow-smoke:passed`,
+`full-e2e-smoke:passed`.
+
+**The fix is one flag.** `--onedir` writes the same binary next to its dependencies and loads them in place,
+so the extraction happens once at build time instead of once per run. Pointing `electron-builder.yml` at the
+bundle directory rather than at `dist/` keeps the shipped path byte-identical to what it was, so
+`pythonWorkerPaths.ts`, `after-pack.cjs`, `after-sign.cjs` and both packaged smokes resolve exactly what they
+resolved before and needed no change.
+
+**The cost, stated plainly.** `--onedir` ships uncompressed, so the worker goes from a 148 MB executable to a
+376 MB directory of 2,448 files, and the packaged `win-unpacked` tree contains all 2,448 of them. That is a
+real regression in installed footprint, traded for roughly a 9x reduction in the latency of every document
+operation in the app.
+
+The effect on the *installer* runs the other way, which was not the expectation. Measured: the `--onefile`
+build produced a 240.3 MB `Applyocalypse-Setup-0.1.0.exe` (251,923,114 bytes); the `--onedir` build produces
+a 213.1 MB one (223,405,401 bytes). The installer is **27.2 MB smaller**, an 11.3% reduction, and that comes
+on top of the 257 MB to 240 MB reduction already recorded in item 6.
+
+The reason is that the two payloads are not equally compressible. PyInstaller's `--onefile` executable is
+already compressed internally, so the NSIS solid LZMA pass had almost nothing left to take out of it. A
+`--onedir` bundle is loose uncompressed files, and NSIS compresses those better than PyInstaller had. The
+regression is therefore confined to installed footprint: what the user downloads gets smaller, and only what
+lands on disk after install gets bigger.
+
+Worth recording because it cost two builds to learn: the NSIS step failed twice with
+`ERR_ELECTRON_BUILDER_CANNOT_EXECUTE` and exit `3221225794`, which is `0xC0000142`, `STATUS_DLL_INIT_FAILED`.
+That is a process-creation failure, not a packaging error, and it was not caused by the flag. Running
+`app-builder.exe --version` and each of the four cached `makensis.exe` binaries directly showed all of them
+healthy, and the machine had 2.06 GB free of 15.31 GB at the time. Re-running the same step with nothing else
+competing for memory succeeded on the first attempt. The lesson for anyone who hits it: check free memory
+before suspecting the build. One consequence worth carrying forward: `sign-worker-binary.cjs`
+signs a single path, which under `--onedir` covers the executable but not the DLLs beside it. Signing is not
+configured yet, so nothing regressed, but full coverage will mean iterating the bundle rather than signing one
+file.
+
+1. **The profile pool above is the biggest win inside a run**, now that the startup cost above is paid at build time instead. A cold Chrome profile means zero HTTP cache, zero compiled-JS cache, and a full TLS plus asset fetch for a Workday SPA on every single run.
 
    **Shipped in `23176c2`**, as the same change that closes 3.2. A run leases one of three pooled profile directories, sized to the concurrency cap, and the lease is an exclusive OS file lock rather than an entry in a state file, because Electron kills a stopped run's process tree with `taskkill /T /F` and nothing gets to run cleanup on the way out. The kernel drops the lock when the holder dies, so there is no stale-lock table to reap. No pool configured, or every slot busy, falls back to the old run-scoped directory.
 2. **Reuse prepared statements in `pythonEventIngest.ts`.** better-sqlite3's own benchmark floor is **62,554 single-row-single-transaction inserts/sec** ([better-sqlite3 benchmark](https://github.com/WiseLibs/better-sqlite3), WAL mode, Node 12, 2014 MacBook Pro, 2020). Statement preparation is the actual per-event cost, not the transaction.
@@ -290,6 +368,10 @@ Full deliverable in **`docs/free-apis-research.txt`**. Headlines relevant to thi
     A `self-check` subcommand runs the same imports with no browser and no network; `packaged-adapter-smoke.mjs` asserts the automatic chain, nodriver and seleniumbase, both import, and is wired into `verify:packaged`. Playwright is reported but not required, which keeps the smoke honest about the one thing 4.1 already established: it is deliberately not a dependency, and demanding it would fail every truthful build. The driver table binds the same attribute each adapter binds, and a test reads the adapter source so the two cannot drift apart silently.
 
     Still not covered: a fixture-page fill against a real browser. That remains the right next packaged test, and it is a different kind of test with a different cost.
+
+7. **Time the packaged binary, do not reason about it.** The worker was spending about eleven seconds per invocation on PyInstaller `--onefile` self-extraction, at five separate spawn sites, and the ranked speed list in 4.1 missed it entirely because the list was built by reading source. Nothing in the source says how long a process takes to start. It took one `--onedir` flag to remove, and it was worth more than every item that list did contain.
+
+    This is takeaway 6's lesson arriving a second time from a different direction: the defects that survive into a shipped build are the ones whose only symptom appears in the packaged artifact. The audit found the first by asking what the packaged smoke does not assert, and found this one only because a packaged smoke finally failed. A build that never runs against its own artifact cannot see either class.
 
 ---
 
