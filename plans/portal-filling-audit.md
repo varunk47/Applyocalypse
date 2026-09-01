@@ -751,6 +751,7 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 17 | ~~Rename `live_certification` to a reachability probe; define a real fill-only certification~~ **(done: `tests/test_live_certification.py`)** | MEDIUM | S | `browser/live_certification.py`, `browser/portal_adapters.py` | Test that a 200 OK alone cannot produce a "certified" status |
 | 18 | ~~Prune or implement: drop `workable` quirk (unregistered) or register Workable~~ **(done: registered, test added)** | LOW | XS | `browser/portal_workflows.py`, `browser/portal_registry.py` | Registry consistency test: every key in `ATS_PORTAL_QUIRKS` and `ATS_ENTRY_ACTIONS` is a registered `portal_id` |
 | 19 | ~~Confirm `APPLYO_AUTOFILL_APPROVED_DEFAULTS` cannot bypass the EEO/criminal/prior-employer review gates~~ **(done: `tests/test_runner_autofill_env.py`)** | LOW | XS | `field_resolution.py`, `answers.py` | Parametrized test asserting `requires_review=True` for all three categories with the env var set |
+| 20 | ~~Refuse to write a selector that two fields in one document answer to~~ **(done: `tests/test_ambiguous_selectors.py`)** | HIGH | S | `browser/field_detection.py` | Two raw fields carrying `#email`: both must come back with `selector=None` rather than both resolving to the first match |
 
 ## What I could not verify, and what would prove it
 
@@ -772,6 +773,23 @@ a live run:
 4. **`playwright_adapter.py` `apply_field_value` routing** (`:187-195`) I read as select/checkbox/radio
    → JS, text → `.fill()`. `.fill()` is React-safe, so playwright escapes F8 and the text half of F5.
    I am confident in the nodriver and seleniumbase routings (`:170-171` and `:249-250` read verbatim).
+6. **Shadow DOM is unmeasured, and piercing it is not the small fix it looks like.** Every discovery
+   sweep uses plain `document.querySelectorAll`, which does not cross an open shadow boundary, so a
+   form built from custom elements would read as having no fields. The tempting fix, adding shadow
+   traversal to discovery, is worse than the gap: discovery emits a CSS selector string and the write
+   and verify scripts resolve it with `document.querySelector`, and a selector string cannot cross a
+   shadow boundary either. A field found inside a shadow root would come back as `#email`, and that
+   lookup would either miss it or, since shadow DOM exists precisely so ids may be reused, land on a
+   different element in the light DOM and verify the wrong write as successful. Doing this properly
+   means an ordered path of host selectors carried on the field and resolved by one shared walker in
+   all three scripts. That is worth building only against a portal known to need it, and I could not
+   establish that any registered ATS serves its form this way. *Proof:* on one live posting per ATS,
+   evaluate `document.querySelectorAll('*')` filtered to nodes with a non-null `shadowRoot`, and check
+   whether any of them contains an `input`, `textarea` or `select`. Registered candidates worth
+   probing first are the ones built on component frameworks that own their internals: Oracle
+   Recruiting Cloud and SAP SuccessFactors. Note that a closed shadow root is unreachable from page
+   script at all, so it would remain a hand-off to the human regardless.
+
 5. **Test coverage claims** are based on enumerating `def test_*` across `tests/` and grepping for the
    script builders. I did not run the suite. *Proof:* `pnpm test:python` plus
    `pytest --cov=applyocalypse_automation.browser --cov-report=term-missing`, which would put a number
