@@ -3,12 +3,25 @@ import { createStore } from 'solid-js/store'
 import type { CanonicalProfile, ParsedDocument, Profile, Screenshot, UploadedFile } from '@applyocalypse/shared-types'
 import { useToast } from '../components/Toast'
 
+/**
+ * What the last upload actually did to the profile. The merge drops entries it
+ * is not confident about and records them in `skipped`; keeping that here is
+ * what lets the Documents screen say so instead of losing the work silently.
+ */
+export type ResumeMergeReceipt = {
+  sourceName: string
+  applied: string[]
+  skipped: string[]
+  warnings: string[]
+}
+
 type ProfileState = {
   profile: Profile | null
   canonicalProfile: CanonicalProfile | null
   uploadedFiles: UploadedFile[]
   parsedDocuments: ParsedDocument[]
   screenshots: Screenshot[]
+  lastMerge: ResumeMergeReceipt | null
   isLoading: boolean
   error: string | null
 }
@@ -45,6 +58,7 @@ type ProfileStoreValue = {
   repairEditableMasterAnchors: (uploadedFileId: string) => Promise<void>
   openLocalPath: (localPath: string) => Promise<void>
   refreshProfile: () => Promise<void>
+  dismissMergeReceipt: () => void
 }
 
 const ProfileContext = createContext<ProfileStoreValue>()
@@ -57,9 +71,27 @@ export const ProfileStoreProvider = (props: ParentProps) => {
     uploadedFiles: [],
     parsedDocuments: [],
     screenshots: [],
+    lastMerge: null,
     isLoading: false,
     error: null,
   })
+
+  const recordMerge = (
+    sourceName: string,
+    parsing: { applied: string[]; skipped: string[]; parsedDocument: ParsedDocument } | null
+  ) => {
+    setState(
+      'lastMerge',
+      parsing
+        ? {
+            sourceName,
+            applied: parsing.applied,
+            skipped: parsing.skipped,
+            warnings: parsing.parsedDocument.warnings,
+          }
+        : null
+    )
+  }
 
   const refreshCanonical = async (profileId?: string | null) => {
     const canonical = await window.applyocalypse.profile.getCanonical(profileId ?? undefined)
@@ -195,6 +227,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
         setState('parsedDocuments', (docs) => [registered.parsing!.parsedDocument, ...docs])
         if (registered.parsing.updatedProfile) setState('profile', registered.parsing.updatedProfile)
       }
+      recordMerge(registered.uploadedFile.originalName, registered.parsing)
       await refreshCanonical(state.profile?.id)
       setState('error', null)
     } catch (error) {
@@ -222,6 +255,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
         setState('parsedDocuments', (docs) => [registered.parsing!.parsedDocument, ...docs])
         if (registered.parsing.updatedProfile) setState('profile', registered.parsing.updatedProfile)
       }
+      recordMerge(registered.sourceFile.originalName, registered.parsing)
       await refreshCanonical(state.profile?.id)
       setState('error', null)
     } catch (error) {
@@ -305,6 +339,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
         repairEditableMasterAnchors,
         openLocalPath,
         refreshProfile,
+        dismissMergeReceipt: () => setState('lastMerge', null),
       }}
     >
       {props.children}
