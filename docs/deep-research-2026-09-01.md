@@ -252,7 +252,33 @@ constraint, the row is inserted before any step is materialized, and both of the
 end in `?? null` so an unmapped type creates no step and changes no run status, which is the correct behaviour
 for accounting.
 
-Still open from this section: schema enforcement beyond `json_object`, and streaming.
+**`json_object` is a request, not a guarantee, so the client stopped trusting it.** The obvious first move was
+to gate the parameter on capability, and probing litellm 1.89.1 killed that idea before it was written: it
+reports `response_format` as supported for every provider in `PROVIDER_MATRIX`, and returns `None` for a model
+it does not recognise, where the safe default is to send the parameter anyway. Gating would change nothing for
+anything the app supports. Recording why is more useful than shipping the machinery.
+
+The failure that does happen is a level lower down. Support is claimed by the provider and compliance happens at
+the model, and the long tail behind OpenRouter and NVIDIA NIM is mostly small models that wrap the object in a
+markdown fence or put a sentence in front of it. The client parsed strictly and raised, which cost a whole extra
+completion on the retry, and when the retry came back fenced as well the user got a template document instead of
+a tailored one.
+
+`_parse_json_response` tries strict parsing first, so a provider that honours the request is parsed exactly as
+it was before and nothing here can change its result. Only content that would previously have failed outright
+reaches the second attempt, which takes the widest span from the first brace to the last. That absorbs a fence,
+a preamble and a trailing sentence without a regex, and gets nested objects right where a narrower heuristic
+truncates them. Failure still raises `ValueError`, which is what the callers' retry-on-malformed-output branches
+catch, and a JSON array still raises `RuntimeError` exactly as before, asserted in a test so the tolerant parse
+cannot quietly widen into accepting one.
+
+**Streaming is a deliberate non-fix.** It buys perceived latency for someone watching tokens arrive, and nobody
+watches this one: the output is a DOCX and a PDF that get validated, sometimes regenerated when the bullets fail
+or the page count runs over, and only then shown. Streaming a response that has to be complete and parsed before
+anything can be done with it costs a partial-JSON accumulator and a second failure mode in exchange for nothing
+the user can see. The progress they do want is already reported per stage over the event feed.
+
+Section 4.3 is closed.
 
 ---
 

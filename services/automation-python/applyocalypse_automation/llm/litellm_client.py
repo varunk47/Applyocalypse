@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass
 from typing import Any
@@ -60,6 +61,45 @@ def _wants_explicit_cache_breakpoint(model: str, forced_provider: str | None) ->
         return bool(supports_prompt_caching(model=model))
     except Exception:
         return False
+
+
+def _parse_json_response(content: str, schema_name: str) -> Any:
+    """The JSON the model meant to send, whether or not it sent only that.
+
+    ``response_format={"type": "json_object"}`` is a request, not a guarantee.
+    litellm reports every provider in the BYOK matrix as supporting the
+    parameter, so there is nothing to gate on, but support is claimed at the
+    provider and the compliance happens at the model, and the long tail behind
+    OpenRouter and NVIDIA NIM is mostly small models that wrap the object in a
+    markdown fence or put a sentence in front of it.
+
+    Strict parsing is tried first, so a provider that honours the request is
+    parsed exactly as it was before and nothing here can change its result.
+    Only content that would previously have failed outright reaches the second
+    attempt, and failure still raises ValueError so the callers'
+    retry-on-malformed-output branches keep working. Rescuing the response is
+    worth the twenty lines because the alternative costs a whole extra
+    completion, and when that one is malformed too the user gets a template
+    document instead of a tailored one.
+    """
+    try:
+        return json.loads(content)
+    except json.JSONDecodeError:
+        pass
+
+    # The widest span between the first brace and the last is the object itself
+    # once a fence or a preamble is discarded. Anything narrower truncates a
+    # nested object, and a fence-only regex misses the bare-preamble case.
+    start = content.find("{")
+    end = content.rfind("}")
+    if start != -1 and end > start:
+        try:
+            return json.loads(content[start : end + 1])
+        except json.JSONDecodeError:
+            pass
+
+    # ValueError keeps callers' retry-on-malformed-output branches working.
+    raise ValueError(f"{schema_name} response was not valid JSON")
 
 
 def _user_content(user: str, cached_prefix: str, *, explicit_breakpoint: bool) -> Any:
@@ -161,13 +201,7 @@ class LiteLlmClient:
         if not isinstance(content, str):
             raise RuntimeError(f"{schema_name} response did not contain text content")
 
-        import json
-
-        try:
-            parsed = json.loads(content)
-        except json.JSONDecodeError as exc:
-            # ValueError keeps callers' retry-on-malformed-output branches working.
-            raise ValueError(f"{schema_name} response was not valid JSON") from exc
+        parsed = _parse_json_response(content, schema_name)
         if not isinstance(parsed, dict):
             raise RuntimeError(f"{schema_name} response must be a JSON object")
         return parsed
