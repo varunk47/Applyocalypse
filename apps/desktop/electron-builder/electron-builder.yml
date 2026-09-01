@@ -16,6 +16,32 @@ npmRebuild: false
 files:
   - out/**
   - package.json
+  # electron-builder always packages production dependencies, and better-sqlite3
+  # publishes its entire build tree: an incremental-link object, an incremental
+  # PDB, the static sqlite3 lib, the object directory, the amalgamation sources
+  # and the C++ sources. Roughly 43 MB of it per copy, of which the only file the
+  # app ever opens is build/Release/better_sqlite3.node at 1.7 MB.
+  - "!node_modules/**/better-sqlite3/deps/**"
+  - "!node_modules/**/better-sqlite3/src/**"
+  - "!node_modules/**/better-sqlite3/build/Release/obj/**"
+  - "!node_modules/**/better-sqlite3/build/Release/*.iobj"
+  - "!node_modules/**/better-sqlite3/build/Release/*.ipdb"
+  - "!node_modules/**/better-sqlite3/build/Release/*.lib"
+  - "!node_modules/**/better-sqlite3/build/Release/*.exp"
+  - "!node_modules/**/better-sqlite3/build/Release/*.ilk"
+  # test_extension.node exists so better-sqlite3's own test suite has something to
+  # call loadExtension on. Nothing in lib/ references it, and it is only here at all
+  # because electron-builder unpacks every *.node it finds.
+  - "!node_modules/**/better-sqlite3/build/Release/test_extension.node"
+  - "!node_modules/**/better-sqlite3/build/*.vcxproj*"
+  - "!node_modules/**/better-sqlite3/build/*.sln"
+  - "!node_modules/**/better-sqlite3/build/deps/**"
+  # The second copy, better-sqlite3@11, exists only so vitest can load a Node-ABI
+  # build; see the pin in packages/db. It is compiled against the wrong ABI for
+  # Electron, so the app could never load it and does not: the main process is
+  # bundled to one file whose `require("better-sqlite3")` resolves to the
+  # top-level Electron-ABI copy. Shipping it was 43 MB of unreachable weight.
+  - "!node_modules/@applyocalypse/db/node_modules/better-sqlite3/**"
 extraResources:
   - from: ../../services/automation-python/dist
     to: automation-python
