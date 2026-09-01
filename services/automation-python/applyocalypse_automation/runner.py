@@ -2502,6 +2502,23 @@ def main() -> None:
         raise
 
 
+def _emit_driver_self_check() -> None:
+    """Report whether this build still carries the browser drivers it will need.
+
+    A packaged binary is the only place the question has a real answer, and nothing else
+    in the packaged suite reaches an adapter: the worker smoke stops at PAUSED, which is
+    document review, before a browser is ever asked for. Exits non-zero when a driver in
+    the automatic chain is missing, so a bundle that lost one fails the build instead of
+    someone's application.
+    """
+    from .browser.driver_check import check_all_drivers, missing_required
+
+    statuses = check_all_drivers()
+    print(json.dumps({"drivers": [status.to_payload() for status in statuses]}, sort_keys=True), flush=True)
+    if missing_required(statuses):
+        sys.exit(1)
+
+
 def _main_impl() -> None:
     # Provider API keys arrive via the 0600 worker-secrets file, never spawn env;
     # export them for LiteLLM/boto before any subcommand or pipeline work runs.
@@ -2519,6 +2536,10 @@ def _main_impl() -> None:
 
         sys.argv = [sys.argv[0], *sys.argv[2:]]
         pipeline_main()
+        return
+
+    if len(sys.argv) > 1 and sys.argv[1] == "self-check":
+        _emit_driver_self_check()
         return
 
     args = build_parser().parse_args()
