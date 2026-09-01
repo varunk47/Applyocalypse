@@ -12,16 +12,18 @@ pytest>=8.3.5
 pyinstaller>=6.15.0
 tzdata>=2025.2
 ruff>=0.8.0
-pypdf>=5.0
+pypdf>=6.15.0  # PYSEC-2026-3655, PYSEC-2026-3656
 
 # dev tooling (kept in the lock so maintainers can regenerate it)
-pip-tools>=7.4
+pip-tools>=7.6.1  # 7.5.3 cannot run under pip 26: it imports pip internals that were removed
 
 # Transitive pins that only exist to clear advisories pip-audit blocks on.
-# Both arrive through google-auth / google-api-python-client, which do not yet
-# require the fixed releases themselves. Drop a line once its parent floats past
-# the version named here on its own.
-httplib2>=0.32.0  # PYSEC-2026-3444
-pyasn1>=0.6.4  # PYSEC-2026-3455, PYSEC-2026-3456, PYSEC-2026-3457
+# Each arrives through a parent that does not yet require the fixed release
+# itself; the parent is named so the line can be dropped once it floats past
+# this version on its own.
+httplib2>=0.32.0  # via google-api-python-client. PYSEC-2026-3444
+pyasn1>=0.6.4  # via google-auth. PYSEC-2026-3455, PYSEC-2026-3456, PYSEC-2026-3457
+aiohttp>=3.14.3  # via litellm. PYSEC-2026-3545, PYSEC-2026-3546, PYSEC-2026-3547
+cryptography>=50.0.0  # via google-auth. PYSEC-2026-3552
 
 # tectonic>=0.15.0 is a binary tool, not a PyPI package — bundled via PyInstaller build script
