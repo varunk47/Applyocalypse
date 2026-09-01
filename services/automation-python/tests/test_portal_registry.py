@@ -24,7 +24,7 @@ from applyocalypse_automation.browser.portal_adapters import (
 )
 from applyocalypse_automation.browser.portal_registry import PORTALS, detect_portal
 from applyocalypse_automation.browser.portal_state import classify_portal_page_state
-from applyocalypse_automation.browser.portal_workflows import workflow_for_url
+from applyocalypse_automation.browser.portal_workflows import workflow_for_portal, workflow_for_url
 from applyocalypse_automation.runner import SAFE_STEP_PROGRESSION_LABELS
 
 
@@ -103,6 +103,31 @@ def test_adapter_driver_module_map_covers_every_supported_adapter() -> None:
     assert set(_ADAPTER_DRIVER_MODULES) == set(SUPPORTED_BROWSER_ADAPTERS)
 
 
+def test_the_automatic_adapter_chain_never_offers_an_adapter_that_is_not_installed() -> None:
+    """The declared default was only half of it; the fallback chain was the other half.
+
+    Every ATS used to fall back nodriver -> playwright -> seleniumbase. With no
+    playwright in the build, a nodriver failure spent a launch on an adapter that
+    could not start and wrote that dead attempt into the record the UI shows, ahead
+    of the seleniumbase fallback that could actually have worked.
+    """
+    offered = {
+        name for portal in PORTALS for name in adapter_candidates_for_workflow(workflow_for_portal(portal))
+    }
+    not_installed = sorted(
+        name for name in offered if importlib.util.find_spec(_ADAPTER_DRIVER_MODULES[name]) is None
+    )
+
+    assert not_installed == [], f"the automatic chain offers uninstalled adapters: {not_installed}"
+
+
+def test_an_explicitly_named_adapter_is_still_honoured() -> None:
+    """Dropping playwright from the automatic chain must not quietly unsupport it."""
+    workflow = workflow_for_url("https://jobs.lever.co/example/abc")
+
+    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
+
+
 def test_detect_portal_from_known_url() -> None:
     portal = detect_portal("https://boards.greenhouse.io/example/jobs/123")
 
@@ -126,7 +151,7 @@ def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
     assert workflow.portal_id == "lever"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
     assert workflow.default_adapter == "nodriver"
-    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "seleniumbase")
     assert "Apply for this job" in workflow.entry_action_labels
     assert workflow.requires_manual_review_before_fill is True
     payload = workflow.to_event_payload()

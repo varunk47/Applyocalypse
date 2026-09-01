@@ -33,9 +33,15 @@ def adapter_candidates_for_workflow(workflow: PortalWorkflow, preferred_adapter_
                 ordered.append(name)
         return tuple(ordered)
 
-    # ATS portals: playwright -> nodriver -> seleniumbase
+    # ATS portals: nodriver -> seleniumbase, the same pair as the high-stealth boards.
+    # Playwright is deliberately not in the automatic chain. It is not a dependency of
+    # this project and the PyInstaller build carries zero playwright modules, so on a
+    # real install every attempt at it fails on the spot. Leaving it here cost the run
+    # a launch that could not succeed and wrote a misleading "playwright is not
+    # installed" attempt into the record the UI shows, in front of the fallback that
+    # can actually work. It stays reachable for anyone who installs it and names it.
     ordered = [preferred]
-    for adapter_name in (workflow.default_adapter, "playwright", "nodriver", "seleniumbase"):
+    for adapter_name in (workflow.default_adapter, "nodriver", "seleniumbase"):
         normalized = adapter_name.strip().lower()
         if normalized in SUPPORTED_BROWSER_ADAPTERS and normalized not in ordered:
             ordered.append(normalized)
