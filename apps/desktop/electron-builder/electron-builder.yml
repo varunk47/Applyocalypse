@@ -43,7 +43,7 @@ files:
   # top-level Electron-ABI copy. Shipping it was 43 MB of unreachable weight.
   - "!node_modules/@applyocalypse/db/node_modules/better-sqlite3/**"
 extraResources:
-  - from: ../../services/automation-python/dist
+  - from: ../../services/automation-python/dist/applyocalypse-worker
     to: automation-python
     filter:
       - "**/*"
