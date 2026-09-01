@@ -130,6 +130,15 @@ class LiteLlmClient:
             # completion must not accrue unbounded cost.
             timeout=180,
             max_tokens=4096,
+            # Tailoring twenty applications is twenty calls against one key, which
+            # is exactly the shape that trips a rate limit, and until now a single
+            # 429 ended the run and dropped the user back to a template document.
+            # litellm retries only what is worth retrying (429, 5xx, timeouts) and
+            # backs off between attempts; a bad request or a rejected key still
+            # fails on the first try. The costs it does not retry through are the
+            # ones the caller already handles: malformed JSON comes back as a
+            # successful response, so that retry stays where it is.
+            num_retries=2,
         )
         if routed_through_openai:
             # Route custom OpenAI-compatible endpoints (NVIDIA NIM, OpenRouter, zai, vLLM,

@@ -217,6 +217,7 @@ def test_a_call_with_no_prefix_is_byte_for_byte_the_old_request(monkeypatch: pyt
     assert request["response_format"] == {"type": "json_object"}
     assert request["timeout"] == 180
     assert request["max_tokens"] == 4096
+    assert request["num_retries"] == 2
 
 
 def test_anthropic_gets_the_breakpoint(monkeypatch: pytest.MonkeyPatch) -> None:
