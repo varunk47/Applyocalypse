@@ -202,7 +202,7 @@ def test_technical_terms_distrusts_capitals_when_the_whole_line_shouts() -> None
 
 
 def _rewriter_returning(bullets: list[str]) -> Any:
-    async def _complete(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _complete(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         return {"bullets": bullets}
 
     client = AsyncMock()

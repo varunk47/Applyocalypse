@@ -312,7 +312,7 @@ _LAZY_PROFILE = {
 
 
 def _fake_lazy_client(text: str) -> Any:
-    async def _complete(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _complete(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         return {"cover_letter_text": text}
     client = AsyncMock()
     client.complete_json = _complete

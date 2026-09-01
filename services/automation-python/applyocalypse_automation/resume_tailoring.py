@@ -140,7 +140,12 @@ async def tailor_resume_sections(
     system_prompt = build_tailor_system_prompt(font_size)
     # Bound prompt size: a scraped JD full of site boilerplate can be enormous, and
     # provider context limits should degrade to truncated input, not a hard failure.
-    user_message = f"JOB DESCRIPTION:\n{job_description[:20000]}\n\n---\n\nCANDIDATE RESUME:\n{resume_text[:20000]}"
+    #
+    # The resume comes first because it is the half that does not change: twenty
+    # applications in a batch are twenty different job descriptions against one
+    # resume, and a provider can only reuse a prefix that is actually a prefix.
+    cached_prefix = f"CANDIDATE RESUME:\n{resume_text[:20000]}"
+    user_message = f"---\n\nJOB DESCRIPTION:\n{job_description[:20000]}"
 
     last_exc: Exception | None = None
     for attempt in range(2):
@@ -149,6 +154,7 @@ async def tailor_resume_sections(
                 system=system_prompt,
                 user=user_message,
                 schema_name="TailoredResume",
+                cached_prefix=cached_prefix,
             )
             data = _parse_json_response(raw)
 
@@ -234,14 +240,17 @@ async def tailor_bullets_1to1(
     if not bullets:
         return []
     numbered = "\n".join(f"{index + 1}. {text}" for index, text in enumerate(bullets))
-    user_message = (
-        f"JOB DESCRIPTION:\n{job_description[:20000]}\n\n---\n\n"
-        f"RESUME BULLETS ({len(bullets)} total; rewrite each, keep order and count):\n{numbered}"
-    )
+    # Same batch of bullets, one job description after another: the bullets lead
+    # so that the part being repeated is the part a provider can reuse.
+    cached_prefix = f"RESUME BULLETS ({len(bullets)} total; rewrite each, keep order and count):\n{numbered}"
+    user_message = f"---\n\nJOB DESCRIPTION:\n{job_description[:20000]}"
     for _ in range(2):
         try:
             raw = await llm_client.complete_json(
-                system=_BULLET_REWRITE_SYSTEM, user=user_message, schema_name="bullet_rewrite"
+                system=_BULLET_REWRITE_SYSTEM,
+                user=user_message,
+                schema_name="bullet_rewrite",
+                cached_prefix=cached_prefix,
             )
         except Exception as exc:  # noqa: BLE001 - degrade to no-tailor; format stays preserved
             print(f"bullet rewrite LLM failed: {type(exc).__name__}: {exc}", file=sys.stderr)
