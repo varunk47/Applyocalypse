@@ -370,9 +370,35 @@ What was not built, and why it is worth recording:
 - **No API submission.** The caveat above is the entire argument against it. Greenhouse accepting an application that omits required fields means a 200 there can still be an application nobody reviews. Submission stays in the browser behind the human gate, where the portal enforces its own rules. That reasoning lives in the module docstring rather than only here, so it survives the next reader who takes "we already call the API" as an invitation.
 - **Not before browser launch.** Reading the schema early would save the discovery pass, but there is no schema-driven fill path to feed yet, so that saving is hypothetical while the cross-check is not. Moving it earlier is a later change, against a real fill path.
 - **Invariant #2 is still enforced by string matching.** The pre-labelled EEOC blocks make structural enforcement possible; nothing was rewired onto them.
-- Template lint and the submission receipt are still open.
+- The submission receipt is still open. The template lint shipped, below.
 
 Every failure path returns "nothing published", which is also what every non-Greenhouse portal returns, so the gate is unchanged for them. A suite-wide fixture keeps the tests off the network, since several already drive this flow with a live greenhouse.io URL.
+
+**Template lint shipped.** Greenhouse publishes the formatting that breaks its resume parser, which is unusual
+and worth building against:
+<https://support.greenhouse.io/hc/en-us/articles/200989175-Unsuccessful-resume-parse>. `documents/ats_lint.py`
+checks a DOCX for the ten hazards on that list that can be decided from the file itself: over 2.5MB (the size
+above which Greenhouse says the parser reads nothing at all), tables, text boxes, embedded graphics, a
+multi-column page, text in the header, text in the footer, no meaningful text layer, letters spaced apart, and
+no section heading the parser recognises.
+
+It runs against the **master template**, not the generated document. These hazards are properties of the
+template, so they travel to every application the user ever sends from it, and one warning about the template is
+worth more than the same warning attached to the fiftieth tailored copy. It is also one call site instead of
+three, since `RESUME_RENDERED` is emitted from three branches with different fallback tiers.
+
+Nothing here blocks. A table in a resume is a tradeoff the user is entitled to make; what they cannot do is make
+it without being told, because a bad parse is silent. The application submits, and the profile the recruiter
+opens is simply thinner than the resume that was sent. The finding arrives as a `RESUME_PARSE_RISK_DETECTED`
+warning carrying the codes, the readable detail for each, and the Greenhouse URL. A lint that throws is caught
+and dropped, because a diagnostic that costs a run is worse than one that is missing.
+
+Two items on Greenhouse's list were deliberately left out. Company names without "Inc." or "LLC", and job titles
+abbreviated to "Sr. Account Exec", both need to know which words on a line are the company and which are the
+title. Guessing that from a text dump would produce confident false alarms about a document that is fine, and a
+lint the user learns to ignore is worse than no lint.
+
+The submission receipt is the last item open in this section.
 
 ### 5.4  Libraries worth adopting
 

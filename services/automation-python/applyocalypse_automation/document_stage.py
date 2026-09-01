@@ -26,6 +26,7 @@ from .documents.artifact_generation import (
     split_legal_name,
     write_text_artifact,
 )
+from .documents.ats_lint import lint_resume_docx
 from .documents.docx_builder import build_cover_letter_docx
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
 from .documents.export_flow import RESUME_DOCX_TAIL, RESUME_TEX_TAIL, run_resume_render_tail
@@ -433,6 +434,38 @@ def generate_application_documents(
     if editable_master:
         master_path = Path(str(editable_master["localPath"]))
         master_format = str(editable_master["sourceFormat"])
+        if master_format == "DOCX":
+            # Reported against the template rather than the generated copy, because
+            # these hazards are properties of the template: they travel to every
+            # application sent from it, and hearing about them once is more use than
+            # hearing about them on the fiftieth tailored document.
+            #
+            # Advisory only. A table in a resume is a tradeoff the user is entitled to
+            # make; what they cannot do is make it without being told, since a bad
+            # parse is silent and the application still submits.
+            try:
+                parse_risks = lint_resume_docx(master_path)
+            except Exception:
+                # A diagnostic that costs a run is worse than one that is missing.
+                parse_risks = ()
+            if parse_risks:
+                WorkerEvent(
+                    event_type=EventType.RESUME_PARSE_RISK_DETECTED,
+                    run_id=run_id,
+                    step_id=None,
+                    severity=Severity.WARN,
+                    message=(
+                        f"Your resume template has {len(parse_risks)} formatting issue(s) that Greenhouse "
+                        "documents as causes of a failed resume parse"
+                    ),
+                    machine_state={"source_format": "DOCX", "risk_codes": [risk.code for risk in parse_risks]},
+                    ui_state={"current_step": "document_review"},
+                    payload={
+                        "source_master_path": str(master_path),
+                        "reference": "https://support.greenhouse.io/hc/en-us/articles/200989175-Unsuccessful-resume-parse",
+                        "risks": [risk.to_payload() for risk in parse_risks],
+                    },
+                ).emit()
         replacements = build_placeholder_replacements(canonical_profile=canonical_profile, tailoring_plan=tailoring_plan)
         if master_format == "DOCX":
             output_path = choose_collision_safe_path(
