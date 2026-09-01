@@ -13,6 +13,7 @@ from typing import Literal
 
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
+from .browser.greenhouse_schema import GreenhouseQuestion, fetch_questions, unanswered_required
 from .browser.portal_adapters import (
     COMMON_STEP_PROGRESSION_LABELS,
     PortalRuntimePolicy,
@@ -1759,6 +1760,22 @@ async def run_url_observation_flow(
     return UrlObservationResult(should_stop=False, job_text_file=job_text_file, scraped_url=scraped_url)
 
 
+def form_field_names(fields: list[BrowserField]) -> set[str]:
+    """What the portal calls its own inputs, which is the vocabulary an ATS schema uses.
+
+    Both attributes are collected because the two are not reliably the same element: a
+    Greenhouse custom question renders ``name="question_12345"`` while several portals
+    carry the meaningful token only on ``id``.
+    """
+    names: set[str] = set()
+    for browser_field in fields:
+        for key in ("name", "id"):
+            value = str(browser_field.metadata.get(key) or "").strip()
+            if value:
+                names.add(value)
+    return names
+
+
 async def run_browser_apply_after_review(
     *,
     run_id: str,
@@ -1909,12 +1926,20 @@ async def run_browser_apply_after_review(
     # browser. This prevents the infinite FIELD_REVIEW loop on fields that have no profile
     # value (Country, LinkedIn, work-auth, EEO, ...).
     presented_missing_answer_keys: set[str] = set()
+    # Every input name seen on any page of this application. Greenhouse publishes the
+    # posting's question set, so at the submit gate this answers a question the DOM cannot:
+    # which required questions never appeared at all, because they sit on a wizard page we
+    # never reached or behind a control discovery could not see. Fields that DID appear and
+    # were left blank are already reported by the FIELD_REVIEW_REQUIRED pause, so the two
+    # signals cover different failures rather than repeating one.
+    observed_field_names: set[str] = set()
     while True:
         if upload_attempt > 0:
             if await handle_runtime_control(work_dir, run_id, context="required document retry field detection"):
                 await adapter.close()
                 return
             fields = await adapter.detect_fields()
+        observed_field_names |= form_field_names(fields)
         cl_requirement = emit_cover_letter_requirement_from_fields(run_id, fields, context="approved_field_detection")
         if (
             cl_requirement is not None
@@ -2351,31 +2376,85 @@ async def run_browser_apply_after_review(
     if runtime_policy.review_evidence_required:
         visible = await adapter.extract_visible_text()
         visible_before_submit = str(visible.payload.get("text") or "") if visible.ok else None
+    # The ATS knows its own form. Greenhouse serves the posting's questions
+    # unauthenticated, so a required question that never appeared in anything we filled can
+    # be named here instead of being discovered by the candidate weeks later as silence. A
+    # portal we cannot read returns nothing and the gate is exactly as it was.
+    unanswered_questions: list[GreenhouseQuestion] = []
+    published_questions = await asyncio.to_thread(fetch_questions, job_url)
+    if published_questions:
+        unanswered_questions = unanswered_required(published_questions, observed_field_names)
+    if unanswered_questions:
+        WorkerEvent(
+            event_type=EventType.USER_REVIEW_REQUIRED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message=(
+                f"{len(unanswered_questions)} required question(s) this posting publishes never "
+                "appeared in the form that was filled"
+            ),
+            machine_state={
+                "reason": "PUBLISHED_REQUIRED_QUESTION_UNSEEN",
+                "portal_id": runtime_policy.portal_id,
+                "published_question_count": len(published_questions or []),
+                "unseen_count": len(unanswered_questions),
+            },
+            ui_state={"requires_user_review": True, "current_step": "final_submit"},
+            payload={
+                "questions": [
+                    {
+                        "label": question.label,
+                        "field_type": question.field_type,
+                        "options": list(question.options),
+                    }
+                    for question in unanswered_questions
+                ],
+                "instructions": (
+                    "Check these in the visible browser before approving submission. They are "
+                    "required by the posting and Applyocalypse never saw them."
+                ),
+            },
+        ).emit()
     gate = evaluate_final_submit_gate(
         policy=runtime_policy,
         auto_submit_enabled=auto_submit_enabled,
         visible_text=visible_before_submit,
     )
     auto_submit_enabled = gate.auto_submit_enabled
+    # Preapproved auto-submit is withdrawn on this evidence, the same way it is withdrawn
+    # when a portal that always shows a review page did not. The costs are not symmetric:
+    # a false alarm costs the user one click, and being right costs them an application
+    # submitted without an answer the employer required.
+    auto_submit_withdrawn_for_unseen = bool(unanswered_questions) and auto_submit_enabled
+    if auto_submit_withdrawn_for_unseen:
+        auto_submit_enabled = False
     WorkerEvent(
         event_type=EventType.READY_TO_SUBMIT,
         run_id=run_id,
         step_id=None,
         severity=Severity.INFO if auto_submit_enabled else Severity.WARN,
-        message=gate.message,
+        message=(
+            "Final submission needs approval: the posting publishes required questions that "
+            "never appeared in the form"
+            if auto_submit_withdrawn_for_unseen
+            else gate.message
+        ),
         machine_state={
             "gate": "FINAL_SUBMIT",
             "auto_submit_enabled": auto_submit_enabled,
             "portal_id": runtime_policy.portal_id,
             "review_evidence_required": runtime_policy.review_evidence_required,
             "review_text_detected": gate.review_text_detected,
-            "auto_submit_withdrawn": gate.withdrawn,
+            "auto_submit_withdrawn": gate.withdrawn or auto_submit_withdrawn_for_unseen,
+            "unseen_required_question_count": len(unanswered_questions),
         },
         ui_state={"requires_user_review": not auto_submit_enabled},
         payload={
             "auto_submit_enabled": auto_submit_enabled,
             "review_text_detected": gate.review_text_detected,
-            "auto_submit_withdrawn": gate.withdrawn,
+            "auto_submit_withdrawn": gate.withdrawn or auto_submit_withdrawn_for_unseen,
+            "unseen_required_questions": [question.label for question in unanswered_questions],
         },
     ).emit()
     if auto_submit_enabled:
