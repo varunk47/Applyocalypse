@@ -28,6 +28,7 @@ from .field_detection import (
 from .field_write import verify_or_repair_text_write
 from .human_typing import clear_element, type_into_element
 from .isolated_world import IsolatedWorlds
+from .navigation_warmup import WARM_UP_TIMEOUT_S, dwell_seconds, origin_of, warm_up_target
 from .page_readiness import (
     PAGE_TEXT_POLL_INTERVAL_S,
     PAGE_TEXT_TIMEOUT_S,
@@ -99,6 +100,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         self._browser = None
         self._page = None
         self._worlds = IsolatedWorlds()
+        self._visited_origins: set[str] = set()
 
     async def launch(self, *, run_id: str, user_data_dir: Path) -> BrowserStepResult:
         try:
@@ -125,6 +127,14 @@ class NodriverBrowserAdapter(BrowserAdapter):
     async def open_url(self, url: str) -> BrowserStepResult:
         if self._browser is None:
             return BrowserStepResult(False, "browser is not launched")
+        landing = warm_up_target(url, self._visited_origins)
+        origin = origin_of(url)
+        if origin is not None:
+            # Marked before the warm-up runs rather than after it succeeds, so a
+            # site whose front door is broken costs one failed navigation for
+            # the run instead of one on every page opened there.
+            self._visited_origins.add(origin)
+        warmed = await self._warm_up(landing) if landing is not None else False
         self._page = await self._browser.get(url)
         # The old documents are gone and so are their contexts. Chrome can hand
         # a retired context id back out, so the cache is dropped here rather
@@ -135,7 +145,30 @@ class NodriverBrowserAdapter(BrowserAdapter):
             timeout_s=PAGE_TEXT_TIMEOUT_S,
             poll_interval_s=PAGE_TEXT_POLL_INTERVAL_S,
         )
-        return BrowserStepResult(True, "page navigated", {"url": url, "page_text": readiness})
+        return BrowserStepResult(
+            True, "page navigated", {"url": url, "page_text": readiness, "warmed_up": warmed}
+        )
+
+    async def _warm_up(self, url: str) -> bool:
+        """Land on a site's front door before following a link into it.
+
+        The navigation this precedes is the one that matters, so every part of
+        this is best effort: a front door that will not load, will not render or
+        does not exist leaves the run exactly where it would have been without
+        the warm-up, one page later.
+        """
+        try:
+            self._page = await self._browser.get(url)
+            self._worlds.forget_all()
+            await wait_for_page_text(
+                self._probe_visible_text_length,
+                timeout_s=WARM_UP_TIMEOUT_S,
+                poll_interval_s=PAGE_TEXT_POLL_INTERVAL_S,
+            )
+            await asyncio.sleep(dwell_seconds())
+        except Exception:
+            return False
+        return True
 
     async def _read(self, frame: Any, script: str) -> Any:
         """Run a read-only probe, preferring a world the page cannot see.
