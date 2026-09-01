@@ -345,8 +345,12 @@ def test_validator_bullet_too_long_custom_limit() -> None:
 # Contact line and employment dates on the markdown resume
 #
 # The fixtures above carry neither a LinkedIn URL nor a single date, the same
-# blind spot that let the DOCX builder ship without both. This is a shipped
-# artifact, not a preview: document_stage validates it and writes it out.
+# blind spot that let the DOCX builder ship without both. document_stage writes
+# this one with review_only=True, so it is the copy the user reads rather than
+# the file that reaches the portal, and it is also the fallback resume text
+# handed to the LLM tailorer when DOCX extraction fails. A review artifact with
+# no dates cannot be reviewed against, and a tailorer cannot weigh tenure it
+# was never shown.
 # ---------------------------------------------------------------------------
 
 _DATED_MARKDOWN_PROFILE = {
