@@ -279,11 +279,17 @@ Full deliverable in **`docs/free-apis-research.txt`**. Headlines relevant to thi
 ## 7. Key Takeaways
 
 1. **Decide the licence.** AGPL exposure is verified and it blocks a clean public release. Relicense, buy Artifex and drop nodriver, or replace both. Nothing else in this report is blocked on it, but a release is.
-2. **Build the profile pool next.** One change, four wins: stealth, cold-start latency, re-login UX, and bounded profile storage.
-3. **Make tailoring emit verbatim-anchored edits.** Reject in code, not in the prompt. This is the difference between the app and a 1.7-star competitor.
-4. **Query Greenhouse's schema API before launching a browser**, and use its labelled EEOC blocks to enforce the review gate structurally.
+2. **Build the profile pool next.** One change, four wins: stealth, cold-start latency, re-login UX, and bounded profile storage. **Done, `23176c2`** (3.c).
+3. **Make tailoring emit verbatim-anchored edits.** Reject in code, not in the prompt. This is the difference between the app and a 1.7-star competitor. **Rejection half done, `643b6b1`**; the citation schema is argued against and closed in 5.1.
+4. **Query Greenhouse's schema API before launching a browser**, and use its labelled EEOC blocks to enforce the review gate structurally. **Done narrower, `5f1db60`**: a cross-check at the submit gate, not a pre-launch fill. The EEOC half is still string matching.
 5. **Never ship an ATS score.** Ship parse verification instead.
 6. **Add a packaged smoke test that exercises a browser adapter.** `scripts/test/packaged-worker-smoke.mjs` currently asserts only `RUN_STARTED`, `JD_ANALYSIS_COMPLETED`, `RESUME_RENDERED`, `PAUSED`. No packaged test touches any browser adapter, which is structurally why a Playwright import bug survived into a shipped build. This gap is the meta-finding of the whole audit.
+
+    **Done, `b00d1c6`, and narrower than "exercise an adapter" for a reason.** Driving a real browser in a packaged smoke needs a browser present and a page to drive, which buys flakiness in exchange for coverage of code the unit suite already reaches. The part that only a packaged binary can answer is whether the drivers are *in* it, and that is exactly the part that broke: every adapter imports its driver inside `launch()` and degrades a missing one to a soft `"<name> is not installed"` step result, so an absent driver produces no build error and no failing test. PyInstaller finds those imports by static analysis alone, and seleniumbase already needs hand-maintained `--hidden-import` entries to survive it.
+
+    A `self-check` subcommand runs the same imports with no browser and no network; `packaged-adapter-smoke.mjs` asserts the automatic chain, nodriver and seleniumbase, both import, and is wired into `verify:packaged`. Playwright is reported but not required, which keeps the smoke honest about the one thing 4.1 already established: it is deliberately not a dependency, and demanding it would fail every truthful build. The driver table binds the same attribute each adapter binds, and a test reads the adapter source so the two cannot drift apart silently.
+
+    Still not covered: a fixture-page fill against a real browser. That remains the right next packaged test, and it is a different kind of test with a different cost.
 
 ---
 
