@@ -739,7 +739,8 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > the one direction that would wrongly claim a submit worked. Top-only reports "unchanged" on an
 > embedded portal, which routes to a human check instead.
 >
-> **Still open:** open shadow roots.
+> **Still open:** same-origin iframes and open shadow roots. See item 7 below for why the
+> same-origin case is not the easy half of the iframe work it looks like.
 
 | 10 | ~~Rank option/answer matching, require a unique winner, pause on ties~~ **(done: `tests/test_select_option_matching.py`)** | HIGH | M | `browser/field_detection.py`, `runner.py`, `answers.py` | Table-driven test: `"India"` does not select `"Indiana"`; `"No, I do not require sponsorship"` does not select the first `"No"`-adjacent option; ambiguous cases return `ok:false` |
 | 11 | ~~Replace fixed post-click sleeps with `wait_for_page_text` + change detection~~ **(done: `tests/test_post_click_readiness.py`)** | MEDIUM | S | all three adapters, `runner.py` | Existing `tests/test_page_readiness.py` pattern, extended to the click paths with an injected clock |
@@ -789,6 +790,30 @@ a live run:
    probing first are the ones built on component frameworks that own their internals: Oracle
    Recruiting Cloud and SAP SuccessFactors. Note that a closed shadow root is unreachable from page
    script at all, so it would remain a hand-off to the human regardless.
+
+7. **Same-origin iframes fall between the two mechanisms, and the read being easy is a trap.**
+   Cross-origin frames are handled: Chrome's site isolation gives each one its own renderer and its
+   own CDP target, `nodriver_adapter._embedded_form_frames` collects them from `page.get_frames()`,
+   and every field carries a `FrameRef` so the write re-enters the frame it came from. A same-origin
+   iframe gets none of that. It shares the parent's renderer, so it is not a separate target and
+   never appears in `get_frames()`, and the discovery script only ever queries `document`
+   (`field_detection.py:256`), which does not descend into `contentDocument`. A form served that way
+   reads as a page with no fields, which is the same silent outcome as the cross-origin case before
+   it was fixed. The trap is that same-origin makes the read look free, since
+   `iframe.contentDocument` is right there: adding that walk to discovery alone would produce fields
+   whose selectors resolve against the wrong document. Discovery emits a CSS selector string, and
+   `document.querySelector` in the verify and apply scripts cannot cross a frame boundary any more
+   than it can cross a shadow boundary, so `#email` would either miss or land on a same-named input
+   in the parent and verify the wrong write as successful. Native typing has the same problem one
+   level down: all three adapters resolve an element handle per frame. This wants exactly what item 6
+   wants, an ordered path carried on the field and resolved by one shared walker, which argues for
+   doing both at once rather than either alone. *Proof:* the pattern that produces it is an employer
+   reverse-proxying the ATS onto its own hostname rather than embedding the vendor's, so probe
+   `careers.*` domains that serve a known ATS's markup from a first-party path, and on each evaluate
+   `Array.from(document.querySelectorAll('iframe')).map(f => { try { return [f.src,
+   f.contentDocument && f.contentDocument.querySelectorAll('input,textarea,select').length]; }
+   catch (e) { return [f.src, 'cross-origin']; } })`. Any row with a number rather than
+   `'cross-origin'` is a form this worker currently cannot see.
 
 5. **Test coverage claims** are based on enumerating `def test_*` across `tests/` and grepping for the
    script builders. I did not run the suite. *Proof:* `pnpm test:python` plus
