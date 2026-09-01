@@ -128,7 +128,9 @@ AUTOFILL_ENV_VALUES = (None, "", "0", "1", "true", "TRUE", "yes")
 FIELD_TYPES = ("text", "textarea", "select", "radio", "checkbox")
 
 
-def _make_field(label: str, field_type: str) -> BrowserField:
+def _make_field(
+    label: str, field_type: str, *, field_name: str | None = None
+) -> BrowserField:
     return BrowserField(
         field_id="f1",
         label=label,
@@ -136,6 +138,7 @@ def _make_field(label: str, field_type: str) -> BrowserField:
         selector=None,
         required=True,
         confidence=0.9,
+        metadata={"name": field_name} if field_name else {},
     )
 
 
@@ -216,3 +219,98 @@ def test_sensitive_review_categories_are_the_three_claude_md_invariant_categorie
 )
 def test_ordinary_fields_are_not_misclassified_as_sensitive(label: str) -> None:
     assert sensitive_review_category(label) is None
+
+
+# Measured, not imagined. Sampling 38 live Greenhouse postings across 20 boards
+# on 2026-09-01 turned up 40 distinct questions the ATS itself files under
+# `compliance` (EEOC) or `demographic_questions`. These eight are the ones the
+# label matcher used to miss: questions invariant #2 says must always be
+# review-gated, which used to fall through to the generic profile rules. A
+# `field_name` of None is a question the API publishes with no machine name.
+LIVE_EEO_QUESTIONS_THAT_USED_TO_SLIP = (
+    ("Are you a person of transgender experience?", None),
+    ("DisabilityStatus", "disability_status"),
+    ("Do you identify as a member of the LGBT2QIA+ community?", None),
+    ("Do you identify as transgender?", None),
+    ("I identify as transgender:", None),
+    ("Please select up to 2 ethnicities that you most closely identify with.", None),
+    ("VeteranStatus", "veteran_status"),
+    ("What is your military status?", None),
+)
+
+
+@pytest.mark.parametrize(("label", "field_name"), LIVE_EEO_QUESTIONS_THAT_USED_TO_SLIP)
+def test_live_eeo_questions_reach_the_review_gate(label: str, field_name: str | None) -> None:
+    assert sensitive_review_category(label, field_name=field_name) == "EEO"
+
+
+@pytest.mark.parametrize(("label", "field_name"), LIVE_EEO_QUESTIONS_THAT_USED_TO_SLIP)
+def test_live_eeo_questions_require_review_end_to_end(
+    label: str, field_name: str | None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The invariant is about the proposed answer, not about the classifier."""
+    monkeypatch.setenv("APPLYO_AUTOFILL_APPROVED_DEFAULTS", "1")
+
+    answer = proposed_answer_for_browser_field(
+        _make_field(label, "select", field_name=field_name), PROFILE
+    )
+
+    assert answer.requires_review is True
+    assert answer.proposed_value not in OWN_PROFILE_VALUES
+
+
+@pytest.mark.parametrize(
+    ("label", "field_name"),
+    [
+        ("Voluntary Self-Identification", "disability_status"),
+        ("Question 3 of 4", "veteran_status"),
+        ("", "disability_status"),
+    ],
+)
+def test_the_machine_name_gates_a_label_the_phrase_list_has_never_seen(
+    label: str, field_name: str
+) -> None:
+    """The structural signal is the ATS's own name for the input.
+
+    A recruiter can reword the prose freely; Greenhouse still calls the input
+    ``disability_status``. Reading the name is what makes the gate structural
+    rather than a bet on how somebody phrased the question.
+    """
+    assert sensitive_review_category(label, field_name=field_name) == "EEO"
+
+
+@pytest.mark.parametrize("acronym", ["LGBTQ+", "LGBTQIA", "LGBT2QIA+", "LGBTQIA2S+"])
+def test_the_same_acronym_spelled_four_ways_gates_every_time(acronym: str) -> None:
+    assert sensitive_review_category(f"Do you identify as {acronym}?") == "EEO"
+
+
+def test_camel_splitting_did_not_break_the_single_token_linkedin_rule() -> None:
+    """The camel split lives in the gate, deliberately, not in ``label_tokens``.
+
+    Splitting globally would turn "LinkedIn" into ("linked", "in") and the rule
+    that fills the applicant's LinkedIn URL would stop matching.
+    """
+    answer = propose_answer_for_detected_field(
+        field_label="LinkedIn Profile",
+        field_type="text",
+        canonical_profile=PROFILE,
+    )
+
+    assert answer.proposed_value == "https://linkedin.com/in/grace-hopper"
+    assert sensitive_review_category("LinkedIn Profile") is None
+
+
+@pytest.mark.parametrize(
+    ("label", "field_name"),
+    [
+        ("First name", "first_name"),
+        ("Email", "email"),
+        ("City", "candidate_city"),
+        ("LinkedIn Profile", "linkedin_url"),
+    ],
+)
+def test_an_ordinary_field_with_a_benign_machine_name_stays_unclassified(
+    label: str, field_name: str
+) -> None:
+    """The extra views are one-directional: they only ever pull a question in."""
+    assert sensitive_review_category(label, field_name=field_name) is None

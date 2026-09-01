@@ -209,6 +209,8 @@ _EEO_RULES: list[tuple[tuple[str, ...], str]] = [
 
 def _stem(token: str) -> str:
     """Strip a naive plural so "requirements" matches "requirement"."""
+    if len(token) > 4 and token.endswith("ies"):
+        return token[:-3] + "y"
     if len(token) > 3 and token.endswith("s") and not token.endswith(("ss", "us", "is")):
         return token[:-1]
     return token
@@ -279,7 +281,19 @@ _FOREIGN_SUBJECT_QUALIFIERS: tuple[str, ...] = (
 # ── Always-review categories (CLAUDE.md safety invariant #2) ──────────────────
 SENSITIVE_REVIEW_CATEGORIES: tuple[str, ...] = ("EEO", "CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER")
 
-_EEO_PHRASES: tuple[str, ...] = tuple(alias for aliases, _ in _EEO_RULES for alias in aliases)
+# Vocabulary that only classifies, never fills. Nothing in the profile answers
+# these, but the ATS files them as EEOC or demographic questions and they must
+# reach the review gate. Measured against 38 live Greenhouse postings: every
+# phrase here appeared on a real posting and matched no existing rule.
+_EEO_CLASSIFY_ONLY_PHRASES: tuple[str, ...] = ("transgender", "military")
+
+# LGBTQ+, LGBTQIA, LGBT2QIA+ are the same question spelled four ways. Matching
+# the common prefix stops the list being whack-a-mole with an acronym.
+_EEO_TOKEN_PREFIXES: tuple[str, ...] = ("lgbt",)
+
+_EEO_PHRASES: tuple[str, ...] = (
+    tuple(alias for aliases, _ in _EEO_RULES for alias in aliases) + _EEO_CLASSIFY_ONLY_PHRASES
+)
 
 # Yes/no screening questions get a conservative "No" default; every other label
 # in the category is a detail field that must be left blank for the reviewer.
@@ -345,21 +359,55 @@ _CHOICE_FIELD_TYPES: frozenset[str] = frozenset(
 )
 
 
-def sensitive_review_category(field_label: str) -> str | None:
-    """Return the always-review category of a label, or ``None``.
+def _split_camel_case(value: str) -> str:
+    """``DisabilityStatus`` -> ``Disability Status``.
+
+    Greenhouse labels its two federally mandated EEOC fields exactly that way.
+    """
+    return re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", value)
+
+
+def _has_token_prefix(tokens: tuple[str, ...], prefixes: tuple[str, ...]) -> bool:
+    return any(token.startswith(prefix) for token in tokens for prefix in prefixes)
+
+
+def _sensitive_token_views(field_label: str, field_name: str | None) -> tuple[tuple[str, ...], ...]:
+    """Every text a sensitive question can hide in, most authoritative last.
+
+    A label is prose somebody typed, so it varies by employer. ``field_name`` is
+    the ATS's own name for the input (``disability_status``, ``veteran_status``),
+    which is the structural signal: it does not change when a recruiter rewords
+    the question, and it survives a label our phrase list has never seen.
+
+    Only this gate reads the extra views. Splitting camel case inside
+    ``label_tokens`` would break rules that depend on a single token, "linkedin"
+    among them, and the blast radius of a mistake here is one-directional: these
+    views can only pull a question into the review gate, never out of it.
+    """
+    views = [label_tokens(field_label)]
+    camel_tokens = label_tokens(_split_camel_case(field_label))
+    if camel_tokens != views[0]:
+        views.append(camel_tokens)
+    if field_name:
+        views.append(label_tokens(field_name))
+    return tuple(views)
+
+
+def sensitive_review_category(field_label: str, *, field_name: str | None = None) -> str | None:
+    """Return the always-review category of a field, or ``None``.
 
     CLAUDE.md safety invariant #2: EEO, criminal-history and previous-employer
     answers are ALWAYS ``requires_review=True``. Classification happens up front,
     before any generic profile rule runs, so that neither rule ordering nor
     ``APPLYO_AUTOFILL_APPROVED_DEFAULTS`` can open a path around the gate.
     """
-    tokens = label_tokens(field_label)
-    if _matches_any(tokens, _EEO_PHRASES):
-        return "EEO"
-    if _matches_any(tokens, _CRIMINAL_HISTORY_PHRASES):
-        return "CRIMINAL_HISTORY"
-    if _matches_any(tokens, _PREVIOUS_EMPLOYER_PHRASES):
-        return "PREVIOUS_EMPLOYER"
+    for tokens in _sensitive_token_views(field_label, field_name):
+        if _matches_any(tokens, _EEO_PHRASES) or _has_token_prefix(tokens, _EEO_TOKEN_PREFIXES):
+            return "EEO"
+        if _matches_any(tokens, _CRIMINAL_HISTORY_PHRASES):
+            return "CRIMINAL_HISTORY"
+        if _matches_any(tokens, _PREVIOUS_EMPLOYER_PHRASES):
+            return "PREVIOUS_EMPLOYER"
     return None
 
 
@@ -398,9 +446,10 @@ def propose_answer_for_detected_field(
     canonical_profile: dict[str, Any],
     autofill_approved_defaults: bool = False,
     jd_text: str | None = None,
+    field_name: str | None = None,
 ) -> ProposedApplicationAnswer:
     """Propose an answer for a detected field, enforcing the always-review gate."""
-    category = sensitive_review_category(field_label)
+    category = sensitive_review_category(field_label, field_name=field_name)
     if category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
         return _sensitive_history_answer(field_label=field_label, field_type=field_type, category=category)
 

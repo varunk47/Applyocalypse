@@ -52,6 +52,10 @@ def proposed_answer_for_browser_field(
         canonical_profile=canonical_profile,
         autofill_approved_defaults=os.getenv("APPLYO_AUTOFILL_APPROVED_DEFAULTS") == "1",
         jd_text=jd_text,
+        # Detection already carries what the ATS calls the input. The review gate
+        # reads it so a demographic question still gates when its label is worded
+        # in a way no phrase list anticipated.
+        field_name=str(field.metadata.get("name") or "") or None,
     )
 
 
