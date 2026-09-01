@@ -226,7 +226,33 @@ This matters because bytenode documents a hard `SIGTRAP` / `EXC_BREAKPOINT` abor
 
 The real defect was message ordering. Both `resume_tailoring.py` call sites put the job description *before* the resume and before the bullets, so twenty applications in a batch shared no common opening at all and even the providers that cache automatically (OpenAI, Deepseek, recent Gemini) had nothing to reuse. That is a missing-cache bug with no flag to turn on. `complete_json` now takes an optional `cached_prefix`, the stable half goes first, and the breakpoint is added only where litellm's own tables say the provider needs telling (anthropic, bedrock, vertex_ai) and the prefix clears roughly a thousand tokens. Empty prefix reproduces the previous request byte for byte, a custom OpenAI-compatible base never gets `cache_control`, and an unrecognised model id stops being decorated rather than stopping being sent. The cover letter was already ordered correctly and only needed to say where the seam is.
 
-Still open from this section: schema enforcement beyond `json_object`, streaming, a retry policy at the client rather than per caller, and token/cost accounting.
+**The caching work could not be checked, so it now reports on itself.** Sending the stable half first and
+marking a breakpoint either produces cache reads or it does not, and the client discarded `response["usage"]`
+without looking at it, so there was no answer either way. This is the failure mode Key Takeaway 7 warns about,
+committed in the same section that states it.
+
+`llm/usage.py` is a ledger the client records into after every completion. The worker is one process per run,
+so module state is run-scoped without being told, and nothing has to be threaded through four call sites and
+back. It reads cache hits in both shapes providers report them, Anthropic's top-level `cache_read_input_tokens`
+and OpenAI's nested `prompt_tokens_details.cached_tokens`, so the number is right whichever key the user
+brought. Cost comes from litellm's own `completion_cost` rather than a price table kept in the repo, because a
+stale table does something worse than failing: it reports a wrong number confidently. When litellm has no price
+the call records `None` rather than `0.0`, and the snapshot carries `cost_is_partial` so a total that is really
+a floor cannot be quoted as the amount spent.
+
+Recording happens before the response is validated, since a completion that came back as unparseable text was
+still billed. Totals are emitted once, at the end of the document stage, as `LLM_USAGE_REPORTED`. Once rather
+than per stage because the tailoring path can call the model three separate times on its own, an initial pass,
+a retry when the bullets fail validation, and another when the PDF runs to two pages, so a per-stage figure
+would report the first of those as the whole. The cost of adding it came to two lines outside the new module
+and its emission: the event type in `event_protocol.py` and the same string in `RunEventTypeSchema`, which is
+what `events.ts` parses `event_type` against and would otherwise have rejected the event at the boundary
+without a trace. No migration, because `run_events.event_type` is plain `TEXT NOT NULL` with no check
+constraint, the row is inserted before any step is materialized, and both of the ingest's lookup maps already
+end in `?? null` so an unmapped type creates no step and changes no run status, which is the correct behaviour
+for accounting.
+
+Still open from this section: schema enforcement beyond `json_object`, and streaming.
 
 ---
 
