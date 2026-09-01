@@ -440,6 +440,8 @@ export const buildDom = (spec) => {
   document.elementFromPoint = (x, y) => hitTest(body, x, y);
 
   const window = {
+    innerWidth: (spec.viewport || {}).width ?? 1280,
+    innerHeight: (spec.viewport || {}).height ?? 800,
     HTMLInputElement: StubHTMLInputElement,
     HTMLTextAreaElement: StubHTMLTextAreaElement,
     HTMLSelectElement: StubHTMLSelectElement,

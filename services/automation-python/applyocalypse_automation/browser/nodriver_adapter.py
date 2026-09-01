@@ -26,6 +26,7 @@ from .field_detection import (
     parse_final_submit_result,
 )
 from .field_write import verify_or_repair_text_write
+from .human_scroll import dispatch_wheel_scroll, parse_scroll_anchor
 from .human_typing import clear_element, type_into_element
 from .isolated_world import IsolatedWorlds
 from .navigation_warmup import WARM_UP_TIMEOUT_S, dwell_seconds, origin_of, warm_up_target
@@ -564,6 +565,31 @@ class NodriverBrowserAdapter(BrowserAdapter):
             return False
         return str(tag) in {"iframe", "frame"}
 
+    async def _scroll_toward(self, frame: Any, payload: dict[str, Any]) -> bool:
+        """Wheel a control below the fold into view. ``False`` scrolled nothing.
+
+        Aimed and guarded exactly like the click that follows, because it is the
+        same kind of event against the same top-level target: a frame whose
+        origin cannot be worked out, or that the top document is not showing at
+        the point we would scroll at, is left alone rather than scrolled at a
+        guess. The caller then presses the control where it stands, which is
+        what it did before there was a wheel to send.
+        """
+        if self._page is None:
+            return False
+        origin = await self._frame_viewport_origin(frame)
+        if origin is None:
+            return False
+        anchor = parse_scroll_anchor(payload, origin)
+        if anchor is None:
+            return False
+        if frame is not self._page and not await self._point_reaches_frame(anchor.point):
+            return False
+        try:
+            return await dispatch_wheel_scroll(self._page, anchor)
+        except Exception:
+            return False
+
     async def _dispatch_located_click(self, frame: Any, payload: dict[str, Any]) -> bool:
         """Press the located control with the mouse. ``False`` means use the script."""
         if self._page is None:
@@ -602,6 +628,14 @@ class NodriverBrowserAdapter(BrowserAdapter):
         located = await self._evaluate_click_script(
             frame, locate_script, parse, failure_message, read_only=True
         )
+        if not located.ok and "scroll_by" in located.payload:
+            # The control sits outside the viewport, so the page could not
+            # hit-test it. Wheeling it into view invalidates the box it just
+            # reported, which is why the measurement is taken a second time.
+            if await self._scroll_toward(frame, located.payload):
+                located = await self._evaluate_click_script(
+                    frame, locate_script, parse, failure_message, read_only=True
+                )
         if located.ok:
             if await self._dispatch_located_click(frame, located.payload):
                 payload = {**_without_coordinates(located.payload), "click_dispatch": "trusted_input"}

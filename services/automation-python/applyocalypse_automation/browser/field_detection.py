@@ -1150,14 +1150,29 @@ def _press_or_locate_js(action: str, match: str, extra_fields: str, *, locate_on
     return f"""
   // {LOCATE_SCRIPT_MARKER}
   const pressEl = {match}.element;
-  if (typeof pressEl.scrollIntoView === 'function') {{
-    pressEl.scrollIntoView({{ block: 'center', inline: 'center' }});
-  }}
   const pressBox = pressEl.getBoundingClientRect();
   const pressCx = pressBox.left + pressBox.width / 2;
   const pressCy = pressBox.top + pressBox.height / 2;
   const pressJx = Math.min(pressBox.width * 0.2, {_MAX_JITTER_X_PX});
   const pressJy = Math.min(pressBox.height * 0.2, {_MAX_JITTER_Y_PX});
+  const pressViewW = window.innerWidth || document.documentElement.clientWidth || 0;
+  const pressViewH = window.innerHeight || document.documentElement.clientHeight || 0;
+  // Deliberately not scrollIntoView: that jumps the viewport in one frame with
+  // no wheel behind it. The caller is told how far to move and moves it, then
+  // asks again. A page whose height we cannot read is measured where it lies.
+  if (pressViewH > 0 && (pressCy - pressJy < 0 || pressCy + pressJy > pressViewH)) {{
+    return JSON.stringify({{
+      ok: false,
+      action: '{action}',
+      message: 'the matched control is outside the viewport',
+      fallback: 'injected_js',
+      scroll_by: {{
+        y: pressCy - pressViewH / 2,
+        ax: pressViewW / 2,
+        ay: pressViewH / 2
+      }}
+    }});
+  }}
   const pressReaches = (x, y) => {{
     const hit = document.elementFromPoint(x, y);
     return Boolean(hit) && (hit === pressEl || pressEl.contains(hit) || hit.contains(pressEl));
@@ -1415,6 +1430,16 @@ def parse_click_by_text_result(raw_result: Any) -> BrowserStepResult:
             key: value
             for key, value in click_target.items()
             if key in ("x", "y", "jx", "jy") and isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
+    scroll_by = payload.get("scroll_by")
+    if isinstance(scroll_by, dict):
+        # How far the caller has to wheel the page and where to put the cursor
+        # to do it. Working data like click_target, and it never reaches a run
+        # event: the only payload carrying it is a refusal that falls back.
+        safe_payload["scroll_by"] = {
+            key: value
+            for key, value in scroll_by.items()
+            if key in ("y", "ax", "ay") and isinstance(value, (int, float)) and not isinstance(value, bool)
         }
     message = str(payload.get("message") or ("safe portal action clicked" if payload.get("ok") else "safe portal action could not be clicked"))
     if not payload.get("ok"):
