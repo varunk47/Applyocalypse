@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from applyocalypse_automation.documents.docx_builder import build_cover_letter_docx, build_resume_docx
+from applyocalypse_automation.documents.docx_builder import (
+    _date_range,
+    build_cover_letter_docx,
+    build_resume_docx,
+)
 from applyocalypse_automation.documents.file_generation import (
     GeneratedNameInput,
     build_generated_filename,
@@ -298,3 +302,129 @@ def test_build_resume_docx_respects_font_size_param() -> None:
         ]
         expected_pts = {round(s / 12700) for s in run_sizes}
         assert 11 in expected_pts or 15 in expected_pts  # 11pt body or 15pt header (11+4)
+
+
+# ---------------------------------------------------------------------------
+# Contact line and employment dates
+#
+# `_RESUME_PROFILE` above carries neither a LinkedIn URL nor any dates, which is
+# why the builder could read the wrong contact key and drop every date range
+# without a single test noticing. This fixture carries both.
+# ---------------------------------------------------------------------------
+
+_DATED_PROFILE = {
+    "profile": {
+        "legalName": "Grace Hopper",
+        "email": "grace@example.com",
+        "phone": "555-0300",
+        "location": "Arlington, VA",
+        "linkedinUrl": "https://linkedin.com/in/grace-hopper",
+    },
+    "skillGroups": [{"skills": ["COBOL"]}],
+    "experience": [
+        {
+            "title": "Rear Admiral",
+            "company": "US Navy",
+            "startDate": "1967-08",
+            "endDate": "1986-08",
+            "bullets": ["Standardised the compiler toolchain across the fleet."],
+        },
+        {
+            "title": "Senior Consultant",
+            "company": "Digital Equipment Corporation",
+            "startDate": "1986-09",
+            "bullets": ["Lectured on the cost of a microsecond."],
+        },
+    ],
+    "education": [
+        {
+            "institution": "Yale University",
+            "degree": "PhD",
+            "field": "Mathematics",
+            "startDate": "1930-09",
+            "endDate": "1934-06",
+        }
+    ],
+}
+
+
+def _resume_text(profile: dict, name: str) -> str:
+    from docx import Document  # type: ignore
+
+    with tempfile.TemporaryDirectory() as tmp:
+        out = Path(tmp) / name
+        build_resume_docx(profile, _RESUME_PLAN, out)
+        doc = Document(str(out))
+        return "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+
+
+def test_build_resume_docx_contains_linkedin_url() -> None:
+    """The canonical key is `linkedinUrl`; reading `linkedin` matched nothing."""
+    try:
+        from docx import Document  # type: ignore  # noqa: F401
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    text = _resume_text(_DATED_PROFILE, "resume_linkedin.docx")
+    assert "https://linkedin.com/in/grace-hopper" in text
+
+
+def test_build_resume_docx_dates_each_role() -> None:
+    try:
+        from docx import Document  # type: ignore  # noqa: F401
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    text = _resume_text(_DATED_PROFILE, "resume_dates.docx")
+    assert "Rear Admiral | US Navy | 1967-08 to 1986-08" in text
+
+
+def test_build_resume_docx_marks_a_role_with_no_end_date_as_present() -> None:
+    try:
+        from docx import Document  # type: ignore  # noqa: F401
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    text = _resume_text(_DATED_PROFILE, "resume_present.docx")
+    assert "1986-09 to Present" in text
+
+
+def test_build_resume_docx_dates_education() -> None:
+    try:
+        from docx import Document  # type: ignore  # noqa: F401
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    text = _resume_text(_DATED_PROFILE, "resume_edu_dates.docx")
+    assert "Yale University | PhD | Mathematics | 1930-09 to 1934-06" in text
+
+
+def test_build_resume_docx_leaves_no_dangling_separator_without_dates() -> None:
+    """An entry with no dates keeps the heading it always had."""
+    try:
+        from docx import Document  # type: ignore  # noqa: F401
+    except ImportError:
+        pytest.skip("python-docx not installed")
+
+    text = _resume_text(_RESUME_PROFILE, "resume_undated.docx")
+    assert "Principal Engineer | Analytical Engines" in text
+    assert "Analytical Engines |" not in text
+    assert "University of London | BSc | Mathematics" in text
+    assert "Mathematics |" not in text
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        ({"startDate": "2019-06", "endDate": "2021-03"}, "2019-06 to 2021-03"),
+        ({"startDate": "2019-06"}, "2019-06 to Present"),
+        ({"startDate": "2019-06", "endDate": None}, "2019-06 to Present"),
+        ({"startDate": "", "endDate": "2021-03"}, "2021-03"),
+        ({"endDate": "2021-03"}, "2021-03"),
+        ({}, ""),
+        ({"startDate": None, "endDate": None}, ""),
+        ({"startDate": "  2019-06  ", "endDate": "  2021-03  "}, "2019-06 to 2021-03"),
+    ],
+)
+def test_date_range(entry: dict, expected: str) -> None:
+    assert _date_range(entry) == expected
