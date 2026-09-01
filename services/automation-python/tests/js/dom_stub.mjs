@@ -34,12 +34,14 @@ class StubHTMLElement {
     this._text = "";
     this.parentElement = null;
     this.ownerDocument = null;
-    this.rect = { width: 200, height: 30 };
+    this.rect = { left: 0, top: 0, width: 200, height: 30 };
     this.styleMap = { display: "block", visibility: "visible", opacity: "1" };
     this.disabled = false;
     this.required = false;
     this.focusCount = 0;
     this.blurCount = 0;
+    this.scrollIntoViewCount = 0;
+    this.clickCount = 0;
   }
 
   get children() {
@@ -105,7 +107,26 @@ class StubHTMLElement {
   }
 
   getBoundingClientRect() {
-    return { width: this.rect.width, height: this.rect.height };
+    const { left, top, width, height } = this.rect;
+    return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height };
+  }
+
+  scrollIntoView() {
+    this.scrollIntoViewCount += 1;
+  }
+
+  click() {
+    this.clickCount += 1;
+    this.dispatchEvent(new StubEvent("click", { bubbles: true }));
+  }
+
+  contains(other) {
+    let node = other;
+    while (node) {
+      if (node === this) return true;
+      node = node.parentElement;
+    }
+    return false;
   }
 
   matches(selector) {
@@ -167,6 +188,22 @@ class StubHTMLInputElement extends StubHTMLElement {
 
 class StubHTMLTextAreaElement extends StubHTMLInputElement {}
 
+/**
+ * `href` on a real anchor is resolved against the document, so a relative link
+ * comes back absolute. `isExternalLink` in the click script compares that
+ * against `location.origin`, and would wave every relative link through if the
+ * stub handed back the raw attribute.
+ */
+class StubHTMLAnchorElement extends StubHTMLElement {
+  get href() {
+    const raw = this.getAttribute("href");
+    if (raw === null) return "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("#")) return raw;
+    const origin = (this.ownerDocument && this.ownerDocument.__origin) || "";
+    return raw.startsWith("/") ? origin + raw : origin + "/" + raw;
+  }
+}
+
 class StubHTMLOptionElement extends StubHTMLElement {
   constructor() {
     super("option");
@@ -203,6 +240,39 @@ class StubHTMLSelectElement extends StubHTMLElement {
     }
   }
 }
+
+const isPaintedAt = (element, x, y) => {
+  const style = element.styleMap;
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  const { left, top, width, height } = element.rect;
+  if (width <= 0 || height <= 0) return false;
+  return x >= left && x <= left + width && y >= top && y <= top + height;
+};
+
+const stackingOrder = (element) => {
+  const raw = element.styleMap["z-index"] ?? element.styleMap.zIndex;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+/**
+ * Topmost element covering a point: highest z-index wins, and within one layer
+ * the element painted last does. Because `descendants` walks in document order,
+ * "last" is also the deepest, which is what the real hit test settles on.
+ */
+const hitTest = (root, x, y) => {
+  let winner = null;
+  let winningLayer = -Infinity;
+  for (const element of descendants(root)) {
+    if (!isPaintedAt(element, x, y)) continue;
+    const layer = stackingOrder(element);
+    if (layer >= winningLayer) {
+      winner = element;
+      winningLayer = layer;
+    }
+  }
+  return winner;
+};
 
 const descendants = (root) => {
   const out = [];
@@ -307,6 +377,7 @@ const createElement = (spec, document) => {
   else if (tag === "textarea") element = new StubHTMLTextAreaElement(tag);
   else if (tag === "input") element = new StubHTMLInputElement(tag);
   else if (tag === "option") element = new StubHTMLOptionElement();
+  else if (tag === "a") element = new StubHTMLAnchorElement(tag);
   else element = new StubHTMLElement(tag);
 
   element.ownerDocument = document;
@@ -354,6 +425,7 @@ export const buildDom = (spec) => {
     title: spec.title || "",
     activeElement: null,
     forms: [],
+    __origin: spec.origin || "https://jobs.example.com",
   };
   const body = new StubHTMLElement("body");
   body.ownerDocument = document;
@@ -365,14 +437,17 @@ export const buildDom = (spec) => {
   document.querySelector = (selector) => body.querySelector(selector);
   document.getElementById = (id) => body.querySelector(`#${id}`);
   document.forms = body.querySelectorAll("form");
+  document.elementFromPoint = (x, y) => hitTest(body, x, y);
 
   const window = {
     HTMLInputElement: StubHTMLInputElement,
     HTMLTextAreaElement: StubHTMLTextAreaElement,
     HTMLSelectElement: StubHTMLSelectElement,
-    HTMLAnchorElement: StubHTMLElement,
+    HTMLAnchorElement: StubHTMLAnchorElement,
     getComputedStyle: (element) => ({ ...element.styleMap }),
   };
+
+  const location = { origin: document.__origin, href: document.__origin + (spec.path || "/") };
 
   const snapshot = () =>
     descendants(body)
@@ -395,5 +470,12 @@ export const buildDom = (spec) => {
         react_saw_change: element.__reactSawChange === undefined ? null : element.__reactSawChange,
       }));
 
-  return { window, document, CSS: { escape: (value) => String(value) }, Event: StubEvent, snapshot };
+  return {
+    window,
+    document,
+    location,
+    CSS: { escape: (value) => String(value) },
+    Event: StubEvent,
+    snapshot,
+  };
 };

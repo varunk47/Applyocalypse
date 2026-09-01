@@ -991,6 +991,7 @@ _FIELD_WRITE_BODY_JS = r"""
 # a debug log and to anything that has to tell a write apart from a read-back.
 WRITE_SCRIPT_MARKER = "applyo:write-field-value"
 VERIFY_SCRIPT_MARKER = "applyo:verify-field-value"
+LOCATE_SCRIPT_MARKER = "applyo:locate-control"
 
 
 def build_apply_field_value_script(selector: str, value: str) -> str:
@@ -1109,8 +1110,81 @@ def build_verify_field_value_script(selector: str, value: str) -> str:
     )
 
 
-def build_click_by_text_script(labels: list[str]) -> str:
+# How far from a control's centre the press may wander, in pixels. Small enough
+# to stay well inside any real button, large enough that two clicks on the same
+# control never land on the same pixel.
+_MAX_JITTER_X_PX = 12
+_MAX_JITTER_Y_PX = 8
+
+
+def _press_or_locate_js(action: str, match: str, extra_fields: str, *, locate_only: bool) -> str:
+    """The tail both click scripts share: press the match, or say where to press it.
+
+    ``element.click()`` produces an event carrying ``isTrusted: false``, which is
+    the cheapest question a bot detector can ask. In locate mode the script
+    clicks nothing and instead reports a centre plus the half-extents of a box it
+    has hit-tested at the centre and all four corners, so the caller can dispatch
+    a real mouse event and vary the point with no risk of landing on a cookie
+    banner sitting over the control.
+
+    A control that matched but is covered refuses with ``fallback: 'injected_js'``.
+    That distinguishes it from the refusals above it, where nothing matched at
+    all: the caller re-runs this same script in press mode rather than giving up,
+    so a page we cannot reach with the mouse behaves exactly as it did before.
+
+    The returned text is interpolated into an outer f-string, so its braces are
+    single here and must stay that way.
+    """
+    fields = f"""
+    ok: true,
+    action: '{action}',
+    clicked_label: {match}.label.slice(0, 160),
+    clicked_tag: {match}.element.tagName.toLowerCase(){extra_fields}"""
+
+    if not locate_only:
+        return f"""
+  {match}.element.click();
+  return JSON.stringify({{{fields}
+  }});"""
+
+    return f"""
+  // {LOCATE_SCRIPT_MARKER}
+  const pressEl = {match}.element;
+  if (typeof pressEl.scrollIntoView === 'function') {{
+    pressEl.scrollIntoView({{ block: 'center', inline: 'center' }});
+  }}
+  const pressBox = pressEl.getBoundingClientRect();
+  const pressCx = pressBox.left + pressBox.width / 2;
+  const pressCy = pressBox.top + pressBox.height / 2;
+  const pressJx = Math.min(pressBox.width * 0.2, {_MAX_JITTER_X_PX});
+  const pressJy = Math.min(pressBox.height * 0.2, {_MAX_JITTER_Y_PX});
+  const pressReaches = (x, y) => {{
+    const hit = document.elementFromPoint(x, y);
+    return Boolean(hit) && (hit === pressEl || pressEl.contains(hit) || hit.contains(pressEl));
+  }};
+  const pressCovered = [[0, 0], [-pressJx, -pressJy], [pressJx, -pressJy], [-pressJx, pressJy], [pressJx, pressJy]]
+    .some((offset) => !pressReaches(pressCx + offset[0], pressCy + offset[1]));
+  if (pressCovered) {{
+    return JSON.stringify({{
+      ok: false,
+      action: '{action}',
+      message: 'the matched control is covered by something else',
+      fallback: 'injected_js'
+    }});
+  }}
+  return JSON.stringify({{{fields},
+    click_target: {{ x: pressCx, y: pressCy, jx: pressJx, jy: pressJy }}
+  }});"""
+
+
+def build_click_by_text_script(labels: list[str], *, locate_only: bool = False) -> str:
     labels_json = json.dumps([label for label in labels if label.strip()])
+    tail = _press_or_locate_js(
+        'click_by_text',
+        'exact',
+        ",\n    href: exact.element instanceof HTMLAnchorElement ? exact.element.href : null",
+        locate_only=locate_only,
+    )
     return f"""
 (() => {{
   const labels = {labels_json};
@@ -1171,21 +1245,14 @@ def build_click_by_text_script(labels: list[str]) -> str:
       candidate_labels: preferredMatches.map((entry) => entry.label.slice(0, 160)).slice(0, 8)
     }});
   }}
-  const exact = preferredMatches[0];
-  exact.element.click();
-  return JSON.stringify({{
-    ok: true,
-    action: 'click_by_text',
-    clicked_label: exact.label.slice(0, 160),
-    clicked_tag: exact.element.tagName.toLowerCase(),
-    href: exact.element instanceof HTMLAnchorElement ? exact.element.href : null
-  }});
+  const exact = preferredMatches[0];{tail}
 }})()
 """
 
 
-def build_final_submit_script(labels: list[str]) -> str:
+def build_final_submit_script(labels: list[str], *, locate_only: bool = False) -> str:
     labels_json = json.dumps([label for label in labels if label.strip()])
+    tail = _press_or_locate_js('final_submit', 'target', '', locate_only=locate_only)
     return f"""
 (() => {{
   const labels = {labels_json};
@@ -1219,14 +1286,7 @@ def build_final_submit_script(labels: list[str]) -> str:
       candidate_count: candidates.length
     }});
   }}
-  const target = matches[0];
-  target.element.click();
-  return JSON.stringify({{
-    ok: true,
-    action: 'final_submit',
-    clicked_label: target.label.slice(0, 160),
-    clicked_tag: target.element.tagName.toLowerCase()
-  }});
+  const target = matches[0];{tail}
 }})()
 """
 
@@ -1335,7 +1395,7 @@ def parse_click_by_text_result(raw_result: Any) -> BrowserStepResult:
         payload = raw_result if isinstance(raw_result, dict) else {"ok": False, "message": "browser returned an invalid click result"}
 
     safe_payload: dict[str, Any] = {"action": "click_by_text"}
-    for key in ("clicked_label", "clicked_tag", "href", "candidate_count", "ambiguity_code"):
+    for key in ("clicked_label", "clicked_tag", "href", "candidate_count", "ambiguity_code", "fallback"):
         value = payload.get(key)
         if isinstance(value, str):
             safe_payload[key] = value[:240]
@@ -1346,6 +1406,16 @@ def parse_click_by_text_result(raw_result: Any) -> BrowserStepResult:
     candidate_labels = payload.get("candidate_labels")
     if isinstance(candidate_labels, list):
         safe_payload["candidate_labels"] = [str(label)[:160] for label in candidate_labels if str(label).strip()][:8]
+    click_target = payload.get("click_target")
+    if isinstance(click_target, dict):
+        # Coordinates for the caller to dispatch a real mouse event at. The
+        # adapter strips them again before the payload reaches a run event; they
+        # are working data, not something worth persisting.
+        safe_payload["click_target"] = {
+            key: value
+            for key, value in click_target.items()
+            if key in ("x", "y", "jx", "jy") and isinstance(value, (int, float)) and not isinstance(value, bool)
+        }
     message = str(payload.get("message") or ("safe portal action clicked" if payload.get("ok") else "safe portal action could not be clicked"))
     if not payload.get("ok"):
         safe_payload["message"] = message

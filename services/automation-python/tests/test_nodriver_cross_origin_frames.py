@@ -24,6 +24,7 @@ from typing import Any
 from applyocalypse_automation.browser.adapter import BrowserField
 from applyocalypse_automation.browser.field_detection import (
     DOM_FIELD_DISCOVERY_SCRIPT,
+    LOCATE_SCRIPT_MARKER,
     VERIFY_SCRIPT_MARKER,
     WRITE_SCRIPT_MARKER,
 )
@@ -72,13 +73,26 @@ class FakeElement:
 class FakeFrame:
     """One document. The top tab and an embedded IFrame differ only in URL."""
 
-    def __init__(self, url: str, *, fields: list[dict[str, Any]] | None = None, click_ok: bool = False) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        fields: list[dict[str, Any]] | None = None,
+        click_ok: bool = False,
+        click_target: dict[str, float] | None = None,
+        covered: bool = False,
+    ) -> None:
         self.target = _FakeTargetInfo(url)
         self._fields = fields or []
         self._click_ok = click_ok
+        self._click_target = click_target
+        self._covered = covered
         self.discovery_calls = 0
         self.write_scripts: list[str] = []
         self.click_scripts: list[str] = []
+        self.locate_scripts: list[str] = []
+        self.press_scripts: list[str] = []
+        self.sent: list[dict[str, Any]] = []
         self.cleared: list[str] = []
         self.filled: list[tuple[str, str]] = []
         self.uploaded: list[tuple[str, str]] = []
@@ -124,9 +138,45 @@ class FakeFrame:
                 }
             )
         self.click_scripts.append(script)
+        if LOCATE_SCRIPT_MARKER in script:
+            self.locate_scripts.append(script)
+            return self._locate_result()
+        self.press_scripts.append(script)
         if self._click_ok:
             return json.dumps({"ok": True, "message": "clicked", "clicked_label": "Submit application"})
         return json.dumps({"ok": False, "message": "no matching control was found"})
+
+    def _locate_result(self) -> str:
+        """What the page says when asked where the control is rather than to click it."""
+        if not self._click_ok:
+            return json.dumps({"ok": False, "message": "no matching control was found"})
+        if self._covered:
+            return json.dumps(
+                {
+                    "ok": False,
+                    "message": "the matched control is covered by something else",
+                    "fallback": "injected_js",
+                }
+            )
+        payload: dict[str, Any] = {"ok": True, "message": "clicked", "clicked_label": "Submit application"}
+        if self._click_target is not None:
+            payload["click_target"] = self._click_target
+        return json.dumps(payload)
+
+    async def send(self, command: Any) -> None:
+        """Drive a CDP command generator far enough to see what it asked for.
+
+        nodriver's commands are generators that yield a request dict, so this is
+        the whole of what a real ``Tab.send`` does before it waits on a socket.
+        Returning ``None`` for the response is what makes the frame-translation
+        lookups fail, which is deliberate: an embedded frame has to keep working
+        by falling back, and this pins that it does.
+        """
+        try:
+            self.sent.append(next(command))
+        except (TypeError, StopIteration):
+            return None
+        return None
 
 
 def _adapter(top: FakeFrame, embedded: list[FakeFrame] | None = None) -> NodriverBrowserAdapter:
@@ -347,7 +397,13 @@ def test_duplicate_urls_are_resolved_by_the_recorded_index() -> None:
 
 
 def test_submit_reaches_the_button_inside_the_embedded_form() -> None:
-    """On an embedded portal the submit button is not in the top document."""
+    """On an embedded portal the submit button is not in the top document.
+
+    The frame is asked twice: once for coordinates, and once to click, because
+    this fake cannot answer the CDP lookup that translates an embedded frame's
+    box into the top document. That is the fallback working, and it is the
+    behaviour that matters most here: the button still gets pressed.
+    """
     top = FakeFrame(_EMPLOYER_URL)
     embed = FakeFrame(_EMBED_URL, click_ok=True)
     adapter = _adapter(top, [embed])
@@ -356,7 +412,9 @@ def test_submit_reaches_the_button_inside_the_embedded_form() -> None:
 
     assert result.ok is True, result.message
     assert result.payload["action"] == "final_submit"
-    assert len(embed.click_scripts) == 1
+    assert result.payload["click_dispatch"] == "injected_js"
+    assert len(embed.locate_scripts) == 1
+    assert len(embed.press_scripts) == 1
 
 
 def test_the_top_document_is_always_tried_first() -> None:
@@ -367,8 +425,87 @@ def test_the_top_document_is_always_tried_first() -> None:
 
     asyncio.run(adapter.click_by_text(["Apply now"]))
 
-    assert len(top.click_scripts) == 1
+    assert len(top.locate_scripts) == 1
     assert embed.click_scripts == [], "the embedded frame was clicked as well"
+
+
+# ---------------------------------------------------------------------------
+# clicks the page cannot tell were ours
+# ---------------------------------------------------------------------------
+
+
+def _mouse_events(frame: FakeFrame) -> list[dict[str, Any]]:
+    return [call["params"] for call in frame.sent if call.get("method") == "Input.dispatchMouseEvent"]
+
+
+def test_a_button_we_can_reach_is_pressed_with_the_mouse() -> None:
+    """The point of all of this: no ``element.click()``, so no ``isTrusted: false``.
+
+    A detector reads that property first because it costs nothing and cannot be
+    forged from inside the page. Every button this worker pressed used to fail it.
+    """
+    top = FakeFrame(_EMPLOYER_URL, click_ok=True, click_target={"x": 300.0, "y": 200.0, "jx": 12.0, "jy": 8.0})
+    adapter = _adapter(top)
+
+    result = asyncio.run(adapter.click_by_text(["Apply now"]))
+
+    events = _mouse_events(top)
+    assert result.ok is True, result.message
+    assert result.payload["click_dispatch"] == "trusted_input"
+    assert top.press_scripts == [], "the page was asked to click after we already had"
+    assert [event["type"] for event in events][-2:] == ["mousePressed", "mouseReleased"]
+    assert abs(events[-1]["x"] - 300.0) <= 12.0
+    assert abs(events[-1]["y"] - 200.0) <= 8.0
+
+
+def test_the_coordinates_do_not_follow_the_click_into_the_run_record() -> None:
+    """``runner.py`` spreads these payloads into emitted events. They are scratch."""
+    top = FakeFrame(_EMPLOYER_URL, click_ok=True, click_target={"x": 300.0, "y": 200.0, "jx": 12.0, "jy": 8.0})
+
+    result = asyncio.run(_adapter(top).click_by_text(["Apply now"]))
+
+    assert "click_target" not in result.payload
+
+
+def test_a_button_we_cannot_locate_is_still_clicked_the_old_way() -> None:
+    """Every reason the mouse path can refuse ends here, so none of them lose a click."""
+    top = FakeFrame(_EMPLOYER_URL, click_ok=True)
+    adapter = _adapter(top)
+
+    result = asyncio.run(adapter.click_by_text(["Apply now"]))
+
+    assert result.ok is True, result.message
+    assert result.payload["click_dispatch"] == "injected_js"
+    assert _mouse_events(top) == []
+    assert len(top.press_scripts) == 1
+
+
+def test_a_button_under_a_cookie_banner_is_clicked_by_script_not_by_coordinate() -> None:
+    """Pressing a covered point would click the banner, and on a form that is not safe.
+
+    The page refuses to hand over a coordinate it hit-tested to something else,
+    and the injected click takes over, which reaches the element directly.
+    """
+    top = FakeFrame(_EMPLOYER_URL, click_ok=True, covered=True)
+    adapter = _adapter(top)
+
+    result = asyncio.run(adapter.click_by_text(["Apply now"]))
+
+    assert result.ok is True, result.message
+    assert result.payload["click_dispatch"] == "injected_js"
+    assert _mouse_events(top) == []
+
+
+def test_a_control_that_matched_nothing_is_not_asked_twice() -> None:
+    """Nothing matched is not a coordinate problem, so pressing would find the same nothing."""
+    top = FakeFrame(_EMPLOYER_URL)
+    adapter = _adapter(top)
+
+    result = asyncio.run(adapter.click_by_text(["Apply now"]))
+
+    assert result.ok is False
+    assert top.press_scripts == []
+    assert len(top.locate_scripts) == 1
 
 
 def test_a_click_that_matches_nowhere_reports_the_refusal() -> None:

@@ -36,6 +36,13 @@ from .page_readiness import (
     wait_for_page_change,
     wait_for_page_text,
 )
+from .trusted_click import (
+    Point,
+    aim_point,
+    content_box_origin,
+    dispatch_trusted_click,
+    parse_click_target,
+)
 
 PAGE_TEXT_LENGTH_PROBE_SCRIPT = "String(((document.body && document.body.innerText) || '').trim().length)"
 PAGE_FINGERPRINT_PROBE_SCRIPT = (
@@ -58,6 +65,24 @@ FIELD_CLEAR_SCRIPT_TEMPLATE = """
   return String(element.value || '').length === 0 ? 'cleared' : 'not_cleared';
 }})()
 """
+
+
+# Asked of the *top* document, to check that a translated coordinate still
+# lands on the embedded frame it was measured in.
+_POINT_ON_FRAME_SCRIPT = """
+(() => {{
+  const hit = document.elementFromPoint({x}, {y});
+  return hit ? String(hit.tagName || '').toLowerCase() : 'nothing';
+}})()
+"""
+
+# Working data for the click we are about to make, not something to persist:
+# ``runner.py`` spreads these payloads straight into emitted run events.
+_TRANSIENT_PAYLOAD_KEYS = ("click_target",)
+
+
+def _without_coordinates(payload: dict[str, Any]) -> dict[str, Any]:
+    return {key: value for key, value in payload.items() if key not in _TRANSIENT_PAYLOAD_KEYS}
 
 
 def _frame_url(frame: Any) -> str:
@@ -400,13 +425,132 @@ class NodriverBrowserAdapter(BrowserAdapter):
             unchanged_grace_s=POST_CLICK_UNCHANGED_GRACE_S,
         )
 
-    async def _click_across_frames(
+    async def _evaluate_click_script(
         self,
+        frame: Any,
         script: str,
         parse: Callable[[Any], BrowserStepResult],
         failure_message: str,
     ) -> BrowserStepResult:
-        """Run a click script in the top document, then in each embedded form frame.
+        """One click script in one frame, with a frame that broke reported as a refusal.
+
+        A frame can navigate or detach mid-click. The refusal is marked as
+        falling back so the caller retries with the injected click, which is what
+        this code did before the mouse path existed.
+        """
+        try:
+            raw_result = await frame.evaluate(script)
+        except Exception as exc:
+            return BrowserStepResult(False, failure_message, {"error": str(exc), "fallback": "injected_js"})
+        return parse(raw_result)
+
+    async def _frame_viewport_origin(self, frame: Any) -> tuple[float, float] | None:
+        """Where ``frame`` measures its own (0, 0) from, in top-level coordinates.
+
+        An embedded document's ``getBoundingClientRect()`` is relative to its own
+        viewport, but a mouse event is dispatched against the top-level target.
+        Chrome gives an out-of-process frame a target id equal to its frame id,
+        so the owning ``<iframe>`` can be looked up from the page above it and
+        its content box read: that box is exactly the embedded viewport.
+
+        ``None`` means we could not work it out, which costs a fallback to the
+        injected click rather than a press at a guessed coordinate.
+        """
+        if self._page is None:
+            return None
+        if frame is self._page:
+            return (0.0, 0.0)
+        target_id = getattr(getattr(frame, "target", None), "target_id", None)
+        if not target_id:
+            return None
+        try:
+            from nodriver import cdp  # type: ignore[import-not-found]
+
+            # The DOM agent needs a document before it will resolve nodes.
+            await self._page.send(cdp.dom.get_document(depth=0))
+            owner = await self._page.send(cdp.dom.get_frame_owner(cdp.page.FrameId(str(target_id))))
+            backend_node_id = owner[0] if isinstance(owner, tuple) else owner
+            box = await self._page.send(cdp.dom.get_box_model(backend_node_id=backend_node_id))
+        except Exception:
+            return None
+        return content_box_origin(getattr(box, "content", None))
+
+    async def _point_reaches_frame(self, point: Point) -> bool:
+        """Whether the top document still shows the embedded frame at this point.
+
+        ``scrollIntoView`` inside a cross-origin iframe scrolls that frame, not
+        the page holding it. A form scrolled below the top-level fold therefore
+        reports a perfectly good frame-local box whose translation lands on
+        whatever the user can actually see instead. ``element.click()`` never had
+        that problem, so this is the check that keeps the mouse path from being
+        worse than the one it replaces.
+        """
+        if self._page is None:
+            return False
+        try:
+            tag = await self._page.evaluate(_POINT_ON_FRAME_SCRIPT.format(x=point.x, y=point.y))
+        except Exception:
+            return False
+        return str(tag) in {"iframe", "frame"}
+
+    async def _dispatch_located_click(self, frame: Any, payload: dict[str, Any]) -> bool:
+        """Press the located control with the mouse. ``False`` means use the script."""
+        if self._page is None:
+            return False
+        target = parse_click_target(payload)
+        if target is None:
+            return False
+        origin = await self._frame_viewport_origin(frame)
+        if origin is None:
+            return False
+        point = aim_point(target, origin)
+        if frame is not self._page and not await self._point_reaches_frame(point):
+            return False
+        try:
+            await dispatch_trusted_click(self._page, point)
+        except Exception:
+            return False
+        return True
+
+    async def _click_in_frame(
+        self,
+        frame: Any,
+        locate_script: str,
+        press_script: str,
+        parse: Callable[[Any], BrowserStepResult],
+        failure_message: str,
+    ) -> BrowserStepResult:
+        """Find the control, then press it with the mouse if we safely can.
+
+        The page is asked where the control is rather than to click it, because
+        ``element.click()`` produces an event carrying ``isTrusted: false``. When
+        the coordinate cannot be trusted, for any reason at all, the original
+        injected click runs in this same frame, so nothing here can do worse than
+        the behaviour it replaces.
+        """
+        located = await self._evaluate_click_script(frame, locate_script, parse, failure_message)
+        if located.ok:
+            if await self._dispatch_located_click(frame, located.payload):
+                payload = {**_without_coordinates(located.payload), "click_dispatch": "trusted_input"}
+                return BrowserStepResult(True, located.message, payload)
+        elif located.payload.get("fallback") != "injected_js":
+            # Nothing matched, or too many things did. Pressing would find the
+            # same nothing, and the refusal above explains it better.
+            return located
+
+        pressed = await self._evaluate_click_script(frame, press_script, parse, failure_message)
+        if not pressed.ok:
+            return pressed
+        return BrowserStepResult(True, pressed.message, {**pressed.payload, "click_dispatch": "injected_js"})
+
+    async def _click_across_frames(
+        self,
+        locate_script: str,
+        press_script: str,
+        parse: Callable[[Any], BrowserStepResult],
+        failure_message: str,
+    ) -> BrowserStepResult:
+        """Run a click in the top document, then in each embedded form frame.
 
         The top document is always tried first, so a portal that hosts its own form
         behaves exactly as it did before. Only when nothing matched up there do we
@@ -416,12 +560,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         """
         last_result: BrowserStepResult | None = None
         for frame in await self._form_frames():
-            try:
-                raw_result = await frame.evaluate(script)
-            except Exception as exc:
-                last_result = BrowserStepResult(False, failure_message, {"error": str(exc)})
-                continue
-            result = parse(raw_result)
+            result = await self._click_in_frame(frame, locate_script, press_script, parse, failure_message)
             if result.ok:
                 return result
             last_result = result
@@ -432,7 +571,10 @@ class NodriverBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "page is not available")
         baseline = await self._probe_page_fingerprint()
         result = await self._click_across_frames(
-            build_click_by_text_script(labels), parse_click_by_text_result, "portal action click failed"
+            build_click_by_text_script(labels, locate_only=True),
+            build_click_by_text_script(labels),
+            parse_click_by_text_result,
+            "portal action click failed",
         )
         if not result.ok:
             return result
@@ -444,7 +586,10 @@ class NodriverBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "page is not available")
         baseline = await self._probe_page_fingerprint()
         result = await self._click_across_frames(
-            build_final_submit_script(labels), parse_final_submit_result, "final submit click failed"
+            build_final_submit_script(labels, locate_only=True),
+            build_final_submit_script(labels),
+            parse_final_submit_result,
+            "final submit click failed",
         )
         if not result.ok:
             return result

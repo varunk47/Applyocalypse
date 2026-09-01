@@ -16,14 +16,30 @@ process.stdin.on("end", () => {
   try {
     const input = JSON.parse(raw);
     const env = buildDom(input.spec || {});
+    // The click scripts name these bare, the way a page script would.
     const evaluate = new Function(
       "window",
       "document",
       "CSS",
       "Event",
+      "location",
+      "HTMLInputElement",
+      "HTMLTextAreaElement",
+      "HTMLSelectElement",
+      "HTMLAnchorElement",
       `return (${input.script});`
     );
-    const result = evaluate(env.window, env.document, env.CSS, env.Event);
+    const result = evaluate(
+      env.window,
+      env.document,
+      env.CSS,
+      env.Event,
+      env.location,
+      env.window.HTMLInputElement,
+      env.window.HTMLTextAreaElement,
+      env.window.HTMLSelectElement,
+      env.window.HTMLAnchorElement
+    );
     process.stdout.write(JSON.stringify({ result, state: env.snapshot() }));
   } catch (error) {
     process.stdout.write(JSON.stringify({ error: String((error && error.stack) || error) }));
