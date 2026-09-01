@@ -90,15 +90,20 @@ On this machine that is not hypothetical. `C:\Program Files\Google\Chrome Beta\A
 
 New `chrome_discovery.py` ranks candidates by release channel (stable, beta, dev, canary, for-testing, chromium) and breaks ties on discovery order rather than string length. `browser_executable_path=None` is verified to be exactly today's autodetect behaviour (`Config.__init__`: `AUTO = None`, `if not browser_executable_path: ...`), so a future nodriver that moves the helper degrades to the old behaviour instead of failing to launch. 16 tests, including one that asserts the bug's own premise (`assert len(STABLE_PER_USER) > len(BETA)`).
 
+**3.c  Runs no longer arrive as a browser that has never been anywhere.** `commit 23176c2`
+
+`apps/desktop/src/main/scheduler/localQueueScheduler.ts:115` set `runWorkDir = userData/runs/{runId}` and `runner.py:1487,1766` derived `user_data_dir = work_dir / "browser-profile"`, so every run opened a profile directory that had never existed: no history, no cookies, no cached fonts, a first-visit fingerprint, and a person signing in to the same job board again on every application.
+
+New `profile_pool.py` leases one of **3 persistent profiles** (matching `HARD_MAX_CONCURRENT_APPLICATIONS`) for as long as a run holds a browser. A pool rather than one shared directory because Chrome takes an exclusive `SingletonLock` on a user data dir, and a second browser pointed at the same one refuses to start. The lease is an OS file lock rather than a state file because Electron kills a stopped run's process tree with `taskkill /T /F` and nothing gets to run cleanup on the way out: the kernel releases the lock when the process dies, so there is no stale-lock table to reap. The pool root is a sibling of `runs/`, not a child, because `runWorkDirJanitor.ts` sweeps `runs/*` after 7 days. No configured root, or a full pool, falls back to the old run-scoped directory, so a run always gets a browser. 11 tests, including one that kills a child process holding a slot and asserts the slot comes back.
+
 ### 3.1  Still open, in priority order
 
-1. **Persistent profile pool (highest value).** `apps/desktop/src/main/scheduler/localQueueScheduler.ts:115` sets `runWorkDir = userData/runs/{runId}`; `runner.py:1487,1766` derive `user_data_dir = work_dir / "browser-profile"`. Every run is therefore a brand-new browser with no history, no cookies, no cached fonts, and a first-visit fingerprint: the single loudest signal available to a bot detector, and the reason the user re-authenticates every time. Fix: a pool of **3 persistent profiles** (matching `HARD_MAX_CONCURRENT_APPLICATIONS`), leased per run and returned on completion. A pool rather than one shared dir because Chrome's `SingletonLock` will not tolerate two processes on one profile. It also bounds profile storage: `runWorkDirJanitor.ts` already sweeps `runs/*` older than 7 days at app start, so the current growth is capped rather than unbounded, but a week of per-run profiles is still far more disk than three pooled directories. The pool must live outside `runs/` so that janitor does not delete it.
-2. **Stop injecting DOM markers.** nodriver's `flash_point` inserts a visible marker element into the live page before clicks. That is DOM residue a detector reads directly. Replace with a mouse trail into the element's own box.
-3. **Isolated-world probes.** Every discovery pass currently runs through main-world `frame.evaluate`, and the adapter still passes `allow_unsafe_eval_blocked_by_csp=True`. Together those are the live brotector-class exposure: page script can observe the probe, and the CSP override is itself anomalous. Read-only probes should go through `Page.createIsolatedWorld`.
-4. **Never draw highlight boxes into the live page.** Render them in the Electron renderer over a screenshot instead.
-5. **Guardrail test asserting nothing calls `Network.setUserAgentOverride`.** UA spoofing without matching client hints is a self-inflicted mismatch; a test is cheaper than rediscovering that.
-6. **Warm-up navigation** rather than deep-linking cold into an apply URL with no referrer.
-7. **Heavy-tailed session pacing and real scrolling** instead of `scrollIntoView()`, which teleports.
+1. **Our clicks are not trusted clicks.** Correcting an earlier draft of this report: nodriver's `flash_point` DOM marker is **not** in our code path, because `nodriver_adapter.py` never calls `Element.click()`. Every click is injected JavaScript ending in `exact.element.click()` (`field_detection.py:1112-1183`), which is cleaner in one respect and worse in another. It leaves no DOM residue, but the resulting event carries `isTrusted: false`, which is the cheapest check a detector can run. The fix is real CDP `Input.dispatchMouseEvent`, and it is not a small change: `getBoundingClientRect()` inside a cross-origin iframe is frame-local while CDP input is dispatched in the top-level target's coordinate space, so a naive port breaks the OOPIF clicks that commit `6cef0df` exists to make work. It wants a coordinate translation through `DOM.getBoxModel` on the frame owner, and a fixture page to test against.
+2. **Isolated-world probes.** Every discovery pass runs through main-world `frame.evaluate`, so page script can observe the probe. Read-only probes should go through `Page.createIsolatedWorld`. Also correcting an earlier draft: `allow_unsafe_eval_blocked_by_csp=True` is **not** set by our code. It is hard-coded inside nodriver (`tab.py:895,1065,1076`), and `cdp/runtime.py:1010` documents that it bypasses the page's CSP. That is a reason to prefer an explicitly created isolated world over nodriver's evaluate helper, but it is not a flag we can simply stop passing. The six discovery scripts are pure DOM with no page-global dependencies, so they run unchanged in an isolated world.
+3. **Never draw highlight boxes into the live page.** Render them in the Electron renderer over a screenshot instead.
+4. **Guardrail test asserting nothing calls `Network.setUserAgentOverride`.** UA spoofing without matching client hints is a self-inflicted mismatch; a test is cheaper than rediscovering that.
+5. **Warm-up navigation** rather than deep-linking cold into an apply URL with no referrer.
+6. **Heavy-tailed session pacing and real scrolling** instead of `scrollIntoView()`, which teleports.
 
 > Discarded on source quality: a widely-repeated "70-85% LinkedIn ban rate" figure traces to a single competitor blog with no methodology. It is not repeated here and should not be quoted.
 
@@ -158,6 +163,14 @@ Then reject in code, before anything touches a file:
 - **Template-variable leak guard**: a blocking regex on `the user`, `the candidate`, `{{`, `[insert`, `as an AI`. This is not theoretical; it is the literal string a competitor shipped to a live employer.
 
 This slots alongside the existing banned-word and em-dash gates, which are already blocking and already kept in sync across `packages/validator` and `validation.py`.
+
+**Shipped: the rejection half.** `commit 643b6b1`
+
+The four content gates above now run in code as `tailoring/fabrication.py`, over the original/rewrite pair: a number the original never claimed, a tool that appears neither in the bullet nor anywhere on the master resume, an ownership verb where the original claimed none, and template or prompt scaffolding left in the text. Before this, the only check at the call site (`document_stage.py:614-620`) was banned words and em dashes, so the anti-fabrication rules written into `_BULLET_REWRITE_SYSTEM` were enforced by nothing but the model's compliance with them.
+
+Two design notes. Rejection is per bullet rather than per batch, because `tailor_bullets_1to1` was all-or-nothing and one invented metric threw away the tailoring of every other bullet. And the document stage passes the master resume's own tool names as `known_terms`, because moving a tool the candidate genuinely lists into the bullet a job cares about is the rewrite we want, and only the rest of the resume can tell that apart from an invention. Tool-of-trade conflation is deliberately left to the prompt: separating "Built dashboards using Tableau" from "Built Tableau dashboards" needs to parse the sentence, and a false rejection silently costs the tailoring its point. 37 tests.
+
+Still open here is the **edits-not-prose schema** itself. The gate compares two strings, so it cannot verify that new text is anchored to a verbatim span of the user's own material, which is what closes the loop.
 
 ### 5.2  Parse-back regression testing
 
