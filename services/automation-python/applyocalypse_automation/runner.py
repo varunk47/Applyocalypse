@@ -22,6 +22,7 @@ from .browser.portal_adapters import (
 )
 from .browser.portal_state import PortalPageState, classify_portal_page_state
 from .browser.portal_workflows import PortalWorkflow, workflow_for_url
+from .browser.profile_pool import lease_profile
 from .control import WorkerControl, read_worker_control
 from .document_stage import _lazy_generate_cover_letter_for_portal, generate_application_documents
 from .event_protocol import EventType, Severity, WorkerEvent, fail_process, utc_now
@@ -1462,6 +1463,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cover-letter-sample-file")
     parser.add_argument("--output-dir")
     parser.add_argument("--work-dir", required=True)
+    # Persistent Chrome profiles, pooled across runs. Omitted, a run keeps its
+    # own throwaway profile inside the work dir, which is what used to happen.
+    parser.add_argument("--browser-profile-root")
     return parser
 
 
@@ -1481,10 +1485,12 @@ async def run_url_observation_flow(
     work_dir: Path,
     canonical_profile: dict[str, object],
     adapter_name: str = "nodriver",
+    user_data_dir: Path | None = None,
 ) -> UrlObservationResult:
     workflow = workflow_for_url(job_url)
     adapter_candidates = adapter_candidates_for_workflow(workflow, adapter_name)
-    user_data_dir = work_dir / "browser-profile"
+    if user_data_dir is None:
+        user_data_dir = work_dir / "browser-profile"
     screenshot_dir = work_dir / "screenshots"
     emit_portal_workflow_selected(run_id, workflow, adapter_name=adapter_candidates[0], adapter_candidates=adapter_candidates)
     adapter, launch, launch_attempts = await launch_browser_for_workflow(
@@ -1760,10 +1766,12 @@ async def run_browser_apply_after_review(
     work_dir: Path,
     adapter_name: str,
     control: WorkerControl,
+    user_data_dir: Path | None = None,
 ) -> None:
     workflow = workflow_for_url(job_url)
     adapter_candidates = adapter_candidates_for_workflow(workflow, adapter_name)
-    user_data_dir = work_dir / "browser-profile"
+    if user_data_dir is None:
+        user_data_dir = work_dir / "browser-profile"
     emit_portal_workflow_selected(run_id, workflow, adapter_name=adapter_candidates[0], adapter_candidates=adapter_candidates)
     adapter, launch, launch_attempts = await launch_browser_for_workflow(
         run_id=run_id,
@@ -2437,6 +2445,7 @@ def _main_impl() -> None:
     args = build_parser().parse_args()
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    browser_profile_root = Path(args.browser_profile_root) if args.browser_profile_root else None
     output_dir = Path(args.output_dir) if args.output_dir else work_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     canonical_profile: dict[str, object] = {}
@@ -2494,15 +2503,17 @@ def _main_impl() -> None:
                 "workflow": workflow.to_event_payload(),
             },
         ).emit()
-        observation = asyncio.run(
-            run_url_observation_flow(
-                run_id=args.run_id,
-                job_url=args.job_url,
-                work_dir=work_dir,
-                canonical_profile=canonical_profile,
-                adapter_name=workflow.default_adapter,
+        with lease_profile(browser_profile_root, fallback=work_dir / "browser-profile") as profile_dir:
+            observation = asyncio.run(
+                run_url_observation_flow(
+                    run_id=args.run_id,
+                    job_url=args.job_url,
+                    work_dir=work_dir,
+                    canonical_profile=canonical_profile,
+                    adapter_name=workflow.default_adapter,
+                    user_data_dir=profile_dir,
+                )
             )
-        )
         if observation.should_stop or observation.job_text_file is None:
             return
         job_text_source_path = str(observation.job_text_file)
@@ -2557,15 +2568,17 @@ def _main_impl() -> None:
 
     if args.job_url:
         workflow = workflow_for_url(args.job_url)
-        asyncio.run(
-            run_browser_apply_after_review(
-                run_id=args.run_id,
-                job_url=args.job_url,
-                work_dir=work_dir,
-                adapter_name=workflow.default_adapter,
-                control=control,
+        with lease_profile(browser_profile_root, fallback=work_dir / "browser-profile") as profile_dir:
+            asyncio.run(
+                run_browser_apply_after_review(
+                    run_id=args.run_id,
+                    job_url=args.job_url,
+                    work_dir=work_dir,
+                    adapter_name=workflow.default_adapter,
+                    control=control,
+                    user_data_dir=profile_dir,
+                )
             )
-        )
     else:
         auto_submit_enabled = control_auto_submit_enabled(control)
         ready_message = (
