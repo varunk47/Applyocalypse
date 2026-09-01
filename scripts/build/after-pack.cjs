@@ -1,6 +1,7 @@
 const { existsSync } = require("node:fs");
 const { join, resolve } = require("node:path");
 const { brandWindowsExecutable } = require("./brand-windows-executable.cjs");
+const { signWorkerTree } = require("./sign-worker-binary.cjs");
 
 exports.default = async function afterPack(context) {
   const resourcesDir = join(context.appOutDir, "resources", "automation-python");
@@ -20,6 +21,18 @@ exports.default = async function afterPack(context) {
   const initialMigrationPath = join(migrationsDir, "0001_initial.sql");
   if (!existsSync(initialMigrationPath)) {
     throw new Error(`Applyocalypse SQLite migrations are missing from packaged resources: ${migrationsDir}`);
+  }
+
+  // The worker ships as extraResources, so electron-builder never signs any of
+  // it and this is the only pass that can. It runs here rather than in afterSign
+  // because electron-builder skips afterSign outright when the app itself is not
+  // signed ("skipping \"afterSign\" hook as no signing occurred"), which is every
+  // build until signAndEditExecutable is turned on.
+  const signing = await signWorkerTree(workerPath, context.electronPlatformName);
+  if (signing.signed) {
+    console.log(`Applyocalypse worker binaries signed (${signing.count}): ${signing.reason}`);
+  } else {
+    console.log(`Applyocalypse worker binary signing skipped: ${signing.reason}`);
   }
 
   if (context.electronPlatformName !== "win32") {

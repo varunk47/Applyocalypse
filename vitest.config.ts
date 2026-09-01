@@ -18,7 +18,9 @@ export default defineConfig({
   test: {
     globals: false,
     environment: "node",
-    include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "tests/**/*.test.ts"],
+    // scripts/ earns its place here: sign-worker-binary.test.ts sat outside every
+    // pattern above and so had never once run. Build scripts decide what ships.
+    include: ["packages/**/*.test.ts", "apps/**/*.test.ts", "tests/**/*.test.ts", "scripts/**/*.test.ts"],
     coverage: {
       provider: "v8",
       reporter: ["text", "json-summary"],

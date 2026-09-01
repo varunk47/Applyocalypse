@@ -161,7 +161,7 @@ reports `passed`, and all five packaged smokes are green against the onedir buil
 **The fix is one flag.** `--onedir` writes the same binary next to its dependencies and loads them in place,
 so the extraction happens once at build time instead of once per run. Pointing `electron-builder.yml` at the
 bundle directory rather than at `dist/` keeps the shipped path byte-identical to what it was, so
-`pythonWorkerPaths.ts`, `after-pack.cjs`, `after-sign.cjs` and both packaged smokes resolve exactly what they
+`pythonWorkerPaths.ts`, `after-pack.cjs` and both packaged smokes resolve exactly what they
 resolved before and needed no change.
 
 **The cost, stated plainly.** `--onedir` ships uncompressed, so the worker goes from a 148 MB executable to a

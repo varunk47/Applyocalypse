@@ -81,4 +81,3 @@ nsis:
   installerIcon: icon.ico
   uninstallerIcon: icon.ico
 afterPack: ../../scripts/build/after-pack.cjs
-afterSign: ../../scripts/build/after-sign.cjs
