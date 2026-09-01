@@ -18,6 +18,7 @@
     "test": "pnpm native:rebuild:node && vitest run",
     "test:coverage": "pnpm native:rebuild:node && vitest run --coverage",
     "test:python": "node scripts/test/python-tests.mjs",
+    "test:python:browser": "node scripts/test/python-browser-tests.mjs",
     "test:evals": "node scripts/test/python-evals.mjs",
     "test:desktop-smoke": "pnpm native:rebuild:electron && node scripts/test/desktop-boot-smoke.mjs",
     "test:desktop-user-flow": "pnpm native:rebuild:electron && node scripts/test/desktop-user-flow-smoke.mjs",

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
@@ -23,6 +24,13 @@ class PortalReplayAnalysis:
     fields: tuple[BrowserField, ...]
     controls: tuple[ControlCandidate, ...]
     blockers: tuple[BrowserBlocker, ...]
+
+
+# Both of these mirror the injected discovery script in field_detection. A control
+# this twin reports and the browser does not is a phantom question: the offline
+# fixture tests would assert an answer for something no user will ever be asked.
+_SKIPPED_INPUT_TYPES = frozenset({"hidden", "submit", "button", "image", "reset", "search"})
+_CAPTCHA_NAME_RE = re.compile(r"recaptcha|captcha|turnstile")
 
 
 # `html.parser` never emits an end tag for these, so they never open a frame.
@@ -90,7 +98,7 @@ class _PortalHtmlParser(HTMLParser):
                 )
             )
         widget_role = self._aria_widget_role(attrs_map)
-        if widget_role is not None:
+        if widget_role is not None and not self._is_captcha_control(attrs_map):
             # Mirrors the ARIA sweep in ``field_detection.py``: a picker built from
             # divs owns no value the browser can set, and an <input role="combobox">
             # must NOT fall through to the plain-text path below or a write would
@@ -146,7 +154,7 @@ class _PortalHtmlParser(HTMLParser):
             return
         if tag_name in {"input", "textarea", "select"}:
             field_type = (attrs_map.get("type") or "text").lower() if tag_name == "input" else tag_name
-            if field_type in {"hidden", "submit", "button", "image", "reset"}:
+            if field_type in _SKIPPED_INPUT_TYPES or self._is_captcha_control(attrs_map):
                 return
             self.raw_fields.append(
                 {
@@ -328,6 +336,12 @@ class _PortalHtmlParser(HTMLParser):
         if field_type in {"radio", "checkbox"} and value:
             return f'{tag_name}[name="{name}"][value="{value}"]'
         return f'{tag_name}[name="{name}"]'
+
+    @staticmethod
+    def _is_captcha_control(attrs_map: dict[str, str | None]) -> bool:
+        """A challenge is never an application question, however it is labelled."""
+        name_id = f"{attrs_map.get('name') or ''} {attrs_map.get('id') or ''}".lower()
+        return _CAPTCHA_NAME_RE.search(name_id) is not None
 
     @staticmethod
     def _is_hidden(attrs_map: dict[str, str | None]) -> bool:

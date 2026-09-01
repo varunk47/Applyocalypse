@@ -43,4 +43,9 @@ testpaths = ["tests"]
 pythonpath = ["."]
 # -p no:seleniumbase disables the seleniumbase pytest plugin that registers a
 # conflicting --browser CLI argument we don't need in unit tests.
-addopts = "-q -p no:seleniumbase"
+# -m 'not browser' keeps the default gate free of anything that needs a real
+# Chrome. Those tests run from `pnpm test:python:browser`.
+addopts = "-q -p no:seleniumbase -m 'not browser'"
+markers = [
+  "browser: drives a real Chrome; deselected by default, run via `pnpm test:python:browser`"
+]
