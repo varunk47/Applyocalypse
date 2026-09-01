@@ -45,6 +45,27 @@ def iter_document_paragraphs(document: Any) -> list[Any]:
     return paragraphs
 
 
+def addressable_paragraphs(document: Any) -> list[Any]:
+    """Every paragraph a mutation can target, in a stable order: body paragraphs first,
+    then table cells depth-first, each appearing exactly once.
+
+    Two reasons this is not just ``iter_document_paragraphs``. A merged cell is returned
+    once per grid column it spans, so the same paragraph comes back several times, and an
+    index has to name exactly one paragraph for a mutation to be well defined. Identity is
+    the underlying XML element rather than the wrapper, because python-docx builds a fresh
+    ``Paragraph`` on every access.
+    """
+    seen: set[int] = set()
+    unique: list[Any] = []
+    for paragraph in iter_document_paragraphs(document):
+        key = id(paragraph._element)
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(paragraph)
+    return unique
+
+
 def extract_docx_text(path: Path) -> str:
     """Return plain text from all paragraphs and table cells in a DOCX file."""
     try:
@@ -96,7 +117,7 @@ def mutate_docx_paragraphs(source_docx: Path, output_docx: Path, mutations: list
         raise RuntimeError("python-docx is required for DOCX mutation") from exc
 
     document = Document(str(source_docx))
-    paragraphs = list(document.paragraphs)
+    paragraphs = addressable_paragraphs(document)
     for mutation in mutations:
         if mutation.paragraph_index < 0 or mutation.paragraph_index >= len(paragraphs):
             raise IndexError(f"paragraph index out of range: {mutation.paragraph_index}")
@@ -111,11 +132,15 @@ _BULLET_GLYPHS = "•◦‣▪·-–*"
 
 
 def collect_tailorable_bullets(document: Any) -> list[tuple[int, str]]:
-    """Body paragraphs that look like substantive resume bullets (list style or a bullet
+    """Paragraphs that look like substantive resume bullets (list style or a bullet
     glyph), returned as (paragraph_index, text). Indices are stable against a fresh
-    re-open of the same file, so they can drive ``mutate_docx_paragraphs`` directly."""
+    re-open of the same file, so they can drive ``mutate_docx_paragraphs`` directly.
+
+    Table cells count. Plenty of resume templates are one invisible table, or two columns,
+    and reading only the body would find no bullets at all in those and tailor nothing
+    while still reporting success."""
     bullets: list[tuple[int, str]] = []
-    for index, paragraph in enumerate(document.paragraphs):
+    for index, paragraph in enumerate(addressable_paragraphs(document)):
         text = paragraph.text.strip()
         if len(text) < 25:
             continue
@@ -128,25 +153,59 @@ def collect_tailorable_bullets(document: Any) -> list[tuple[int, str]]:
     return bullets
 
 
+def parses_back_intact(
+    before: list[str], after: list[str], tailored_by_index: dict[int, str]
+) -> bool:
+    """Whether a written document still reads back as the document we meant to write:
+    the same paragraphs, the tailored ones holding exactly their new text, the rest
+    untouched.
+
+    Rewriting a paragraph means redistributing text across its existing runs, which is how
+    the formatting survives, and it is also how a character goes missing at a run boundary
+    or a space disappears from a ``w:t`` that lost ``xml:space``. An ATS parses the file
+    rather than rendering it, so a resume that still looks right in Word can already be
+    wrong by the time it is read."""
+    if len(before) != len(after):
+        return False
+    for index, (original, written) in enumerate(zip(before, after, strict=True)):
+        expected = tailored_by_index.get(index, original)
+        if written != expected:
+            return False
+    return True
+
+
 def tailor_master_docx_in_place(
     master_docx: Path, output_docx: Path, tailored_by_index: dict[int, str]
 ) -> tuple[Path, int]:
     """Write tailored bullet text back into the master DOCX in place, preserving every
     paragraph's font/size/bullet/indent (only run text changes). Copies the master
-    verbatim when there is nothing to change, so the user's exact layout is always kept."""
+    verbatim when there is nothing to change, so the user's exact layout is always kept.
+
+    The written file is read back and checked against what was asked for. If it does not
+    match, the master is copied through untouched and the count comes back 0: an
+    untailored resume the user recognises beats a tailored one with a mangled line."""
+    try:
+        from docx import Document  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("python-docx is required for DOCX mutation") from exc
+
+    def copy_master_verbatim() -> tuple[Path, int]:
+        output_docx.parent.mkdir(parents=True, exist_ok=True)
+        Document(str(master_docx)).save(str(output_docx))
+        return output_docx, 0
+
     mutations = [
         DocxParagraphMutation(paragraph_index=index, replacement_text=text)
         for index, text in sorted(tailored_by_index.items())
     ]
     if not mutations:
-        try:
-            from docx import Document  # type: ignore
-        except ImportError as exc:
-            raise RuntimeError("python-docx is required for DOCX mutation") from exc
-        output_docx.parent.mkdir(parents=True, exist_ok=True)
-        Document(str(master_docx)).save(str(output_docx))
-        return output_docx, 0
+        return copy_master_verbatim()
+
+    before = [p.text for p in addressable_paragraphs(Document(str(master_docx)))]
     mutate_docx_paragraphs(master_docx, output_docx, mutations)
+    after = [p.text for p in addressable_paragraphs(Document(str(output_docx)))]
+    if not parses_back_intact(before, after, tailored_by_index):
+        return copy_master_verbatim()
     return output_docx, len(mutations)
 
 
