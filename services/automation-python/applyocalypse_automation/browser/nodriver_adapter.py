@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult, screenshot_payload
+from .chrome_discovery import discover_chrome_executable
 from .field_detection import (
     DOM_BLOCKER_DISCOVERY_SCRIPT,
     DOM_FIELD_DISCOVERY_SCRIPT,
@@ -79,9 +80,20 @@ class NodriverBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "nodriver is not installed")
 
         user_data_dir.mkdir(parents=True, exist_ok=True)
-        self._browser = await uc.start(user_data_dir=str(user_data_dir), browser_args=["--no-first-run"])
+        # Choose the browser rather than letting nodriver pick the shortest path
+        # on disk, which can silently drive Chrome Beta or Canary. See
+        # chrome_discovery for why that heuristic misfires on Windows. None means
+        # nothing was found, which leaves nodriver to autodetect as it always has.
+        executable = discover_chrome_executable()
+        self._browser = await uc.start(
+            user_data_dir=str(user_data_dir),
+            browser_args=["--no-first-run"],
+            browser_executable_path=executable,
+        )
         self._page = await self._browser.get("about:blank")
-        return BrowserStepResult(True, "browser launched", {"run_id": run_id})
+        return BrowserStepResult(
+            True, "browser launched", {"run_id": run_id, "browser_executable": executable}
+        )
 
     async def open_url(self, url: str) -> BrowserStepResult:
         if self._browser is None:
