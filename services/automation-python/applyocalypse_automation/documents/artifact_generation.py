@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from .docx_builder import _date_range
 from .file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 
 
@@ -182,7 +183,11 @@ def build_placeholder_replacements(*, canonical_profile: dict[str, Any], tailori
 def build_resume_markdown(*, canonical_profile: dict[str, Any], tailoring_plan: dict[str, Any]) -> str:
     profile = canonical_profile.get("profile") if isinstance(canonical_profile.get("profile"), dict) else {}
     legal_name = str(profile.get("legalName") or profile.get("displayName") or "Candidate Profile")
-    contact = [str(profile.get(key)).strip() for key in ["email", "phone", "location"] if profile.get(key)]
+    contact = [
+        str(profile.get(key)).strip()
+        for key in ["email", "phone", "location", "linkedinUrl"]
+        if profile.get(key)
+    ]
     one_page_plan = tailoring_plan.get("one_page_plan") if isinstance(tailoring_plan.get("one_page_plan"), dict) else {}
     bullet_limit = int(one_page_plan.get("bullet_limit_per_role", 3)) if isinstance(one_page_plan.get("bullet_limit_per_role"), int) else 3
     experience_limit = int(one_page_plan.get("experience_limit", 4)) if isinstance(one_page_plan.get("experience_limit"), int) else 4
@@ -218,7 +223,7 @@ def build_resume_markdown(*, canonical_profile: dict[str, Any], tailoring_plan: 
         for entry in experience[:experience_limit]:
             title = str(entry.get("title") or "").strip()
             company = str(entry.get("company") or "").strip()
-            heading = " | ".join(part for part in [title, company] if part)
+            heading = " | ".join(part for part in [title, company, _date_range(entry)] if part)
             if heading:
                 lines.append(f"### {heading}")
             for bullet in _planned_bullets(entry, "experience", tailoring_plan, bullet_limit):
@@ -246,7 +251,7 @@ def build_resume_markdown(*, canonical_profile: dict[str, Any], tailoring_plan: 
             institution = str(entry.get("institution") or "").strip()
             degree = str(entry.get("degree") or "").strip()
             field = str(entry.get("field") or "").strip()
-            line = " | ".join(part for part in [institution, degree, field] if part)
+            line = " | ".join(part for part in [institution, degree, field, _date_range(entry)] if part)
             if line:
                 lines.append(line)
         lines.append("")

@@ -339,3 +339,85 @@ def test_validator_bullet_too_long_custom_limit() -> None:
 
     codes = {issue.code for issue in report.warnings}
     assert "BULLET_TOO_LONG" in codes
+
+
+# ---------------------------------------------------------------------------
+# Contact line and employment dates on the markdown resume
+#
+# The fixtures above carry neither a LinkedIn URL nor a single date, the same
+# blind spot that let the DOCX builder ship without both. This is a shipped
+# artifact, not a preview: document_stage validates it and writes it out.
+# ---------------------------------------------------------------------------
+
+_DATED_MARKDOWN_PROFILE = {
+    "profile": {
+        "legalName": "Grace Hopper",
+        "email": "grace@example.com",
+        "location": "Arlington, VA",
+        "linkedinUrl": "https://linkedin.com/in/grace-hopper",
+    },
+    "skillGroups": [{"skills": ["COBOL"]}],
+    "experience": [
+        {
+            "title": "Rear Admiral",
+            "company": "US Navy",
+            "startDate": "1967-08",
+            "endDate": "1986-08",
+            "bullets": ["Standardised the compiler toolchain across the fleet."],
+        },
+        {
+            "title": "Senior Consultant",
+            "company": "Digital Equipment Corporation",
+            "startDate": "1986-09",
+            "bullets": ["Lectured on the cost of a microsecond."],
+        },
+    ],
+    "projects": [],
+    "education": [
+        {
+            "institution": "Yale University",
+            "degree": "PhD",
+            "field": "Mathematics",
+            "startDate": "1930-09",
+            "endDate": "1934-06",
+        }
+    ],
+}
+
+
+def test_resume_markdown_contact_line_carries_linkedin_url() -> None:
+    """The contact line listed email, phone and location and stopped there."""
+    content = build_resume_markdown(
+        canonical_profile=_DATED_MARKDOWN_PROFILE,
+        tailoring_plan={"matched_evidence": [], "missing_keywords": []},
+    )
+
+    assert "https://linkedin.com/in/grace-hopper" in content
+
+
+def test_resume_markdown_dates_experience_and_education() -> None:
+    content = build_resume_markdown(
+        canonical_profile=_DATED_MARKDOWN_PROFILE,
+        tailoring_plan={"matched_evidence": [], "missing_keywords": []},
+    )
+
+    assert "### Rear Admiral | US Navy | 1967-08 to 1986-08" in content
+    assert "### Senior Consultant | Digital Equipment Corporation | 1986-09 to Present" in content
+    assert "Yale University | PhD | Mathematics | 1930-09 to 1934-06" in content
+
+
+def test_resume_markdown_leaves_no_dangling_separator_without_dates() -> None:
+    """An undated entry keeps exactly the heading it always had."""
+    content = build_resume_markdown(
+        canonical_profile={
+            "profile": {"legalName": "Ada Lovelace", "email": "ada@example.com"},
+            "skillGroups": [],
+            "experience": [{"title": "Principal Engineer", "company": "Analytical Engines", "bullets": ["Built tools."]}],
+            "projects": [],
+            "education": [{"institution": "University of London", "degree": "BSc", "field": "Mathematics"}],
+        },
+        tailoring_plan={"matched_evidence": [], "missing_keywords": []},
+    )
+
+    assert "### Principal Engineer | Analytical Engines\n" in content
+    assert "University of London | BSc | Mathematics\n" in content
