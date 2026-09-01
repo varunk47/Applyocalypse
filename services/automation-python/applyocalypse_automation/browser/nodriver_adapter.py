@@ -27,6 +27,7 @@ from .field_detection import (
 )
 from .field_write import verify_or_repair_text_write
 from .human_typing import clear_element, type_into_element
+from .isolated_world import IsolatedWorlds
 from .page_readiness import (
     PAGE_TEXT_POLL_INTERVAL_S,
     PAGE_TEXT_TIMEOUT_S,
@@ -97,6 +98,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
     def __init__(self) -> None:
         self._browser = None
         self._page = None
+        self._worlds = IsolatedWorlds()
 
     async def launch(self, *, run_id: str, user_data_dir: Path) -> BrowserStepResult:
         try:
@@ -124,6 +126,10 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._browser is None:
             return BrowserStepResult(False, "browser is not launched")
         self._page = await self._browser.get(url)
+        # The old documents are gone and so are their contexts. Chrome can hand
+        # a retired context id back out, so the cache is dropped here rather
+        # than one probe later.
+        self._worlds.forget_all()
         readiness = await wait_for_page_text(
             self._probe_visible_text_length,
             timeout_s=PAGE_TEXT_TIMEOUT_S,
@@ -131,10 +137,32 @@ class NodriverBrowserAdapter(BrowserAdapter):
         )
         return BrowserStepResult(True, "page navigated", {"url": url, "page_text": readiness})
 
+    async def _read(self, frame: Any, script: str) -> Any:
+        """Run a read-only probe, preferring a world the page cannot see.
+
+        Everything this worker asks a page used to be asked in the page's own
+        main world, where a script the site loaded first can have replaced the
+        builtins the probe relies on and can watch it run. An isolated world
+        shares the DOM and nothing else, so the same question gets an honest
+        answer and leaves no trace.
+
+        Falling back to the main world on any failure is what keeps this from
+        being a new way to fail: a browser or a frame that will not give us a
+        context loses the stealth and keeps the answer.
+
+        Writes never come through here. React's value tracker is an
+        own-property override installed in the main world, so a write has to
+        happen there to be seen.
+        """
+        ok, value = await self._worlds.evaluate(frame, script)
+        if ok:
+            return value
+        return await frame.evaluate(script)
+
     async def _probe_visible_text_length(self) -> int:
         if self._page is None:
             return 0
-        raw = await self._page.evaluate(PAGE_TEXT_LENGTH_PROBE_SCRIPT)
+        raw = await self._read(self._page, PAGE_TEXT_LENGTH_PROBE_SCRIPT)
         try:
             return int(str(raw).strip() or "0")
         except ValueError:
@@ -172,7 +200,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         return [self._page, *await self._embedded_form_frames()]
 
     async def _discover_in(self, frame: Any) -> Any:
-        raw_result = await frame.evaluate(DOM_FIELD_DISCOVERY_SCRIPT)
+        raw_result = await self._read(frame, DOM_FIELD_DISCOVERY_SCRIPT)
         if isinstance(raw_result, str):
             return json.loads(raw_result)
         return raw_result
@@ -230,7 +258,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._page is None:
             return []
         try:
-            raw_result = await self._page.evaluate(DOM_BLOCKER_DISCOVERY_SCRIPT)
+            raw_result = await self._read(self._page, DOM_BLOCKER_DISCOVERY_SCRIPT)
         except Exception:
             return []
         if isinstance(raw_result, str):
@@ -244,7 +272,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
         try:
-            raw_result = await self._page.evaluate(DOM_METADATA_CAPTURE_SCRIPT)
+            raw_result = await self._read(self._page, DOM_METADATA_CAPTURE_SCRIPT)
         except Exception as exc:
             return BrowserStepResult(False, "DOM snapshot capture failed", {"error": str(exc)})
         if isinstance(raw_result, str):
@@ -274,7 +302,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
         try:
-            raw_result = await self._page.evaluate(DOM_VISIBLE_TEXT_SCRIPT)
+            raw_result = await self._read(self._page, DOM_VISIBLE_TEXT_SCRIPT)
         except Exception as exc:
             return BrowserStepResult(False, "visible text extraction failed", {"error": str(exc)})
         if isinstance(raw_result, str):
@@ -412,7 +440,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._page is None:
             return ""
         try:
-            return str(await self._page.evaluate(PAGE_FINGERPRINT_PROBE_SCRIPT) or "")
+            return str(await self._read(self._page, PAGE_FINGERPRINT_PROBE_SCRIPT) or "")
         except Exception:
             return ""
 
@@ -431,15 +459,25 @@ class NodriverBrowserAdapter(BrowserAdapter):
         script: str,
         parse: Callable[[Any], BrowserStepResult],
         failure_message: str,
+        *,
+        read_only: bool = False,
     ) -> BrowserStepResult:
         """One click script in one frame, with a frame that broke reported as a refusal.
 
         A frame can navigate or detach mid-click. The refusal is marked as
         falling back so the caller retries with the injected click, which is what
         this code did before the mouse path existed.
+
+        ``read_only`` is for the script that measures the control instead of
+        pressing it: measuring is a read, so it can be hidden from the page,
+        while the injected press has to happen in the page's own world to reach
+        the element at all.
         """
         try:
-            raw_result = await frame.evaluate(script)
+            if read_only:
+                raw_result = await self._read(frame, script)
+            else:
+                raw_result = await frame.evaluate(script)
         except Exception as exc:
             return BrowserStepResult(False, failure_message, {"error": str(exc), "fallback": "injected_js"})
         return parse(raw_result)
@@ -488,7 +526,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if self._page is None:
             return False
         try:
-            tag = await self._page.evaluate(_POINT_ON_FRAME_SCRIPT.format(x=point.x, y=point.y))
+            tag = await self._read(self._page, _POINT_ON_FRAME_SCRIPT.format(x=point.x, y=point.y))
         except Exception:
             return False
         return str(tag) in {"iframe", "frame"}
@@ -528,7 +566,9 @@ class NodriverBrowserAdapter(BrowserAdapter):
         injected click runs in this same frame, so nothing here can do worse than
         the behaviour it replaces.
         """
-        located = await self._evaluate_click_script(frame, locate_script, parse, failure_message)
+        located = await self._evaluate_click_script(
+            frame, locate_script, parse, failure_message, read_only=True
+        )
         if located.ok:
             if await self._dispatch_located_click(frame, located.payload):
                 payload = {**_without_coordinates(located.payload), "click_dispatch": "trusted_input"}
