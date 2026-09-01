@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from dataclasses import dataclass
 from typing import Any
 
@@ -599,9 +600,33 @@ DOM_VISIBLE_TEXT_SCRIPT = r"""
 """
 
 
+def _ambiguous_selectors(raw_fields: list[Any]) -> frozenset[str]:
+    """Selectors in this snapshot that more than one field answers to.
+
+    ``selectorFor`` returns ``#id`` for any control carrying an id, and both the write
+    and the verify script resolve it with ``document.querySelector``, which returns the
+    first match and nothing else. Duplicate ids are invalid HTML and common regardless:
+    a portal that repeats a section, or ships a mobile copy of the same form alongside
+    the desktop one, emits two controls under one id. Discovery then reports two
+    questions whose selectors are the same element, so the second answer overwrites the
+    first, and verify reads that one element back and calls both writes successful. An
+    answer that lands in the wrong field and then verifies is the failure this must not
+    produce.
+
+    Scope is one document, which is why this is computed per snapshot. Discovery runs
+    once per frame and each field carries its own frame, so the same selector appearing
+    in two frames is two different elements, correctly addressed, and not a collision.
+    """
+    counts = Counter(
+        str(raw["selector"]) for raw in raw_fields if isinstance(raw, dict) and raw.get("selector")
+    )
+    return frozenset(selector for selector, count in counts.items() if count > 1)
+
+
 def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) -> list[BrowserField]:
     if not isinstance(raw_fields, list):
         return []
+    ambiguous = _ambiguous_selectors(raw_fields)
     parsed: list[BrowserField] = []
     for index, raw in enumerate(raw_fields):
         if not isinstance(raw, dict):
@@ -609,6 +634,13 @@ def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) 
         label = str(raw.get("label") or "").strip()
         label_source = str(raw.get("label_source") or "").strip()
         selector = raw.get("selector")
+        # Kept and surfaced, never dropped, on the same reasoning as an unlabelled
+        # field: with no selector every adapter refuses the write outright rather
+        # than aiming it at whichever twin the page happens to return first, and the
+        # run pauses for a human who can see which control is which.
+        ambiguous_selector = str(selector) if selector and str(selector) in ambiguous else None
+        if ambiguous_selector:
+            selector = None
         field_type = str(raw.get("field_type") or "text").strip().lower()
         synthetic = bool(raw.get("label_synthetic")) or not label
         if synthetic:
@@ -623,6 +655,9 @@ def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) 
         metadata: dict[str, Any] = dict(raw_metadata) if isinstance(raw_metadata, dict) else {}
         if label_source:
             metadata["label_source"] = label_source
+        if ambiguous_selector:
+            metadata["ambiguous_selector"] = ambiguous_selector
+            metadata["requires_human_selector_review"] = True
         if synthetic:
             metadata["label_synthetic"] = True
             metadata["requires_human_label_review"] = True
