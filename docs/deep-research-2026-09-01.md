@@ -370,7 +370,7 @@ What was not built, and why it is worth recording:
 - **No API submission.** The caveat above is the entire argument against it. Greenhouse accepting an application that omits required fields means a 200 there can still be an application nobody reviews. Submission stays in the browser behind the human gate, where the portal enforces its own rules. That reasoning lives in the module docstring rather than only here, so it survives the next reader who takes "we already call the API" as an invitation.
 - **Not before browser launch.** Reading the schema early would save the discovery pass, but there is no schema-driven fill path to feed yet, so that saving is hypothetical while the cross-check is not. Moving it earlier is a later change, against a real fill path.
 - **Invariant #2 is still enforced by string matching.** The pre-labelled EEOC blocks make structural enforcement possible; nothing was rewired onto them.
-- The submission receipt is still open. The template lint shipped, below.
+- The submission receipt and the template lint both shipped separately, below.
 
 Every failure path returns "nothing published", which is also what every non-Greenhouse portal returns, so the gate is unchanged for them. A suite-wide fixture keeps the tests off the network, since several already drive this flow with a live greenhouse.io URL.
 
@@ -398,7 +398,34 @@ abbreviated to "Sr. Account Exec", both need to know which words on a line are t
 title. Guessing that from a text dump would produce confident false alarms about a document that is fine, and a
 lint the user learns to ignore is worse than no lint.
 
-The submission receipt is the last item open in this section.
+**Submission receipt shipped.** `commit 2d9084b`
+
+`submission_receipt.py` writes `submission-receipt.txt` beside the run's other artifacts at the moment of
+submission: the job and the portal, how the submission was approved, the confirmation page if there was one,
+every document an upload control accepted with its size and SHA-256, and every answer that was written into the
+form.
+
+The hashes are taken in the worker, from the bytes handed to the upload control, at the moment they were handed
+over. The control payload carries no hash, so the alternative was widening a renderer-to-main contract to carry
+one down. Hashing at the upload is both narrower and better evidence: it attests to what was actually sent
+rather than to what was generated, and it stays true after the file on disk is edited or deleted.
+
+Two rules govern what goes in. An answer's value is recorded only when the field was neither filled from a
+secret nor looks like it holds one, which is stricter than the event log on purpose, because a receipt is a file
+the user can hand to someone else. And nothing in it is inferred: it says the portal confirmed the submission
+only when a confirmation was detected, and says so plainly when it was not.
+
+It is written on both submit outcomes rather than only the confirmed one. When the click landed and no
+confirmation could be verified, the application may well have gone through, and that is exactly the case where a
+record of what was in it is worth the most. It goes to disk before the outcome event is emitted, so the file
+exists by the time anything reacts to that event and `SUBMITTED` stays the last event on a submitted run. A
+failure to write it is a warning and never a run failure, because nothing here may change the outcome of a
+submission that has already happened.
+
+It is also what finally backs the claim the history screen already makes, that every action is receipted and
+exportable.
+
+That closes section 5.3.
 
 ### 5.4  Libraries worth adopting
 
