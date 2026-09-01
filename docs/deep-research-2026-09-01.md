@@ -227,6 +227,23 @@ Two caveats to write into the adapter: Greenhouse does **not** reject applicatio
 
 Also worth building: **template lint** against Greenhouse's documented parse-failure list, and a **per-application submission receipt** so a user can prove what was sent.
 
+**Shipped as a cross-check at the submit gate, not as a pre-launch schema.** `commit 5f1db60`
+
+What went in is narrower than what this section proposed, deliberately. `browser/greenhouse_schema.py` parses the board API into questions carrying their requiredness, type, options and the input names they render as. The runner accumulates every input name that appeared on any page of the application, and immediately before `evaluate_final_submit_gate` it asks the posting what it required, then names anything required whose inputs were never seen at all.
+
+The comparison is against *observed*, not *filled*, and that is the whole reason it can be trusted. "We never saw this question" has no false positives: prefilled by the portal, typed by the human, or filled by us all count as seen. "We did not fill this" would fire on all three. The blank-but-present case is already covered by the existing `FIELD_REVIEW_REQUIRED` pause, so the two signals partition the failure space rather than overlap. What is left for this to catch is the question on a wizard page the run never reached, or behind a control discovery could not see: exactly the states in which a run arrives at the gate looking complete.
+
+Preapproved auto-submit is withdrawn on that evidence, matching the existing precedent of withdrawing it when a portal that always shows a review page did not. The costs are not symmetric: a false alarm costs one click, being right costs the application.
+
+What was not built, and why it is worth recording:
+
+- **No API submission.** The caveat above is the entire argument against it. Greenhouse accepting an application that omits required fields means a 200 there can still be an application nobody reviews. Submission stays in the browser behind the human gate, where the portal enforces its own rules. That reasoning lives in the module docstring rather than only here, so it survives the next reader who takes "we already call the API" as an invitation.
+- **Not before browser launch.** Reading the schema early would save the discovery pass, but there is no schema-driven fill path to feed yet, so that saving is hypothetical while the cross-check is not. Moving it earlier is a later change, against a real fill path.
+- **Invariant #2 is still enforced by string matching.** The pre-labelled EEOC blocks make structural enforcement possible; nothing was rewired onto them.
+- Template lint and the submission receipt are still open.
+
+Every failure path returns "nothing published", which is also what every non-Greenhouse portal returns, so the gate is unchanged for them. A suite-wide fixture keeps the tests off the network, since several already drive this flow with a live greenhouse.io URL.
+
 ### 5.4  Libraries worth adopting
 
 - **[JSv4/Docxodus](https://github.com/JSv4/Docxodus)** (MIT, C# core, actively maintained, last push 2026-09-01) with its Python client `docx-scalpel`. Stateful DOCX editing sessions, regex search and replace across the whole document, tables, headers and footers, and native tracked-changes redlines via `python-redlines`. The .NET binary is prebuilt into the wheel, so end users install no SDK. Beta wheels for win-x64, linux-x64, osx-arm64.
