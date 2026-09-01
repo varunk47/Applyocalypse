@@ -19,6 +19,8 @@ from .field_detection import (
     build_apply_field_value_script,
     build_click_by_text_script,
     build_final_submit_script,
+    dom_path_for,
+    driver_can_locate,
     fields_from_dom_snapshot,
     frame_url_is_worth_scanning,
     parse_apply_field_result,
@@ -394,6 +396,14 @@ class NodriverBrowserAdapter(BrowserAdapter):
     async def fill_field(self, field: BrowserField, value: str) -> BrowserStepResult:
         if self._page is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        if not driver_can_locate(field):
+            # Refused rather than attempted: `select` would return the parent's
+            # same-named control and this method would clear it and type into it.
+            return BrowserStepResult(
+                False,
+                "field is inside an embedded document the driver cannot address",
+                {"field_id": field.field_id},
+            )
         frame, frame_error = await self._frame_for(field)
         if frame is None:
             return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
@@ -446,7 +456,7 @@ class NodriverBrowserAdapter(BrowserAdapter):
         return evaluate
 
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
-        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES:
+        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES and driver_can_locate(field):
             filled = await self.fill_field(field, value)
             if not filled.ok:
                 return filled
@@ -465,7 +475,9 @@ class NodriverBrowserAdapter(BrowserAdapter):
         if frame is None:
             return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
         try:
-            raw_result = await frame.evaluate(build_apply_field_value_script(field.selector, value))
+            raw_result = await frame.evaluate(
+                build_apply_field_value_script(field.selector, value, dom_path_for(field))
+            )
         except Exception as exc:
             return BrowserStepResult(False, "field value application failed", {"field_id": field.field_id, "error": str(exc)})
         return parse_apply_field_result(raw_result, field)
@@ -711,6 +723,15 @@ class NodriverBrowserAdapter(BrowserAdapter):
         frame, frame_error = await self._frame_for(field)
         if frame is None:
             return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
+        if not driver_can_locate(field):
+            # Uploading is the one write with no scripted equivalent: a file input
+            # can only be set by the driver. Attaching the resume to whatever input
+            # the parent page happens to expose is worse than handing this back.
+            return BrowserStepResult(
+                False,
+                "file input is inside an embedded document the driver cannot address",
+                {"field_id": field.field_id},
+            )
         try:
             element = await frame.select(field.selector)
             if element is None:

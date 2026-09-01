@@ -37,8 +37,13 @@ _EMPLOYER_URL = "https://careers.employer.example/jobs/42"
 _EMBED_URL = "https://job-boards.greenhouse.io/employer/jobs/42"
 
 
-def _raw_field(label: str, selector: str, field_type: str = "text") -> dict[str, Any]:
-    return {
+def _raw_field(
+    label: str,
+    selector: str,
+    field_type: str = "text",
+    dom_path: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    raw: dict[str, Any] = {
         "label": label,
         "label_source": "label",
         "field_type": field_type,
@@ -46,6 +51,13 @@ def _raw_field(label: str, selector: str, field_type: str = "text") -> dict[str,
         "required": True,
         "metadata": {"tag_name": "input"},
     }
+    if dom_path is not None:
+        # Set when discovery walked out of the frame's own document into a
+        # same-origin iframe or an open shadow root nested inside it. The two
+        # addressing systems compose: the frame is found by URL, then the path is
+        # replayed inside it.
+        raw["dom_path"] = dom_path
+    return raw
 
 
 class _FakeTargetInfo:
@@ -389,6 +401,85 @@ def test_duplicate_urls_are_resolved_by_the_recorded_index() -> None:
     assert result.ok is True, result.message
     assert first.filled == [("#email", "alex@example.com")]
     assert duplicate.filled == []
+
+
+_NESTED = [{"kind": "frame", "selector": "#inner", "index": 0}]
+
+
+def test_a_field_below_the_frame_document_is_never_typed_into_by_the_driver() -> None:
+    """The keystroke path cannot see past an iframe or a shadow boundary.
+
+    A text field normally gets real keystrokes because they look far more human
+    than a scripted write. But ``select`` resolves from the frame's own document,
+    so for a field discovered inside a nested root it returns either nothing, and
+    the answer is lost on a required question, or -- the case that does the damage
+    -- the same-named control in the parent, which this method would then clear
+    and type the user's answer into.
+
+    So those fields take the scripted write instead, which resolves the path
+    before it touches anything. A little less stealth beats writing to the wrong
+    element.
+    """
+    top = FakeFrame(_EMPLOYER_URL)
+    embed = FakeFrame(_EMBED_URL, fields=[_raw_field("Email", "#email", dom_path=_NESTED)])
+    adapter = _adapter(top, [embed])
+    field = asyncio.run(adapter.detect_fields())[0]
+
+    result = asyncio.run(adapter.apply_field_value(field, "alex@example.com"))
+
+    assert result.ok is True, result.message
+    assert len(embed.write_scripts) == 1
+    assert embed.filled == [], "the driver typed into whatever its lookup happened to find"
+    assert embed.cleared == [], "and cleared it first, so a prefilled answer is gone too"
+    assert top.filled == []
+
+
+def test_the_keystroke_path_still_runs_for_everything_it_can_reach() -> None:
+    """The guard is narrow on purpose: an ordinary field keeps the stealthier route."""
+    adapter, _, embed = _greenhouse()
+    field = asyncio.run(adapter.detect_fields())[0]
+
+    asyncio.run(adapter.apply_field_value(field, "alex@example.com"))
+
+    assert embed.filled == [("#email", "alex@example.com")]
+    assert embed.write_scripts == []
+
+
+def test_filling_a_nested_field_directly_refuses_rather_than_guessing() -> None:
+    """``fill_field`` is public and the runner reaches it on the repair path too."""
+    top = FakeFrame(_EMPLOYER_URL)
+    embed = FakeFrame(_EMBED_URL, fields=[_raw_field("Email", "#email", dom_path=_NESTED)])
+    adapter = _adapter(top, [embed])
+    field = asyncio.run(adapter.detect_fields())[0]
+
+    result = asyncio.run(adapter.fill_field(field, "alex@example.com"))
+
+    assert result.ok is False
+    assert "the driver cannot address" in result.message
+    assert embed.filled == []
+
+
+def test_a_file_input_below_the_frame_document_refuses(tmp_path: Path) -> None:
+    """Uploading is the one write with no scripted equivalent.
+
+    A file input can only be set by the driver, and there is no way to hand it an
+    element it cannot query for. Attaching the resume to whichever input the
+    surrounding page happens to expose is worse than handing the step back, so
+    this one fails closed.
+    """
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    top = FakeFrame(_EMPLOYER_URL)
+    embed = FakeFrame(_EMBED_URL, fields=[_raw_field("Resume", "#resume", "file", dom_path=_NESTED)])
+    adapter = _adapter(top, [embed])
+    field = asyncio.run(adapter.detect_fields())[0]
+
+    result = asyncio.run(adapter.upload_file(field, resume))
+
+    assert result.ok is False
+    assert "the driver cannot address" in result.message
+    assert embed.uploaded == []
+    assert top.uploaded == []
 
 
 # ---------------------------------------------------------------------------

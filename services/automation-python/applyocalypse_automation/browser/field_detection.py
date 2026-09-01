@@ -186,6 +186,89 @@ def resolve_field_label(sources: dict[str, Any] | None) -> tuple[str, str, bool]
 
 # The JavaScript twin of the three definitions above. Kept as a standalone chunk
 # of `const` declarations so it can be spliced into any injected script.
+# The JS half of the frame filter. Built from the SAME pattern the adapter uses so
+# the two cannot drift: a regex that only Python knows would let the injected script
+# walk into a CAPTCHA frame the adapter was careful to skip, and hand the model a
+# challenge box to answer as though it were an application question.
+#
+# One deliberate difference from :func:`frame_url_is_worth_scanning`: that function
+# also demands an http(s) URL, because the adapter addresses an out-of-process frame
+# BY its URL and has nothing to hold onto for about:blank or srcdoc. The path below
+# addresses a frame structurally, so a srcdoc form we can genuinely reach and write
+# to is worth scanning rather than worth skipping.
+_NON_FORM_FRAME_URL_JS = f"new RegExp({json.dumps(_NON_FORM_FRAME_URL_RE.pattern)}, 'i')"
+
+
+# How deep the walk will chase nested roots. Real portals nest one or two deep
+# (an embedded board inside a careers page, a picker web component inside that).
+# The cycle guard below already handles a frame that embeds its own ancestor; this
+# bounds the pathological case where a page generates roots without repeating one.
+_MAX_DOM_ROOT_DEPTH = 4
+
+
+# Where a field lives when it is not in the document the script was injected into.
+# A same-origin iframe and an open shadow root are both roots that the top document's
+# querySelector cannot see through, and both are reachable from it: the frame through
+# contentDocument, the shadow through shadowRoot. Discovery records the hops it took
+# to reach a field; write and verify replay them. All three go through this one pair
+# of functions, because an address that means one thing to the writer and another to
+# the verifier reports a write as landed against an element it never touched. That is
+# strictly worse than not filling the field: the run reaches the submit gate believing
+# a required question was answered.
+#
+# Cross-origin frames are deliberately absent. contentDocument is null for them under
+# the same-origin policy, and the adapters already reach those through Chrome's own
+# frame targets (see :class:`FrameRef`).
+DOM_PATH_RESOLUTION_JS = r"""
+const NON_FORM_FRAME_URL_RE = __NON_FORM_FRAME_URL_RE__;
+const domFrameIsWorthEntering = (host) => {
+  const src = String(host.getAttribute('src') || '');
+  // An empty src is a srcdoc or script-written frame, which is where a portal puts
+  // a form it builds itself. Only a URL that names a known non-form frame is skipped.
+  return !src || !NON_FORM_FRAME_URL_RE.test(src);
+};
+const domHostsIn = (root, kind) => {
+  if (kind === 'shadow') {
+    // Open roots only. A closed root is unreachable by design, and staying out of it
+    // is the correct behaviour rather than a gap.
+    return Array.from(root.querySelectorAll('*')).filter((element) => element.shadowRoot);
+  }
+  return Array.from(root.querySelectorAll('iframe, frame')).filter(domFrameIsWorthEntering);
+};
+const domRootOf = (host, kind) => {
+  if (kind === 'shadow') return host.shadowRoot || null;
+  // Some engines throw here for a cross-origin frame instead of returning null.
+  // Either way it is not ours to walk from this document.
+  try { return host.contentDocument || null; } catch (error) { return null; }
+};
+const resolveDomRoot = (path) => {
+  let root = document;
+  for (const step of (path || [])) {
+    const hosts = domHostsIn(root, step.kind);
+    let host = null;
+    if (step.selector) {
+      const matches = hosts.filter((candidate) => candidate.matches && candidate.matches(step.selector));
+      // Exactly one or nothing: two matches means the selector decided nothing, and
+      // guessing between them is how a write lands in the wrong embedded form.
+      if (matches.length === 1) host = matches[0];
+    }
+    // Position is only ever the tiebreaker, never the primary key -- the same rule
+    // FrameRef follows for out-of-process frames.
+    if (!host) host = hosts[step.index] || null;
+    if (!host) return null;
+    const next = domRootOf(host, step.kind);
+    if (!next) return null;
+    root = next;
+  }
+  return root;
+};
+// getComputedStyle belongs to the window that owns the element. Reading it off the
+// top window works for the top document and quietly returns the wrong thing, or
+// throws, for an element living in a frame's document.
+const viewOf = (element) => (element.ownerDocument && element.ownerDocument.defaultView) || window;
+""".replace("__NON_FORM_FRAME_URL_RE__", _NON_FORM_FRAME_URL_JS)
+
+
 LABEL_RESOLUTION_JS = r"""
 const LABEL_SOURCE_ORDER = [
   'label_for', 'wrapping_label', 'aria_labelledby', 'aria_label',
@@ -217,8 +300,14 @@ const resolveLabelFromSources = (sources) => {
 };
 const labelSourcesFor = (element) => {
   const readText = (node) => (node ? (node.innerText || node.textContent || '') : '');
+  // A label lives in the same root as the control it labels: inside the shadow root
+  // for a web component, inside the frame's document for an embedded form. Looking
+  // it up in the top document finds nothing there, and the field would be reported
+  // unlabelled even though the page shows it plainly labelled.
+  const root = (element.getRootNode ? element.getRootNode() : null) || document;
+  const byId = (reference) => (root.getElementById ? root.getElementById(reference) : null);
   const elementId = element.getAttribute('id');
-  const explicit = elementId ? document.querySelector(`label[for="${CSS.escape(elementId)}"]`) : null;
+  const explicit = elementId ? root.querySelector(`label[for="${CSS.escape(elementId)}"]`) : null;
   const wrapping = element.closest ? element.closest('label') : null;
   const fieldset = element.closest ? element.closest('fieldset') : null;
   const legend = fieldset && fieldset.querySelector ? fieldset.querySelector('legend') : null;
@@ -228,7 +317,7 @@ const labelSourcesFor = (element) => {
     aria_labelledby: String(element.getAttribute('aria-labelledby') || '')
       .split(/\s+/)
       .filter(Boolean)
-      .map((reference) => collapseLabelWhitespace(readText(document.getElementById(reference))))
+      .map((reference) => collapseLabelWhitespace(readText(byId(reference))))
       .filter(Boolean)
       .join(' '),
     aria_label: element.getAttribute('aria-label') || '',
@@ -253,7 +342,6 @@ SCRIPTED_WRITE_FIELD_TYPES: frozenset[str] = frozenset(
 
 _FIELD_DISCOVERY_BODY_JS = r"""
   const fields = [];
-  const candidates = Array.from(document.querySelectorAll('input, textarea, select'));
   const attrValue = (value) => JSON.stringify(String(value));
   const fieldType = (element) => {
     const tagName = element.tagName.toLowerCase();
@@ -293,9 +381,12 @@ _FIELD_DISCOVERY_BODY_JS = r"""
   };
   const ariaOptionsFor = (element, role) => {
     const containers = [];
+    // aria-controls names an id in the element's own root, which for a picker inside
+    // a web component is the shadow root and not the page.
+    const ownerRoot = (element.getRootNode ? element.getRootNode() : null) || document;
     const owned = ((element.getAttribute('aria-controls') || '') + ' ' + (element.getAttribute('aria-owns') || '')).trim();
     for (const ownedId of owned.split(/\s+/).filter(Boolean)) {
-      const container = document.getElementById(ownedId);
+      const container = ownerRoot.getElementById ? ownerRoot.getElementById(ownedId) : null;
       if (container) containers.push(container);
     }
     // A listbox or radiogroup owns its options directly; a closed combobox owns none
@@ -327,13 +418,34 @@ _FIELD_DISCOVERY_BODY_JS = r"""
     if (!name) return null;
     return `${element.tagName.toLowerCase()}[name=${attrValue(name)}]`;
   };
+  // How to name the frame or shadow host we descended through, so the write and the
+  // verify script can descend the same way. Uniqueness is checked inside the parent
+  // root: a selector that matches two hosts has decided nothing, and the resolver
+  // would fall through to the index anyway, so we do not record it.
+  const hostSelectorFor = (host, root) => {
+    const id = host.getAttribute('id');
+    if (id) {
+      const selector = `#${CSS.escape(id)}`;
+      if (root.querySelectorAll(selector).length === 1) return selector;
+    }
+    const tag = host.tagName.toLowerCase();
+    for (const attribute of ['name', 'data-automation-id', 'title', 'src']) {
+      const value = host.getAttribute(attribute);
+      if (!value) continue;
+      const selector = `${tag}[${attribute}=${attrValue(value)}]`;
+      if (root.querySelectorAll(selector).length === 1) return selector;
+    }
+    return null;
+  };
+  const collectFrom = (root, domPath) => {
+  const candidates = Array.from(root.querySelectorAll('input, textarea, select'));
   for (const element of candidates) {
     const type = fieldType(element);
     if (['hidden', 'submit', 'button', 'image', 'reset', 'search'].includes(type)) continue;
     // Skip non-interactable controls: the display:none g-recaptcha-response textarea,
     // collapsed/conditional fields, and any bot-challenge field the user cannot fill.
     const rect = element.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
+    const style = viewOf(element).getComputedStyle(element);
     const visuallyHidden = (rect.width === 0 && rect.height === 0)
       || style.display === 'none'
       || style.visibility === 'hidden';
@@ -364,6 +476,7 @@ _FIELD_DISCOVERY_BODY_JS = r"""
       label_synthetic: resolved.label_synthetic,
       field_type: type,
       selector,
+      dom_path: domPath,
       required: element.required === true || element.getAttribute('aria-required') === 'true',
       metadata: {
         tag_name: element.tagName.toLowerCase(),
@@ -383,14 +496,14 @@ _FIELD_DISCOVERY_BODY_JS = r"""
       }
     });
   }
-  const ariaCandidates = Array.from(document.querySelectorAll(
+  const ariaCandidates = Array.from(root.querySelectorAll(
     '[role="combobox"], [role="listbox"], [role="radiogroup"], [aria-haspopup][data-automation-id]'
   ));
   for (const element of ariaCandidates) {
     const role = ariaWidgetRoleFor(element);
     if (!role) continue;
     const rect = element.getBoundingClientRect();
-    const style = window.getComputedStyle(element);
+    const style = viewOf(element).getComputedStyle(element);
     if ((rect.width === 0 && rect.height === 0) || style.display === 'none' || style.visibility === 'hidden') continue;
     const nameId = ((element.getAttribute('name') || '') + ' ' + (element.getAttribute('id') || '')).toLowerCase();
     if (/recaptcha|captcha|turnstile/.test(nameId)) continue;
@@ -402,6 +515,7 @@ _FIELD_DISCOVERY_BODY_JS = r"""
       label_synthetic: resolved.label_synthetic,
       field_type: `aria_${role}`,
       selector: ariaSelectorFor(element),
+      dom_path: domPath,
       required: element.getAttribute('aria-required') === 'true' || element.hasAttribute('required'),
       metadata: {
         tag_name: element.tagName.toLowerCase(),
@@ -418,11 +532,37 @@ _FIELD_DISCOVERY_BODY_JS = r"""
       }
     });
   }
+  };
+  // Breadth-first from the injected document outward, so the top document's fields
+  // keep the order and the ids they had before any of this existed and a portal that
+  // embeds nothing behaves exactly as it did. `seen` is not an optimisation: a frame
+  // that embeds its own ancestor is a real cycle and would otherwise not terminate.
+  const queue = [{ root: document, path: [] }];
+  const seen = new Set();
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (seen.has(current.root)) continue;
+    seen.add(current.root);
+    collectFrom(current.root, current.path);
+    if (current.path.length >= __MAX_DOM_ROOT_DEPTH__) continue;
+    for (const kind of ['frame', 'shadow']) {
+      const hosts = domHostsIn(current.root, kind);
+      for (let index = 0; index < hosts.length; index += 1) {
+        if (!domRootOf(hosts[index], kind)) continue;
+        queue.push({
+          root: domRootOf(hosts[index], kind),
+          path: current.path.concat([{ kind, selector: hostSelectorFor(hosts[index], current.root), index }])
+        });
+      }
+    }
+  }
   return JSON.stringify(fields);
-"""
+""".replace("__MAX_DOM_ROOT_DEPTH__", str(_MAX_DOM_ROOT_DEPTH))
 
 
-DOM_FIELD_DISCOVERY_SCRIPT = "\n".join(["(() => {", LABEL_RESOLUTION_JS, _FIELD_DISCOVERY_BODY_JS, "})()"])
+DOM_FIELD_DISCOVERY_SCRIPT = "\n".join(
+    ["(() => {", DOM_PATH_RESOLUTION_JS, LABEL_RESOLUTION_JS, _FIELD_DISCOVERY_BODY_JS, "})()"]
+)
 
 
 DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
@@ -600,7 +740,71 @@ DOM_VISIBLE_TEXT_SCRIPT = r"""
 """
 
 
-def _ambiguous_selectors(raw_fields: list[Any]) -> frozenset[str]:
+def _normalize_dom_path(raw: Any) -> list[dict[str, Any]]:
+    """The hops from the evaluated document down to the root that held a field.
+
+    Every step is rebuilt rather than passed through, because this value is fed back
+    into the page as the address the write and the verify script resolve. A step the
+    resolver cannot read is a write aimed at a root nobody chose.
+    """
+    if not isinstance(raw, list):
+        return []
+    steps: list[dict[str, Any]] = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            return []
+        kind = str(entry.get("kind") or "")
+        if kind not in ("frame", "shadow"):
+            return []
+        index = entry.get("index")
+        if not isinstance(index, int) or isinstance(index, bool) or index < 0:
+            return []
+        selector = entry.get("selector")
+        steps.append(
+            {
+                "kind": kind,
+                "selector": str(selector) if selector else None,
+                "index": index,
+            }
+        )
+    return steps
+
+
+def _dom_path_key(raw: Any) -> str:
+    """A hashable identity for the root a field came from."""
+    return json.dumps(_normalize_dom_path(raw), sort_keys=True)
+
+
+def dom_path_for(field: BrowserField) -> list[dict[str, Any]]:
+    """The path an adapter must replay to reach ``field``, empty for the top document."""
+    metadata = field.metadata if isinstance(field.metadata, dict) else {}
+    return _normalize_dom_path(metadata.get("dom_path"))
+
+
+def driver_can_locate(field: BrowserField) -> bool:
+    """Whether the driver's own element lookup can reach ``field``.
+
+    Every adapter has a fast path that hands the selector to the driver
+    (``frame.select``, ``locator``, ``find_element``) and then types real
+    keystrokes into what comes back, because synthetic keystrokes look far more
+    human than a scripted write. All of those lookups resolve from a document
+    root and stop at an iframe or a shadow boundary.
+
+    So for a field inside an embedded root the lookup either finds nothing, and
+    the answer is silently lost on a required question, or -- worse -- matches a
+    same-named control in the *parent* page, clears it, and types the user's
+    answer into a form nobody chose. An employer page that wraps an ATS embed and
+    keeps its own ``#email`` newsletter box is an entirely ordinary shape, and
+    that is the case where the damage is invisible.
+
+    There is no way to hand the driver an element it cannot query for, so a field
+    with a path takes the scripted write instead: it resolves the path first, and
+    a little less stealth on those fields beats writing to the wrong element.
+    """
+    return not dom_path_for(field)
+
+
+def _ambiguous_selectors(raw_fields: list[Any]) -> frozenset[tuple[str, str]]:
     """Selectors in this snapshot that more than one field answers to.
 
     ``selectorFor`` returns ``#id`` for any control carrying an id, and both the write
@@ -613,14 +817,17 @@ def _ambiguous_selectors(raw_fields: list[Any]) -> frozenset[str]:
     answer that lands in the wrong field and then verifies is the failure this must not
     produce.
 
-    Scope is one document, which is why this is computed per snapshot. Discovery runs
-    once per frame and each field carries its own frame, so the same selector appearing
-    in two frames is two different elements, correctly addressed, and not a collision.
+    Scope is one root, which is why the path is part of the key. Discovery runs once
+    per frame and now walks the nested roots inside each one, so ``#email`` in the page
+    and ``#email`` inside an embedded form are two different elements, each correctly
+    addressed by its own path, and not a collision. Only a repeat within one root is.
     """
     counts = Counter(
-        str(raw["selector"]) for raw in raw_fields if isinstance(raw, dict) and raw.get("selector")
+        (_dom_path_key(raw.get("dom_path")), str(raw["selector"]))
+        for raw in raw_fields
+        if isinstance(raw, dict) and raw.get("selector")
     )
-    return frozenset(selector for selector, count in counts.items() if count > 1)
+    return frozenset(key for key, count in counts.items() if count > 1)
 
 
 def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) -> list[BrowserField]:
@@ -638,7 +845,11 @@ def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) 
         # field: with no selector every adapter refuses the write outright rather
         # than aiming it at whichever twin the page happens to return first, and the
         # run pauses for a human who can see which control is which.
-        ambiguous_selector = str(selector) if selector and str(selector) in ambiguous else None
+        ambiguous_selector = (
+            str(selector)
+            if selector and (_dom_path_key(raw.get("dom_path")), str(selector)) in ambiguous
+            else None
+        )
         if ambiguous_selector:
             selector = None
         field_type = str(raw.get("field_type") or "text").strip().lower()
@@ -661,6 +872,11 @@ def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) 
         if synthetic:
             metadata["label_synthetic"] = True
             metadata["requires_human_label_review"] = True
+        dom_path = _normalize_dom_path(raw.get("dom_path"))
+        if dom_path:
+            # Absent for a field in the document the script was injected into, so a
+            # portal that embeds nothing produces exactly the metadata it always did.
+            metadata["dom_path"] = dom_path
         field_id = f"field:{index}:{field_type}:{label[:40].lower()}"
         if frame is not None:
             metadata["frame_url"] = frame.url
@@ -850,7 +1066,17 @@ _FIELD_WRITE_HELPERS_JS = r"""
 
 
 _FIELD_WRITE_BODY_JS = r"""
-  const element = document.querySelector(selector);
+  const domRoot = resolveDomRoot(domPath);
+  if (!domRoot) {
+    // The frame navigated, the component re-rendered, or the path was never valid.
+    // Falling back to the top document here is the bug this exists to prevent: it
+    // finds a same-named control in the parent and reports the write as landed.
+    return JSON.stringify({
+      ok: false, action: 'query', verified: false, value_matched: false,
+      message: 'the frame or shadow root holding this field is no longer reachable'
+    });
+  }
+  const element = domRoot.querySelector(selector);
   if (!element) {
     return JSON.stringify({
       ok: false, action: 'query', verified: false, value_matched: false, message: 'field not found'
@@ -917,7 +1143,7 @@ _FIELD_WRITE_BODY_JS = r"""
   }
 
   if (type === 'radio') {
-    const root = element.form || document;
+    const root = element.form || domRoot;
     const groupName = element.getAttribute('name');
     const group = groupName
       ? Array.from(root.querySelectorAll(`input[type="radio"][name="${CSS.escape(groupName)}"]`))
@@ -1029,7 +1255,9 @@ VERIFY_SCRIPT_MARKER = "applyo:verify-field-value"
 LOCATE_SCRIPT_MARKER = "applyo:locate-control"
 
 
-def build_apply_field_value_script(selector: str, value: str) -> str:
+def build_apply_field_value_script(
+    selector: str, value: str, dom_path: list[dict[str, Any]] | None = None
+) -> str:
     """Build the injected script that writes one reviewed answer and verifies it.
 
     The script returns a JSON string. Consumers (``runner.py`` via
@@ -1077,6 +1305,8 @@ def build_apply_field_value_script(selector: str, value: str) -> str:
             f"  // {WRITE_SCRIPT_MARKER}",
             f"  const selector = {selector_json};",
             f"  const reviewedValue = {value_json};",
+            f"  const domPath = {json.dumps(_normalize_dom_path(dom_path))};",
+            DOM_PATH_RESOLUTION_JS,
             LABEL_RESOLUTION_JS,
             _FIELD_WRITE_HELPERS_JS,
             _FIELD_WRITE_BODY_JS,
@@ -1086,7 +1316,17 @@ def build_apply_field_value_script(selector: str, value: str) -> str:
 
 
 _FIELD_VERIFY_BODY_JS = r"""
-  const element = document.querySelector(selector);
+  const domRoot = resolveDomRoot(domPath);
+  if (!domRoot) {
+    // The frame navigated, the component re-rendered, or the path was never valid.
+    // Falling back to the top document here is the bug this exists to prevent: it
+    // finds a same-named control in the parent and reports the write as landed.
+    return JSON.stringify({
+      ok: false, action: 'query', verified: false, value_matched: false,
+      message: 'the frame or shadow root holding this field is no longer reachable'
+    });
+  }
+  const element = domRoot.querySelector(selector);
   if (!element) {
     return JSON.stringify({
       ok: false, action: 'verify', verified: false, value_matched: false, message: 'field not found'
@@ -1119,7 +1359,9 @@ _FIELD_VERIFY_BODY_JS = r"""
 """
 
 
-def build_verify_field_value_script(selector: str, value: str) -> str:
+def build_verify_field_value_script(
+    selector: str, value: str, dom_path: list[dict[str, Any]] | None = None
+) -> str:
     """Build a script that reads a field back without writing to it.
 
     Typing is the right way to fill a text field: it fires the key events that
@@ -1137,6 +1379,8 @@ def build_verify_field_value_script(selector: str, value: str) -> str:
             f"  // {VERIFY_SCRIPT_MARKER}",
             f"  const selector = {selector_json};",
             f"  const reviewedValue = {value_json};",
+            f"  const domPath = {json.dumps(_normalize_dom_path(dom_path))};",
+            DOM_PATH_RESOLUTION_JS,
             LABEL_RESOLUTION_JS,
             _FIELD_WRITE_HELPERS_JS,
             _FIELD_VERIFY_BODY_JS,

@@ -34,6 +34,7 @@ class StubHTMLElement {
     this._text = "";
     this.parentElement = null;
     this.ownerDocument = null;
+    this.__root = null;
     this.rect = { left: 0, top: 0, width: 200, height: 30 };
     this.styleMap = { display: "block", visibility: "visible", opacity: "1" };
     this.disabled = false;
@@ -51,8 +52,13 @@ class StubHTMLElement {
   appendChild(node) {
     node.parentElement = this;
     node.ownerDocument = this.ownerDocument;
+    if (node.__root === null) node.__root = this.__root;
     this._childNodes.push(node);
     return node;
+  }
+
+  getRootNode() {
+    return this.__root;
   }
 
   getAttribute(name) {
@@ -370,7 +376,7 @@ const installRevertOnChange = (node, property, revertTo) => {
   });
 };
 
-const createElement = (spec, document) => {
+const createElement = (spec, document, root = document) => {
   const tag = String(spec.tag || "div").toLowerCase();
   let element;
   if (tag === "select") element = new StubHTMLSelectElement(tag);
@@ -381,6 +387,7 @@ const createElement = (spec, document) => {
   else element = new StubHTMLElement(tag);
 
   element.ownerDocument = document;
+  element.__root = root;
   element._attrs = { ...(spec.attrs || {}) };
   element._text = spec.text || "";
   if (spec.rect) element.rect = { ...element.rect, ...spec.rect };
@@ -392,6 +399,7 @@ const createElement = (spec, document) => {
     for (const optionSpec of spec.options || []) {
       const option = new StubHTMLOptionElement();
       option.ownerDocument = document;
+      option.__root = root;
       option._text = optionSpec.label == null ? "" : String(optionSpec.label);
       if (optionSpec.value !== undefined && optionSpec.value !== null) {
         option.setAttribute("value", String(optionSpec.value));
@@ -406,7 +414,26 @@ const createElement = (spec, document) => {
   if (spec.value !== undefined && element instanceof StubHTMLSelectElement) element.value = String(spec.value);
   if (spec.checked !== undefined && element instanceof StubHTMLInputElement) element._checked = Boolean(spec.checked);
 
-  for (const childSpec of spec.children || []) element.appendChild(createElement(childSpec, document));
+  for (const childSpec of spec.children || []) element.appendChild(createElement(childSpec, document, root));
+
+  // `frame: {elements: [...]}` on an iframe spec gives it a same-origin document of
+  // its own, and `shadow: [...]` on any element opens a shadow root under it. Both
+  // are roots the top document's querySelector cannot see into, which is the whole
+  // reason the discovery script walks rather than sweeps.
+  if (spec.frame) {
+    element.contentDocument = buildRoot(spec.frame, {
+      kind: "document",
+      origin: document.__origin,
+      host: element,
+    });
+  }
+  if (spec.shadow) {
+    element.shadowRoot = buildRoot({ elements: spec.shadow }, {
+      kind: "shadow",
+      document,
+      host: element,
+    });
+  }
 
   if (spec.react) {
     const type = (element.getAttribute("type") || "").toLowerCase();
@@ -420,24 +447,80 @@ const createElement = (spec, document) => {
   return element;
 };
 
-export const buildDom = (spec) => {
-  const document = {
-    title: spec.title || "",
-    activeElement: null,
-    forms: [],
-    __origin: spec.origin || "https://jobs.example.com",
-  };
-  const body = new StubHTMLElement("body");
-  body.ownerDocument = document;
-  document.body = body;
-  document.documentElement = body;
-  for (const childSpec of spec.elements || []) body.appendChild(createElement(childSpec, document));
+const VIEW = { getComputedStyle: (element) => ({ ...element.styleMap }) };
 
-  document.querySelectorAll = (selector) => body.querySelectorAll(selector);
-  document.querySelector = (selector) => body.querySelector(selector);
-  document.getElementById = (id) => body.querySelector(`#${id}`);
-  document.forms = body.querySelectorAll("form");
-  document.elementFromPoint = (x, y) => hitTest(body, x, y);
+/**
+ * Build a queryable root and fill it from `spec.elements`.
+ *
+ * `options.kind` is "document" for the page and for each frame's own document, and
+ * "shadow" for an open shadow root. A shadow root is a DocumentFragment: it answers
+ * querySelector and getElementById, and it is what getRootNode returns for the
+ * elements inside it, but it is not their ownerDocument, which stays the containing
+ * document.
+ */
+const buildRoot = (spec, options) => {
+  const isShadow = options.kind === "shadow";
+  const root = isShadow
+    ? { host: options.host, __shadow: true }
+    : { title: spec.title || "", activeElement: null, forms: [], __origin: options.origin };
+  const document = isShadow ? options.document : root;
+  root.__host = options.host || null;
+  if (!isShadow) {
+    // Injected scripts reach getComputedStyle through the element's own view, so a
+    // frame document with no defaultView silently falls back to the top window and
+    // reads the wrong styles. Every document here has one.
+    root.defaultView = VIEW;
+  }
+
+  const body = new StubHTMLElement(isShadow ? "shadow-root" : "body");
+  body.ownerDocument = document;
+  body.__root = root;
+  root.__body = body;
+  if (!isShadow) {
+    root.body = body;
+    root.documentElement = body;
+  }
+  for (const childSpec of spec.elements || []) body.appendChild(createElement(childSpec, document, root));
+
+  root.querySelectorAll = (selector) => body.querySelectorAll(selector);
+  root.querySelector = (selector) => body.querySelector(selector);
+  root.getElementById = (id) => body.querySelector(`#${id}`);
+  if (!isShadow) {
+    root.forms = body.querySelectorAll("form");
+    root.elementFromPoint = (x, y) => hitTest(body, x, y);
+  }
+  return root;
+};
+
+/** Every root reachable from `document`, outermost first, the way discovery walks. */
+const reachableRoots = (document) => {
+  const roots = [];
+  const queue = [document];
+  while (queue.length > 0) {
+    const root = queue.shift();
+    if (roots.includes(root)) continue;
+    roots.push(root);
+    for (const element of descendants(root.__body)) {
+      if (element.contentDocument) queue.push(element.contentDocument);
+      if (element.shadowRoot) queue.push(element.shadowRoot);
+    }
+  }
+  return roots;
+};
+
+/** How a test names the root a control was found in: "document", "frame:#id", "shadow:#id". */
+const rootLabel = (root, document) => {
+  if (root === document) return "document";
+  const host = root.__host ? root.__host.getAttribute("id") : null;
+  return `${root.__shadow ? "shadow" : "frame"}:${host ? `#${host}` : "?"}`;
+};
+
+export const buildDom = (spec) => {
+  const document = buildRoot(spec, {
+    kind: "document",
+    origin: spec.origin || "https://jobs.example.com",
+  });
+  const body = document.__body;
 
   const window = {
     innerWidth: (spec.viewport || {}).width ?? 1280,
@@ -446,15 +529,17 @@ export const buildDom = (spec) => {
     HTMLTextAreaElement: StubHTMLTextAreaElement,
     HTMLSelectElement: StubHTMLSelectElement,
     HTMLAnchorElement: StubHTMLAnchorElement,
-    getComputedStyle: (element) => ({ ...element.styleMap }),
+    getComputedStyle: VIEW.getComputedStyle,
   };
 
   const location = { origin: document.__origin, href: document.__origin + (spec.path || "/") };
 
   const snapshot = () =>
-    descendants(body)
-      .filter((element) => ["input", "textarea", "select"].includes(element.tagName.toLowerCase()))
-      .map((element) => ({
+    reachableRoots(document)
+      .flatMap((root) => descendants(root.__body).map((element) => ({ element, root })))
+      .filter(({ element }) => ["input", "textarea", "select"].includes(element.tagName.toLowerCase()))
+      .map(({ element, root }) => ({
+        root: rootLabel(root, document),
         id: element.getAttribute("id"),
         name: element.getAttribute("name"),
         tag: element.tagName.toLowerCase(),

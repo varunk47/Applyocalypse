@@ -81,10 +81,45 @@ def _resume_field() -> BrowserField:
     )
 
 
+def _nested_resume_field() -> BrowserField:
+    """The same input, discovered inside a same-origin iframe or a shadow root."""
+    field = _resume_field()
+    return BrowserField(
+        field_id=field.field_id,
+        label=field.label,
+        field_type=field.field_type,
+        selector=field.selector,
+        required=field.required,
+        confidence=field.confidence,
+        metadata={"dom_path": [{"kind": "frame", "selector": "#inner", "index": 0}]},
+    )
+
+
 def _resume_on_disk(tmp_path: Path) -> Path:
     resume = tmp_path / "resume.pdf"
     resume.write_bytes(b"%PDF-1.7\n")
     return resume
+
+
+def test_a_file_input_below_the_frame_document_refuses(tmp_path: Path) -> None:
+    """Uploading is the one write with no scripted equivalent.
+
+    ``find_element`` stops at an iframe or a shadow boundary, and there is no way
+    to hand Selenium an element it cannot query for. Attaching the resume to
+    whichever input the surrounding page happens to expose is worse than handing
+    the step back to the human, so this one fails closed.
+    """
+    element = _FakeElement(interactable=True, style=None)
+    driver = _FakeDriver(element)
+
+    result = asyncio.run(
+        _adapter_with(driver).upload_file(_nested_resume_field(), _resume_on_disk(tmp_path))
+    )
+
+    assert result.ok is False
+    assert "the driver cannot address" in result.message
+    assert element.written == [], "the resume attached to whatever the lookup found"
+    assert driver.selectors == []
 
 
 def test_a_visible_file_input_uploads_without_touching_the_page(tmp_path: Path) -> None:

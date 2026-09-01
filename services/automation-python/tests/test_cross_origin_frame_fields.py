@@ -33,8 +33,13 @@ _EMPLOYER_URL = "https://careers.employer.example/jobs/42"
 _EMBED_URL = "https://job-boards.greenhouse.io/employer/jobs/42"
 
 
-def _raw_field(label: str, selector: str, field_type: str = "text") -> dict[str, Any]:
-    return {
+def _raw_field(
+    label: str,
+    selector: str,
+    field_type: str = "text",
+    dom_path: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    raw: dict[str, Any] = {
         "label": label,
         "label_source": "label",
         "field_type": field_type,
@@ -42,6 +47,11 @@ def _raw_field(label: str, selector: str, field_type: str = "text") -> dict[str,
         "required": True,
         "metadata": {"tag_name": "input"},
     }
+    if dom_path is not None:
+        # Set when discovery walked out of the frame's own document into a
+        # same-origin iframe or an open shadow root nested inside it.
+        raw["dom_path"] = dom_path
+    return raw
 
 
 class FakeLocator:
@@ -263,6 +273,47 @@ def test_an_upload_lands_in_the_frame_the_field_came_from(tmp_path: Path) -> Non
 
     assert result.ok is True, result.message
     assert [selector for selector, _ in embed.uploaded] == ["#resume"]
+    assert top.uploaded == []
+
+
+_NESTED = [{"kind": "frame", "selector": "#inner", "index": 0}]
+
+
+def test_a_field_below_the_frame_document_takes_the_scripted_write() -> None:
+    """``locator`` resolves from the frame's own document and stops at a boundary.
+
+    For a field discovered inside a nested root it matches either nothing or the
+    same-named control in the parent, and ``fill`` would then put the user's answer
+    in a form nobody chose. Those fields take the scripted write, which replays the
+    path before it touches anything.
+    """
+    top = FakeFrame(_EMPLOYER_URL)
+    embed = FakeFrame(_EMBED_URL, fields=[_raw_field("Email", "#email", dom_path=_NESTED)])
+    adapter, _ = _adapter([top, embed])
+    field = asyncio.run(adapter.detect_fields())[0]
+
+    result = asyncio.run(adapter.apply_field_value(field, "alex@example.com"))
+
+    assert result.ok is True, result.message
+    assert len(embed.write_scripts) == 1
+    assert embed.filled == []
+    assert top.filled == []
+
+
+def test_a_file_input_below_the_frame_document_refuses(tmp_path: Path) -> None:
+    """``set_input_files`` has no scripted equivalent, so this one fails closed."""
+    resume = tmp_path / "resume.pdf"
+    resume.write_bytes(b"%PDF-1.4")
+    top = FakeFrame(_EMPLOYER_URL)
+    embed = FakeFrame(_EMBED_URL, fields=[_raw_field("Resume", "#resume", "file", dom_path=_NESTED)])
+    adapter, _ = _adapter([top, embed])
+    field = asyncio.run(adapter.detect_fields())[0]
+
+    result = asyncio.run(adapter.upload_file(field, resume))
+
+    assert result.ok is False
+    assert "the driver cannot address" in result.message
+    assert embed.uploaded == []
     assert top.uploaded == []
 
 

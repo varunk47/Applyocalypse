@@ -20,6 +20,7 @@ from .adapter import BrowserField, BrowserStepResult
 from .field_detection import (
     build_apply_field_value_script,
     build_verify_field_value_script,
+    dom_path_for,
     parse_apply_field_result,
 )
 
@@ -38,7 +39,9 @@ async def verify_or_repair_text_write(
         return BrowserStepResult(True, "field value applied", {**fill_payload, "verified": False})
 
     try:
-        raw_verdict = await evaluate(build_verify_field_value_script(field.selector, value))
+        raw_verdict = await evaluate(
+            build_verify_field_value_script(field.selector, value, dom_path_for(field))
+        )
     except Exception as exc:
         # A page that refuses script evaluation is not evidence the write failed,
         # so the typed value stands and the payload says it went unchecked.
@@ -53,7 +56,9 @@ async def verify_or_repair_text_write(
         return BrowserStepResult(True, "field value applied", {**fill_payload, **verified.payload})
 
     try:
-        raw_repair = await evaluate(build_apply_field_value_script(field.selector, value))
+        raw_repair = await evaluate(
+            build_apply_field_value_script(field.selector, value, dom_path_for(field))
+        )
     except Exception as exc:
         return BrowserStepResult(
             False,

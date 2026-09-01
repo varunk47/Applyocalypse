@@ -261,7 +261,11 @@ ADAPTER_BUILDERS: tuple[tuple[str, Callable[[str], AdapterHarness]], ...] = (
 )
 
 
-def make_field(field_type: str = "text", selector: str = "#name") -> BrowserField:
+def make_field(
+    field_type: str = "text",
+    selector: str = "#name",
+    metadata: dict[str, object] | None = None,
+) -> BrowserField:
     return BrowserField(
         field_id="f1",
         label="Full name",
@@ -269,7 +273,13 @@ def make_field(field_type: str = "text", selector: str = "#name") -> BrowserFiel
         selector=selector,
         required=True,
         confidence=1.0,
+        metadata=metadata or {},
     )
+
+
+# A field discovery reached by walking out of the evaluated document into a
+# same-origin iframe or an open shadow root nested inside it.
+NESTED = {"dom_path": [{"kind": "frame", "selector": "#inner", "index": 0}]}
 
 
 # ---------------------------------------------------------------------------
@@ -375,6 +385,50 @@ def test_apply_field_value_routes_non_text_types_through_the_dom_script(
     assert result.ok is True, f"{adapter_name}: {result.message}"
     assert harness.control.type_calls == 0, f"{adapter_name} typed into a {field_type}"
     assert len(harness.evaluated_scripts) == 1, f"{adapter_name} skipped the DOM apply script"
+
+
+@pytest.mark.parametrize("adapter_name,builder", ADAPTER_BUILDERS)
+@pytest.mark.parametrize("field_type", ["text", "email", "tel", "url", "textarea"])
+def test_a_field_the_driver_cannot_reach_is_written_by_script_not_by_keystroke(
+    adapter_name: str, builder: Callable[[str], AdapterHarness], field_type: str
+) -> None:
+    """Text-like types normally get real keystrokes; a nested field cannot.
+
+    ``select``, ``locator`` and ``find_element`` all resolve from a document root
+    and stop at an iframe or a shadow boundary. For a field below that boundary the
+    lookup returns either nothing, and a required answer is silently lost, or the
+    same-named control in the *parent*, which the keystroke path would then clear
+    and type the user's answer into. An employer page wrapping an ATS embed while
+    keeping its own ``#email`` newsletter box is an entirely ordinary shape, and it
+    is the one where the damage is invisible.
+
+    So these fields take the scripted write, which replays the path first. Losing a
+    little stealth on them beats writing to a form nobody chose.
+    """
+    harness = builder("")
+    field = make_field(field_type, metadata=dict(NESTED))
+
+    result = asyncio.run(harness.adapter.apply_field_value(field, "Alex Rivera"))
+
+    assert result.ok is True, result.message
+    assert harness.control.type_calls == 0, f"{adapter_name} typed into an element it cannot address"
+    assert harness.control.clear_calls == 0, f"{adapter_name} cleared an element it cannot address"
+    assert harness.control.native_writes == 1
+    assert harness.control.value == "Alex Rivera"
+
+
+@pytest.mark.parametrize("adapter_name,builder", ADAPTER_BUILDERS)
+def test_filling_a_field_the_driver_cannot_reach_refuses(
+    adapter_name: str, builder: Callable[[str], AdapterHarness]
+) -> None:
+    """``fill_field`` is public, and the runner reaches it on the repair path too."""
+    harness = builder("")
+
+    result = asyncio.run(harness.adapter.fill_field(make_field(metadata=dict(NESTED)), "Alex Rivera"))
+
+    assert result.ok is False
+    assert "the driver cannot address" in result.message
+    assert harness.control.type_calls == 0
 
 
 @pytest.mark.parametrize("adapter_name,builder", ADAPTER_BUILDERS)
