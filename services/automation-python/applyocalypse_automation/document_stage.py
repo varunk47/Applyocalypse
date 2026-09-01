@@ -596,16 +596,22 @@ def generate_application_documents(
 
                     from .documents.docx_mutation import collect_tailorable_bullets, tailor_master_docx_in_place
                     from .resume_tailoring import tailor_bullets_1to1
+                    from .tailoring.fabrication import technical_terms
 
                     inplace_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
                     master_bullets = collect_tailorable_bullets(_MasterDocument(str(master_path)))
                     tailored_by_index: dict[int, str] = {}
                     if master_bullets and inplace_model and job_text:
+                        # Every tool the candidate already claims anywhere on the master, so a
+                        # rewrite may move one into the bullet this job cares about without
+                        # being read as an invention.
+                        resume_terms = technical_terms(extract_docx_text(master_path))
                         rewritten_bullets = asyncio.run(
                             tailor_bullets_1to1(
                                 [text for _, text in master_bullets],
                                 job_description=job_text,
                                 llm_client=LiteLlmClient(model=inplace_model),
+                                known_terms=resume_terms,
                             )
                         )
                         if rewritten_bullets and len(rewritten_bullets) == len(master_bullets):

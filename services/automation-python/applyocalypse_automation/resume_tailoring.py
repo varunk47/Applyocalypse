@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
+
+from .tailoring.fabrication import is_faithful_rewrite
 
 _TAILOR_SYSTEM_PROMPT_TEMPLATE = """\
 You are an ATS optimization expert tailoring a resume to one job description.
@@ -205,10 +208,29 @@ Output JSON only, with exactly the same number of items as the input, in the sam
 """
 
 
-async def tailor_bullets_1to1(bullets: list[str], *, job_description: str, llm_client: Any) -> list[str] | None:
+def _accept_or_keep(original: str, rewritten: Any, *, known_terms: Collection[str]) -> str:
+    """The rewritten bullet, or the original when the rewrite cannot be trusted."""
+    text = str(rewritten).strip() if rewritten is not None else ""
+    if not is_faithful_rewrite(original, text, known_terms=known_terms):
+        return original
+    return text
+
+
+async def tailor_bullets_1to1(
+    bullets: list[str],
+    *,
+    job_description: str,
+    llm_client: Any,
+    known_terms: Collection[str] = (),
+) -> list[str] | None:
     """Rewrite each resume bullet 1:1 for the JD, preserving order and count. Returns a
     list the SAME length as ``bullets`` (blanks fall back to the original), or None when
-    the model output can't be used (caller then keeps the original formatting untouched)."""
+    the model output can't be used (caller then keeps the original formatting untouched).
+
+    A rewrite that claims something the original did not is dropped on its own rather
+    than failing the batch: the bullet keeps the candidate's honest text and every
+    other bullet still gets tailored. ``known_terms`` is the rest of their resume, so a
+    tool they genuinely list can move into the bullet the job cares about."""
     if not bullets:
         return []
     numbered = "\n".join(f"{index + 1}. {text}" for index, text in enumerate(bullets))
@@ -226,8 +248,12 @@ async def tailor_bullets_1to1(bullets: list[str], *, job_description: str, llm_c
             return None
         candidate = raw.get("bullets") if isinstance(raw, dict) else None
         if isinstance(candidate, list) and len(candidate) == len(bullets):
-            return [
-                (str(rewritten).strip() if rewritten is not None else "") or original
+            accepted = [
+                _accept_or_keep(original, rewritten, known_terms=known_terms)
                 for original, rewritten in zip(bullets, candidate, strict=True)
             ]
+            rejected = sum(1 for original, text in zip(bullets, accepted, strict=True) if text == original)
+            if rejected:
+                print(f"bullet rewrite: kept {rejected}/{len(bullets)} originals", file=sys.stderr)
+            return accepted
     return None
