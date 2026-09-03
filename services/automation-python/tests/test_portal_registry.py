@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import sys
+
+import pytest
 
 from applyocalypse_automation.browser.adapter_factory import (
     SUPPORTED_BROWSER_ADAPTERS,
@@ -459,12 +462,21 @@ def test_blocker_detection_normalizes_dom_snapshot() -> None:
     assert blockers[3].metadata["matched_patterns"] == ["sponsorship"]
 
 
-def test_playwright_adapter_fails_safely_when_runtime_is_absent(tmp_path) -> None:
-    if importlib.util.find_spec("patchright") is not None:
-        return
+def test_playwright_adapter_fails_safely_when_runtime_is_absent(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A driver missing from the bundle has to degrade to a soft failure, not an exception.
+
+    This used to skip itself whenever the driver was importable, which made it assert
+    nothing on any machine that had it -- and now that the driver is a hard dependency,
+    that would have been every machine, forever. The absence is simulated instead:
+    ``None`` in ``sys.modules`` is what makes an ``import`` raise ``ImportError``, which
+    is the failure a trimmed PyInstaller bundle actually produces, and no browser is
+    started either way.
+    """
+    monkeypatch.setitem(sys.modules, "patchright.async_api", None)
 
     adapter = create_browser_adapter("playwright")
     result = asyncio.run(adapter.launch(run_id="run-1", user_data_dir=tmp_path / "browser"))
 
     assert result.ok is False
     assert "playwright is not installed" in result.message
+    assert result.payload["install_hint"] == "pip install patchright"

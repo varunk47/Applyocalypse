@@ -46,6 +46,14 @@ on any dev machine it asserts nothing at all.
 > imports. So the declared default could never launch, and every ATS run silently fell back to nodriver.
 > All defaults are now `nodriver`. Read the "Adapter" column below as "was playwright"; the correction
 > at row 9 has the details and the guard that stops it recurring.
+>
+> **Second update, `d680eaa`.** The adapter is installed now. Its driver is Patchright, a drop-in
+> fork of Playwright with the automation tells patched out of the driver itself, and it is in
+> `requirements.in`, in the lock, in the PyInstaller bundle and required by `self-check`. The
+> defaults stay `nodriver`, but the fallback chain is `nodriver -> playwright -> seleniumbase` for
+> every portal, because the playwright adapter can enumerate frames and write inside the one that
+> owns a field and seleniumbase cannot. `tests/test_portal_registry.py` no longer has a test that
+> asserts nothing when the driver is present: the early-return case is the absent-driver case now.
 
 | Portal | Registered | Adapter | Workflow | Selectors | Tests | Genuinely usable? | Notes |
 |---|---|---|---|---|---|---|---|
@@ -735,7 +743,9 @@ Ordered by expected reduction in real-application failures per unit of effort.
 >   using one.
 > - **Row 9, `[contenteditable]`** (`a753401`). See the F3 status note above.
 > - **Row 16, a fixture-page E2E suite.** It shipped as a real-Chrome suite driven by the
->   adapter that actually ships, rather than by Playwright, which is not installed:
+>   adapter that actually ships, rather than by Playwright, which was not installed
+>   (`d680eaa` installs it, as Patchright, and puts it back in the fallback chain; the
+>   suite still drives nodriver, which is still the adapter tried first):
 >   `tests/test_browser_fixture_parity.py` stands the fixture up in real Chrome and asserts
 >   that the offline twin in `browser/html_replay.py` agrees with it, field for field.
 >
