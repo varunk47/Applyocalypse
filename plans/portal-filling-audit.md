@@ -55,6 +55,16 @@ on any dev machine it asserts nothing at all.
 > owns a field and seleniumbase cannot. `tests/test_portal_registry.py` no longer has a test that
 > asserts nothing when the driver is present: the early-return case is the absent-driver case now.
 
+> **Third update, `9770f39`.** Driving the newly promoted adapter through the F9 nested-roots
+> fixture found it reporting six fields for four controls. Playwright lists frames regardless of
+> origin, so a same-origin embed arrived twice: once from the DOM walk that descends through
+> `contentDocument`, once from the frame loop. Every question inside it was offered twice, and the
+> second write would land on a control the first had already answered. Nodriver never showed this,
+> because a same-origin iframe is not a CDP target of its own. The adapter now asks the page which
+> subframes the walk actually entered and skips those, and `tests/test_browser_nested_roots.py` is
+> parametrised over both adapters, so the next one of these is caught by the suite rather than by
+> a hand-written probe.
+
 | Portal | Registered | Adapter | Workflow | Selectors | Tests | Genuinely usable? | Notes |
 |---|---|---|---|---|---|---|---|
 | workday | `portal_registry.py:37` | playwright | `ATS_DIRECT_FORM`, entry actions `portal_workflows.py:41` | none | ideal-HTML replay fixture `tests/test_portal_replay_fixtures.py:23-40` | **Partial** | ARIA comboboxes are now discovered and safely handled (`69c898f`); they were previously invisible. Still uncertified against a live posting, and the account-creation wall remains unhandled. Was: real Workday uses `data-automation-id` ARIA comboboxes, not `select`, so discovery could not see them. The repo's own quirk note says so (`portal_workflows.py:158-159`). Also an account-creation wall before the form, unhandled. |
@@ -744,8 +754,10 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > - **Row 9, `[contenteditable]`** (`a753401`). See the F3 status note above.
 > - **Row 16, a fixture-page E2E suite.** It shipped as a real-Chrome suite driven by the
 >   adapter that actually ships, rather than by Playwright, which was not installed
->   (`d680eaa` installs it, as Patchright, and puts it back in the fallback chain; the
->   suite still drives nodriver, which is still the adapter tried first):
+>   (`d680eaa` installs it, as Patchright, and puts it back in the fallback chain;
+>   `9770f39` parametrises `tests/test_browser_nested_roots.py` over both adapters that
+>   can reach a nested root, so the fixture page is now driven by Playwright too, while
+>   nodriver remains the adapter tried first):
 >   `tests/test_browser_fixture_parity.py` stands the fixture up in real Chrome and asserts
 >   that the offline twin in `browser/html_replay.py` agrees with it, field for field.
 >

@@ -13,6 +13,16 @@ form and renders a real web component, drives a real Chrome through the real
 adapter, and reads every answer back off the page rather than through the adapter
 that wrote it.
 
+Every case runs against both adapters that can reach a nested root, because they
+reach it by different routes and the routes fail differently. Nodriver sees only
+out-of-process frames, so a same-origin embed is the DOM walk's alone; Playwright
+lists frames regardless of origin, so the same embed arrives from both directions
+and every question in it is offered twice unless the adapter knows where the walk
+already went. That duplication shipped once and no test here saw it, because this
+module drove one adapter. SeleniumBase is deliberately absent: it evaluates only
+in the top document, so it never reaches an embed at all, and asserting otherwise
+would be asserting a feature it does not claim.
+
 The same-origin case cannot be folded into ``test_browser_fixture_parity.py``:
 that suite asserts the pure-Python twin predicts what Chrome finds, and the twin
 parses one HTML document and cannot see into an embed. Adding one there would
@@ -37,12 +47,17 @@ from typing import Any
 
 import pytest
 
-from applyocalypse_automation.browser.adapter import BrowserField
+from applyocalypse_automation.browser.adapter import BrowserAdapter, BrowserField
+from applyocalypse_automation.browser.adapter_factory import create_browser_adapter
 from applyocalypse_automation.browser.chrome_discovery import discover_chrome_executable
+from applyocalypse_automation.browser.driver_check import check_driver
 from applyocalypse_automation.browser.field_detection import dom_path_for
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
 
 pytestmark = pytest.mark.browser
+
+# Both adapters that can reach into a nested root. See the module docstring for why
+# SeleniumBase is not one of them.
+NESTED_ROOT_ADAPTERS = ("nodriver", "playwright")
 
 
 EMPLOYER_PATH = "/careers/northstar/apply"
@@ -171,7 +186,7 @@ class _BrowserRun:
     readbacks: dict[str, str] = dataclass_field(default_factory=dict)
 
 
-async def _await_embedded_form(adapter: NodriverBrowserAdapter) -> None:
+async def _await_embedded_form(adapter: BrowserAdapter) -> None:
     """Wait for the iframe's own document, which is a second navigation.
 
     Discovery that runs before the embed commits sees an empty frame and reports
@@ -191,8 +206,8 @@ async def _await_embedded_form(adapter: NodriverBrowserAdapter) -> None:
     raise AssertionError("the embedded application form never loaded")
 
 
-async def _drive(url: str, user_data_dir: Path) -> _BrowserRun:
-    adapter = NodriverBrowserAdapter()
+async def _drive(adapter_name: str, url: str, user_data_dir: Path) -> _BrowserRun:
+    adapter = create_browser_adapter(adapter_name)
     launched = await adapter.launch(run_id="nested-roots", user_data_dir=user_data_dir)
     if not launched.ok:
         pytest.skip(f"no browser available: {launched.message}")
@@ -237,18 +252,27 @@ async def _drive(url: str, user_data_dir: Path) -> _BrowserRun:
             await adapter.close()
 
 
-@pytest.fixture(scope="module")
-def browser_run() -> Iterator[_BrowserRun]:
-    """One page, one browser, one launch, shared by every test below."""
+@pytest.fixture(scope="module", params=NESTED_ROOT_ADAPTERS)
+def browser_run(request: pytest.FixtureRequest) -> Iterator[_BrowserRun]:
+    """One page, one browser, one launch per adapter, shared by every test below.
+
+    The adapters run one after another rather than together on purpose: two
+    concurrent browser sessions is the shape that trips the driver races this
+    suite has no business reproducing.
+    """
+    adapter_name = str(request.param)
     if discover_chrome_executable() is None:
         pytest.skip("no Chrome installation was found")
+    driver = check_driver(adapter_name)
+    if not driver.available:
+        pytest.skip(f"{adapter_name} driver is unavailable: {driver.error}")
     with _serve() as url, tempfile.TemporaryDirectory(prefix="applyo-nested-") as profile_dir:
         loop = asyncio.new_event_loop()
         # nodriver reaches for the current event loop rather than the running one,
         # so this has to be installed the way asyncio.run installs it.
         asyncio.set_event_loop(loop)
         try:
-            yield loop.run_until_complete(_drive(url, Path(profile_dir)))
+            yield loop.run_until_complete(_drive(adapter_name, url, Path(profile_dir)))
         finally:
             # Chrome's subprocess transport tears down asynchronously; give it a
             # turn before the loop closes out from under it.
@@ -258,6 +282,12 @@ def browser_run() -> Iterator[_BrowserRun]:
 
 
 def _field(run: _BrowserRun, label: str) -> BrowserField:
+    """The one field with this label, and an assertion that there is only one.
+
+    Exactness is the point, not tidiness in the helper: an adapter that harvests
+    an embed twice reports every question in it twice, and the second write lands
+    on a control the first already answered.
+    """
     matches = [field for field in run.fields if field.label == label]
     assert len(matches) == 1, f"expected exactly one {label!r}, found {len(matches)}"
     return matches[0]
