@@ -88,6 +88,27 @@ def test_a_broken_driver_reports_why(
     assert status.error.startswith(expected)
 
 
+def test_a_driver_whose_files_are_gone_reports_broken_even_though_it_imports() -> None:
+    """The patchright module landing in a bundle does not mean its Node driver did.
+
+    This is the one failure the import check cannot see, and the only reason the build
+    script passes ``--collect-all``: strip the data files and the import still succeeds,
+    so without this the packaged smoke would call the driver present and the launch
+    would fail in front of a user instead.
+    """
+    driver = pytest.importorskip("patchright._impl._driver")
+
+    assert check_driver("playwright").available is True
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(driver, "compute_driver_executable", lambda: ("no_such_node.exe", "no_such_cli.js"))
+        status = check_driver("playwright")
+
+    assert status.available is False
+    assert status.error is not None
+    assert status.error.startswith("FileNotFoundError")
+
+
 def test_missing_required_ignores_an_absent_optional_driver() -> None:
     statuses = [
         DriverStatus("nodriver", "nodriver", True, True, None),

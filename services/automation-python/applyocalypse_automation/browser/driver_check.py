@@ -17,7 +17,9 @@ touched, so a packaged binary can be asked the question directly and cheaply.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 
 # adapter name -> (module, attribute the adapter binds, is it in the automatic chain)
 _DRIVERS: dict[str, tuple[str, str | None, bool]] = {
@@ -32,6 +34,32 @@ _DRIVERS: dict[str, tuple[str, str | None, bool]] = {
     # bundle carries it, so an absent module here now means a build that lost its middle
     # fallback, which is exactly the failure this file exists to catch before a user does.
     "playwright": ("patchright.async_api", "async_playwright", True),
+}
+
+
+def _patchright_driver_files_are_present() -> None:
+    """Patchright's Python package is not the thing that drives the browser.
+
+    The package is a client for a Node driver it ships alongside itself -- node.exe and a
+    JS package directory -- which ``launch()`` spawns as a subprocess. PyInstaller's
+    static analysis sees only Python, so those files reach a bundle through
+    ``--collect-all`` in the build script and nothing else. Lose them and the import
+    above still succeeds: this file would report the driver present, the packaged smoke
+    would agree, and the failure would arrive at ``async_playwright().start()`` in front
+    of a user. So the import is checked for the module and the disk is checked for the
+    driver, because for this adapter they are two different things that can go missing
+    independently.
+    """
+    from patchright._impl._driver import compute_driver_executable
+
+    for path in compute_driver_executable():
+        if not Path(path).exists():
+            raise FileNotFoundError(path)
+
+
+# Ran after the import succeeds, for drivers whose Python module is not the whole driver.
+_POST_IMPORT_CHECKS: dict[str, Callable[[], None]] = {
+    "playwright": _patchright_driver_files_are_present,
 }
 
 
@@ -59,6 +87,9 @@ def check_driver(adapter: str) -> DriverStatus:
         module = importlib.import_module(module_name)
         if attribute is not None:
             getattr(module, attribute)
+        post_import_check = _POST_IMPORT_CHECKS.get(adapter)
+        if post_import_check is not None:
+            post_import_check()
     except Exception as exc:  # noqa: BLE001 - a broken driver raises whatever it likes
         return DriverStatus(adapter, module_name, required, False, f"{type(exc).__name__}: {exc}")
     return DriverStatus(adapter, module_name, required, True, None)
