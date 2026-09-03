@@ -10,6 +10,7 @@ from .field_detection import (
     DOM_BLOCKER_DISCOVERY_SCRIPT,
     DOM_FIELD_DISCOVERY_SCRIPT,
     DOM_METADATA_CAPTURE_SCRIPT,
+    DOM_REACHED_FRAME_URLS_JS,
     DOM_VISIBLE_TEXT_SCRIPT,
     SCRIPTED_WRITE_FIELD_TYPES,
     FrameRef,
@@ -145,13 +146,41 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             if frame is not main_frame and frame_url_is_worth_scanning(frame.url)
         ]
 
+    async def _frame_urls_the_dom_walk_reached(self) -> set[str]:
+        """Subframes discovery already covered from the top document, so we skip them.
+
+        Playwright lists every frame in the page, same-origin ones included, and the
+        discovery script descends into those by itself. Scanning both ways offers each
+        embedded question twice. Asking the page which documents it could reach is the
+        same test discovery makes, rather than a guess about origins made out here.
+        """
+        if self._page is None:
+            return set()
+        try:
+            reached = await self._page.main_frame.evaluate(DOM_REACHED_FRAME_URLS_JS)
+        except Exception:
+            # Losing this leaves duplicates, which the reviewer can see and dismiss.
+            # Losing detection outright because one probe failed is the worse trade.
+            return set()
+        if isinstance(reached, str):
+            try:
+                reached = json.loads(reached)
+            except json.JSONDecodeError:
+                return set()
+        if not isinstance(reached, list):
+            return set()
+        return {url for url in reached if isinstance(url, str) and url}
+
     async def detect_fields(self) -> list[BrowserField]:
         if self._page is None:
             return []
         main_frame = self._page.main_frame
         frames = self._page.frames
+        already_walked = await self._frame_urls_the_dom_walk_reached()
         fields: list[BrowserField] = []
         for frame in self._form_frames():
+            if frame is not main_frame and frame.url in already_walked:
+                continue
             try:
                 raw_result = await frame.evaluate(DOM_FIELD_DISCOVERY_SCRIPT)
             except Exception:

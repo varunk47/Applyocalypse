@@ -23,6 +23,7 @@ import pytest
 from applyocalypse_automation.browser.adapter import BrowserField
 from applyocalypse_automation.browser.field_detection import (
     DOM_FIELD_DISCOVERY_SCRIPT,
+    DOM_REACHED_FRAME_URLS_JS,
     VERIFY_SCRIPT_MARKER,
     WRITE_SCRIPT_MARKER,
     frame_url_is_worth_scanning,
@@ -69,10 +70,20 @@ class FakeLocator:
 class FakeFrame:
     """One document. The top frame and an embedded form differ only in URL."""
 
-    def __init__(self, url: str, *, fields: list[dict[str, Any]] | None = None, click_ok: bool = False) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        fields: list[dict[str, Any]] | None = None,
+        click_ok: bool = False,
+        reached_frames: list[str] | None = None,
+    ) -> None:
         self.url = url
         self._fields = fields or []
         self._click_ok = click_ok
+        # The frames this document's own DOM walk got into, which is what separates a
+        # same-origin embed from a cross-origin one. Empty is the cross-origin default.
+        self._reached_frames = reached_frames or []
         self.discovery_calls = 0
         self.write_scripts: list[str] = []
         self.click_scripts: list[str] = []
@@ -83,6 +94,8 @@ class FakeFrame:
         return FakeLocator(self, selector)
 
     async def evaluate(self, script: str) -> str:
+        if script == DOM_REACHED_FRAME_URLS_JS:
+            return json.dumps(self._reached_frames)
         if script == DOM_FIELD_DISCOVERY_SCRIPT:
             self.discovery_calls += 1
             return json.dumps(self._fields)
@@ -201,6 +214,33 @@ def test_captcha_frames_are_never_scanned() -> None:
     asyncio.run(adapter.detect_fields())
 
     assert captcha.discovery_calls == 0
+
+
+def test_a_same_origin_embed_the_dom_walk_entered_is_not_scanned_again() -> None:
+    """The other half of the division of labour, and the one Playwright can break.
+
+    Cross-origin frames belong to the adapter's frame enumeration; same-origin ones
+    belong to the DOM walk, which reaches them through contentDocument. Playwright
+    lists frames regardless of origin, so an embed the walk already went into gets
+    offered a second time unless discovery says where the boundary fell. Two copies
+    of one question is not cosmetic: the second write lands on a control the first
+    already answered, and the reviewer is asked the same thing twice with no way to
+    tell it is the same thing.
+    """
+    top = FakeFrame(
+        _EMPLOYER_URL,
+        fields=[_raw_field("Email", "#email", dom_path=_NESTED)],
+        reached_frames=[_EMBED_URL],
+    )
+    embed = FakeFrame(_EMBED_URL, fields=[_raw_field("Email", "#email")])
+    adapter, _ = _adapter([top, embed])
+
+    fields = asyncio.run(adapter.detect_fields())
+
+    assert [field.label for field in fields] == ["Email"]
+    assert embed.discovery_calls == 0, "the frame was harvested a second time"
+    # The surviving copy is the one that knows how to get back to the control.
+    assert fields[0].metadata["dom_path"] == _NESTED
 
 
 def test_one_broken_frame_does_not_lose_the_others() -> None:

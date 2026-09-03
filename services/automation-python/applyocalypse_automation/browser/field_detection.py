@@ -269,6 +269,55 @@ const viewOf = (element) => (element.ownerDocument && element.ownerDocument.defa
 """.replace("__NON_FORM_FRAME_URL_RE__", _NON_FORM_FRAME_URL_JS)
 
 
+# Which subframe documents the walk above already went into, asked of the page itself.
+#
+# The division of labour stated above -- the DOM walk takes same-origin frames, the
+# adapter's own frame enumeration takes cross-origin ones -- only holds if each side
+# knows where the boundary fell. Nodriver's does for free: a same-origin iframe is not
+# a separate CDP target, so its enumeration cannot see one even in principle. Playwright
+# reports every frame in the page regardless of origin, so without this its adapter runs
+# discovery once from the top document, which descends through contentDocument, and again
+# on the same frame directly, and every question in an embedded form is offered twice.
+# Two copies of one field is worse than it sounds: the second write lands on an element
+# the first already answered, and the reviewer is asked the same question twice with no
+# way to tell that it is the same question.
+#
+# Origin cannot be compared as a string out here. What decides whether discovery got into
+# a frame is whether contentDocument was reachable at the time, so that is what this asks,
+# and it asks by running the discovery traversal rather than a summary of it: the same
+# helpers, the same breadth-first order, the same cycle guard, the same depth budget, and
+# shadow hops spend that budget here exactly as they do there. A shorter walk would be
+# worse than no walk at all, because a frame this called covered that discovery had in
+# fact stopped short of would then be skipped by both and never filled.
+_REACHED_FRAME_URLS_BODY_JS = r"""
+const reached = [];
+const queue = [{ root: document, depth: 0 }];
+const seen = new Set();
+while (queue.length > 0) {
+  const current = queue.shift();
+  if (seen.has(current.root)) continue;
+  seen.add(current.root);
+  if (current.depth >= __MAX_DOM_ROOT_DEPTH__) continue;
+  for (const kind of ['frame', 'shadow']) {
+    for (const host of domHostsIn(current.root, kind)) {
+      const child = domRootOf(host, kind);
+      if (!child) continue;
+      // Only frames are reported. A shadow root is not a target the adapter can
+      // enumerate separately, so it can never be the second half of a duplicate.
+      if (kind === 'frame') reached.push(String((child.location && child.location.href) || ''));
+      queue.push({ root: child, depth: current.depth + 1 });
+    }
+  }
+}
+return JSON.stringify(reached);
+""".replace("__MAX_DOM_ROOT_DEPTH__", str(_MAX_DOM_ROOT_DEPTH))
+
+
+DOM_REACHED_FRAME_URLS_JS = "\n".join(
+    ["(() => {", DOM_PATH_RESOLUTION_JS, _REACHED_FRAME_URLS_BODY_JS, "})()"]
+)
+
+
 LABEL_RESOLUTION_JS = r"""
 const LABEL_SOURCE_ORDER = [
   'label_for', 'wrapping_label', 'aria_labelledby', 'aria_label',
