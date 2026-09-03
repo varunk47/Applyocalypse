@@ -1,0 +1,133 @@
+"""The drivers the adapters reach for at launch, checked without launching anything."""
+
+from __future__ import annotations
+
+import inspect
+
+import pytest
+
+from applyocalypse_automation.browser import (
+    nodriver_adapter,
+    playwright_adapter,
+    seleniumbase_adapter,
+)
+from applyocalypse_automation.browser.adapter_factory import SUPPORTED_BROWSER_ADAPTERS
+from applyocalypse_automation.browser.driver_check import (
+    _DRIVERS,
+    DriverStatus,
+    check_all_drivers,
+    check_driver,
+    missing_required,
+)
+
+
+def test_every_adapter_in_the_automatic_chain_is_required() -> None:
+    """All three drivers now ship, so all three are a build defect when absent.
+
+    The playwright entry used to be optional, because Playwright was not a dependency
+    and demanding it would have failed every honest build. Its driver is Patchright
+    now, which is in requirements.in and in the PyInstaller bundle, so an absent one
+    means a build that lost the middle fallback rather than a build without an extra.
+    """
+    required = {adapter for adapter, (_m, _a, is_required) in _DRIVERS.items() if is_required}
+
+    assert required == set(SUPPORTED_BROWSER_ADAPTERS)
+    assert set(_DRIVERS) == set(SUPPORTED_BROWSER_ADAPTERS)
+
+
+@pytest.mark.parametrize(
+    ("adapter", "module", "statement"),
+    [
+        ("nodriver", nodriver_adapter, "import nodriver"),
+        ("seleniumbase", seleniumbase_adapter, "from seleniumbase import SB"),
+        ("playwright", playwright_adapter, "from patchright.async_api import async_playwright"),
+    ],
+)
+def test_each_entry_imports_what_its_adapter_imports(adapter: str, module: object, statement: str) -> None:
+    """A check against a different symbol would pass while the real launch import fails.
+
+    Reading the adapter source is the only way to notice that drift, because the import
+    lives inside ``launch()`` and never runs during a test that does not open a browser.
+    """
+    assert statement in inspect.getsource(module), f"{adapter} no longer imports {statement!r}"
+
+    module_name, attribute, _required = _DRIVERS[adapter]
+    assert module_name in statement
+    if attribute is not None:
+        assert attribute in statement
+
+
+def test_a_present_driver_reports_available(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setitem(_DRIVERS, "nodriver", ("json", "loads", True))
+
+    status = check_driver("nodriver")
+
+    assert status.available is True
+    assert status.error is None
+    assert status.module == "json"
+
+
+@pytest.mark.parametrize(
+    ("entry", "expected"),
+    [
+        (("applyocalypse_no_such_driver", None, True), "ModuleNotFoundError"),
+        # A driver that imports but lost the symbol is just as broken as one that is gone,
+        # and it is the failure a bundle trimmed too aggressively actually produces.
+        (("json", "no_such_attribute", True), "AttributeError"),
+    ],
+)
+def test_a_broken_driver_reports_why(
+    entry: tuple[str, str | None, bool], expected: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(_DRIVERS, "nodriver", entry)
+
+    status = check_driver("nodriver")
+
+    assert status.available is False
+    assert status.error is not None
+    assert status.error.startswith(expected)
+
+
+def test_a_driver_whose_files_are_gone_reports_broken_even_though_it_imports() -> None:
+    """The patchright module landing in a bundle does not mean its Node driver did.
+
+    This is the one failure the import check cannot see, and the only reason the build
+    script passes ``--collect-all``: strip the data files and the import still succeeds,
+    so without this the packaged smoke would call the driver present and the launch
+    would fail in front of a user instead.
+    """
+    driver = pytest.importorskip("patchright._impl._driver")
+
+    assert check_driver("playwright").available is True
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(driver, "compute_driver_executable", lambda: ("no_such_node.exe", "no_such_cli.js"))
+        status = check_driver("playwright")
+
+    assert status.available is False
+    assert status.error is not None
+    assert status.error.startswith("FileNotFoundError")
+
+
+def test_missing_required_ignores_an_absent_optional_driver() -> None:
+    statuses = [
+        DriverStatus("nodriver", "nodriver", True, True, None),
+        DriverStatus("seleniumbase", "seleniumbase", True, True, None),
+        DriverStatus("playwright", "patchright.async_api", False, False, "ModuleNotFoundError: x"),
+    ]
+
+    assert missing_required(statuses) == []
+
+
+def test_missing_required_names_the_absent_one() -> None:
+    broken = DriverStatus("nodriver", "nodriver", True, False, "ModuleNotFoundError: x")
+    statuses = [broken, DriverStatus("seleniumbase", "seleniumbase", True, True, None)]
+
+    assert missing_required(statuses) == [broken]
+
+
+def test_check_all_drivers_covers_every_entry() -> None:
+    statuses = check_all_drivers()
+
+    assert {status.adapter for status in statuses} == set(_DRIVERS)
+    assert all(isinstance(status.to_payload()["available"], bool) for status in statuses)

@@ -8,6 +8,7 @@ import { registerArtifactProtocolHandler, registerArtifactScheme } from "./servi
 import { GeneratedFileCleanupService } from "./services/generatedFileCleanupService";
 import { PythonWorkerSupervisor } from "./services/pythonWorkerSupervisor";
 import { sweepStaleRunWorkDirs } from "./services/runWorkDirJanitor";
+import { smokeDeadlineMs } from "./smokeDeadline";
 import { ThemeController } from "./theme";
 import { createMainWindow } from "./window";
 
@@ -111,7 +112,7 @@ const boot = async (): Promise<void> => {
     const timeout = setTimeout(() => {
       console.error("boot-smoke:timeout");
       app.exit(1);
-    }, 15_000);
+    }, smokeDeadlineMs(15_000));
     mainWindow.webContents.once("did-finish-load", () => {
       void mainWindow?.webContents
         .executeJavaScript(
@@ -187,7 +188,7 @@ const boot = async (): Promise<void> => {
     const timeout = setTimeout(() => {
       console.error("user-flow-smoke:timeout");
       app.exit(1);
-    }, 20_000);
+    }, smokeDeadlineMs(20_000));
     mainWindow.webContents.once("did-finish-load", () => {
       void mainWindow?.webContents
         .executeJavaScript(
@@ -307,7 +308,7 @@ const boot = async (): Promise<void> => {
     const timeout = setTimeout(() => {
       console.error(`full-e2e-smoke:${phase}:timeout`);
       app.exit(1);
-    }, 25_000);
+    }, smokeDeadlineMs(25_000));
     mainWindow.webContents.once("did-finish-load", () => {
       void mainWindow?.webContents
         .executeJavaScript(

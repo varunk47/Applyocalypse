@@ -1,0 +1,2249 @@
+================================================================================
+FREE APIs: HOW TO FIND THEM, HOW TO VET THEM, AND WHAT IS ACTUALLY FREE
+Research notes for Applyocalypse
+================================================================================
+
+Last researched: 2026-09-01 (sources read 2026-08-31 to 2026-09-01)
+
+WARNING ON FRESHNESS
+    Free-tier limits change faster than any document can track. Between
+    Dec 2025 and Aug 2026 alone: GitHub Models was retired entirely,
+    Clearbit's free Logo API was shut down, Gemini's free daily quota was
+    cut (and sources still disagree on the new number by 6x), and Crunchbase
+    removed its free tier. Treat every number below as "was true when read,
+    at the URL given". Re-verify anything you are about to depend on, in the
+    provider's own console, before you ship it.
+
+    Numbers marked "unverified" could not be confirmed from an official
+    source. They are NOT guesses. Do not treat them as real.
+
+
+================================================================================
+1. HOW TO FIND FREE APIS
+================================================================================
+
+This is the durable part. Tools rot; method does not.
+
+--------------------------------------------------------------------------------
+1.1  THE DIRECTORIES (start here, but do not stop here)
+--------------------------------------------------------------------------------
+
+  public-apis/public-apis (GitHub)
+      https://github.com/public-apis/public-apis
+      ~474k stars. 48 categories (including a "Jobs" category). Table columns
+      are API | Description | Auth | HTTPS | CORS. Roughly 1,000-1,500 entries.
+      Manually curated, now sponsored by APILayer, so the top of the README is
+      an ad. No liveness checking: many entries are years-dead. Use it for
+      DISCOVERY of what exists, never as evidence that something still works.
+
+  APIs.guru
+      https://apis.guru/  |  machine-readable: https://api.apis.guru/v2/list.json
+      "Wikipedia for Web APIs." Indexes OpenAPI/Swagger specs, not marketing
+      pages. As of this research: 2,529 APIs, 3,992 specs, 108,837 endpoints,
+      166 unreachable, 688 invalid. The metrics endpoint
+      (https://api.apis.guru/v2/metrics.json) is itself a free API. Best
+      directory when you want a machine-readable contract rather than a link.
+
+  FreePublicAPIs.com
+      https://freepublicapis.com/
+      659 APIs, and crucially it HEALTH-CHECKS THEM DAILY and publishes a
+      health score plus a "dead" tag. That liveness signal is what public-apis
+      lacks. Smaller list, higher trust per entry. Has /tags/dead, which is a
+      genuinely useful page to read before you adopt anything.
+
+  Postman Public API Network
+      https://www.postman.com/explore
+      Largest by raw count (Postman markets "250M+" but that counts
+      workspaces and collections, not distinct APIs; third parties peg
+      distinct public APIs at 100,000+). The real value is the "verified
+      publisher" badge and ready-to-run collections, so you can test auth in
+      30 seconds instead of reading docs.
+
+  RapidAPI Hub
+      https://rapidapi.com/
+      Marketplace, not a directory. Free tiers exist but are usually tiny and
+      RapidAPI marks up the paid tiers. Note their own distinction: "free"
+      APIs need no card, "freemium" APIs REQUIRE a card on file for overages.
+      JSearch (see section 4) is the job-relevant example.
+
+  apilist.fun
+      https://apilist.fun/
+      Effectively abandoned. Footer still reads "(c) 2019". Listed here so you
+      do not waste time on it.
+
+  ProgrammableWeb
+      DEAD. Confirmed. Founded 2005, acquired by MuleSoft 2013, then
+      Salesforce. Shut down Oct 2022, formal announcement Feb 2023. Its
+      ~19,000-API directory is gone from the live web.
+      Where the corpse is: Wayback Machine snapshots of
+      programmableweb.com/apis/directory, and the community archive at
+      https://github.com/api-evangelist/programmableweb
+
+  Domain-specific awesome-* lists
+      Almost always better than the general directories, because they are
+      maintained by people who actually use the APIs. For LLMs specifically
+      see section 3.1. The pattern: search GitHub for
+      "awesome <domain> api" sorted by recently-updated, not by stars. A
+      3-year-old 20k-star list is worse than a 6-month-old 500-star one.
+
+--------------------------------------------------------------------------------
+1.2  THE NON-OBVIOUS METHODS (these find things directories miss)
+--------------------------------------------------------------------------------
+
+  a) READ THE PRODUCT'S OWN DEVELOPER DOCS FIRST
+      The highest-yield and most-skipped move. If you want company data, go to
+      the company's site and look for /developers, /api, /docs, or a
+      "Developers" footer link. Directories lag reality by 12-24 months;
+      the vendor's own pricing page is the source of truth. Every single
+      correction in this document came from doing this.
+
+  b) GITHUB CODE SEARCH, AS A DISCOVERY SIGNAL ONLY
+      Searching GitHub for config templates (.env.example, config.sample.yml,
+      docker-compose.yml) reveals which APIs real projects actually integrate,
+      including ones no directory lists. You learn that an API EXISTS and what
+      its env var and base URL look like.
+
+      >>> HARD RULE: this is for discovering that a service exists. If you
+      >>> encounter a real credential that someone leaked, you do not use it.
+      >>> Not once, not "just to test". Using another party's leaked key is
+      >>> unauthorised access, it bills or rate-limits an innocent third
+      >>> party, and it will get your app's behaviour attributed to them.
+      >>> The correct action on finding a live leaked key is to notify the
+      >>> repo owner or the provider, and move on. Go sign up for your own.
+
+  c) SEARCH THE PRICING LANGUAGE, NOT THE PRODUCT
+      Query patterns that surface free tiers directories never indexed:
+          "<domain> api" "free tier" -"credit card"
+          "<domain> api" "no credit card required"
+          "<domain> api" "forever free" OR "free forever"
+          site:news.ycombinator.com "<domain> api" free
+      Inverting it also works: search for the paid competitor's name plus
+      "alternative" plus "free" to find the scrappy challenger.
+
+  d) WAYBACK MACHINE FOR VANISHED OR SHRUNKEN FREE TIERS
+      https://web.archive.org/web/*/<pricing-url>
+      Two uses. First, archaeology: recover docs for a service whose free tier
+      was killed (this is the only way to read the old ProgrammableWeb or the
+      pre-shutdown Clearbit docs). Second, and more useful, TREND DETECTION:
+      diff a provider's pricing page across 2-3 years. A free tier that went
+      10,000/mo -> 1,000/mo -> 100/mo is telling you exactly what happens next.
+      Do this before you build on any free tier you plan to keep for years.
+
+  e) GOVERNMENT AND UNIVERSITY OPEN-DATA PORTALS
+      Systematically underused. No key or a trivial key, no commercial-use
+      ban, public-domain or CC licensing, and institutional funding means they
+      do not vanish when a founder loses interest. This is the single most
+      durable category of free API there is.
+          https://catalog.data.gov/        US federal, ~556,000 datasets
+          https://data.europa.eu/          EU, search API at /api/hub/search/
+          https://www.bls.gov/developers/  US labour statistics (see 4.4)
+          https://services.onetcenter.org/ US occupation taxonomy (see 4.4)
+          https://data.sec.gov/            US company filings (see 5.1)
+      Also: national statistics offices, city open-data portals, and
+      university library APIs.
+
+  f) READING A COMPETITOR'S NETWORK TRAFFIC FOR UNDOCUMENTED ENDPOINTS
+      Open DevTools, filter Network to Fetch/XHR, perform the action, and read
+      the JSON the site's own frontend calls. This finds per-company endpoints
+      that are genuinely public but undocumented. It is how people discovered
+      the ATS job-board endpoints in section 4.3, which are officially
+      documented but only lightly advertised.
+
+      >>> LEGAL / TOS CAVEAT, READ THIS BEFORE YOU USE IT:
+      >>> The endpoint responding does not mean you are authorised.
+      >>> - US case law (hiQ v. LinkedIn 2019; Meta v. Bright Data 2024) has
+      >>>   narrowed the CFAA so that scraping data visible to a logged-OUT
+      >>>   anonymous user, without bypassing a technical access control, is
+      >>>   generally not a computer-crime violation.
+      >>> - But that is criminal law only. Terms of service are CONTRACT law
+      >>>   and still bind you. Clickwrap terms (you clicked "I agree") are
+      >>>   materially more enforceable than a browsewrap footer link.
+      >>> - The moment you log in to reach an endpoint you have almost
+      >>>   certainly accepted clickwrap terms AND moved into
+      >>>   authorised-access territory. That is the worst combination.
+      >>> - EU courts have gone further than US ones (the CJEU let Ryanair
+      >>>   contractually restrict API/site use).
+      >>> Practical line for this project: logged-out, non-personal, factual
+      >>> data, at a polite rate, with an honest User-Agent, is low risk.
+      >>> Anything behind a login, anything personal, or anything that
+      >>> requires defeating a rate limit or CAPTCHA is not worth it.
+      >>> When an official API exists, use the official API.
+
+  g) LOOK AT WHO ALREADY SOLVED IT
+      Search GitHub for open-source projects in your problem space and read
+      their dependency list and integration directory. For this project, the
+      ATS-aggregator repos in section 4.3 are worth more than any directory.
+
+
+================================================================================
+2. HOW TO VET A FREE API BEFORE DEPENDING ON IT
+================================================================================
+
+Run this before writing the first line of client code. Roughly 10 minutes,
+and it will save you a rewrite.
+
+  [ ] 1. IS IT ALIVE?
+         Last commit / changelog / blog post date. A docs site with no
+         changelog entry in 18 months is a warning. Check the status page
+         (status.<vendor>.com) and whether it has any history at all: a
+         status page that has never recorded an incident is usually a status
+         page nobody updates.
+
+  [ ] 2. WHO PAYS FOR IT?
+         The single most predictive question. Rank by durability:
+           government / statutory mandate  > very durable
+           the API is the product (paid tiers fund the free tier) > durable
+           big-co loss leader / developer funnel > can be killed at any time
+                                                   (GitHub Models, Clearbit)
+           venture-subsidised land grab > will re-price on schedule
+           one person's hobby project on a free Heroku-alike > will vanish
+         If you cannot name who pays the bandwidth bill, assume it disappears.
+
+  [ ] 3. AUTH MODEL
+         None > static API key > app_id+key > OAuth. Fewer moving parts is
+         better in a desktop app, where you cannot hide a secret and cannot
+         easily run an OAuth redirect. If auth requires a server-side secret,
+         a local-first app has an architecture problem, not an API problem.
+
+  [ ] 4. THE ACTUAL RATE LIMIT, IN THE UNITS THAT MATTER
+         Get requests/second AND requests/day AND requests/month. Providers
+         quote whichever flatters them. A "1,000 req/hour" limit with a
+         200 req/MONTH cap (see JSearch) is a 200 req/month API. Also check:
+         is the limit per key, per IP, per organisation, or global? Creating
+         extra accounts to multiply a global limit is against every ToS and
+         usually detected.
+
+  [ ] 5. COMMERCIAL USE, IN WRITING
+         Read the ToS, not the pricing page. Search the terms text for:
+         "commercial", "redistribut", "resell", "aggregat", "attribution",
+         "non-commercial", "evaluation", "trial". This is where free tiers
+         actually bite (see section 8.2). If it is ambiguous, email them and
+         KEEP THE REPLY.
+
+  [ ] 6. ATTRIBUTION AND LINK-BACK OBLIGATIONS
+         Several free tiers are free only if you display a credit or a
+         followed backlink (RemoteOK, Remotive, logo.dev, O*NET, OSM). That
+         is a UI requirement, which means it is a product decision, which
+         means find out now and not after the design is locked.
+
+  [ ] 7. DATA / PRIVACY TERMS
+         Does the provider train on, log, or human-review what you send?
+         For this app that is a gating question, not a footnote. See 8.3.
+
+  [ ] 8. DOES IT DEGRADE GRACEFULLY?
+         Can the feature ship without it? If the honest answer is no, either
+         pay for it, self-host it, or drop the feature. See 8.5.
+
+  [ ] 9. SNAPSHOT THE EVIDENCE
+         Save the pricing/ToS page to the Wayback Machine the day you adopt
+         it, and note the date in code near the client. When the terms change
+         under you, you will want to know what you agreed to.
+
+
+================================================================================
+3. FREE LLM / AI APIS
+================================================================================
+
+Most volatile category in this document. Model names below were current at
+the research date and will be stale within months.
+
+--------------------------------------------------------------------------------
+3.1  THE DURABLE ANSWER: TRACK THE COMMUNITY LISTS, NOT THIS TABLE
+--------------------------------------------------------------------------------
+
+These are auto-updated far more often than any hand-written doc. Read these
+first, every time.
+
+  cheahjs/free-llm-api-resources
+      https://github.com/cheahjs/free-llm-api-resources
+      ~29k stars. Partly auto-generated from provider APIs, so the per-model
+      rate-limit tables are unusually current. Splits "free providers" from
+      "providers with trial credits", which is the distinction that matters.
+      THIS IS THE SINGLE BEST SOURCE. Most numbers in 3.2 come from here.
+
+  mnfst/awesome-free-llm-apis
+      https://github.com/mnfst/awesome-free-llm-apis
+      ~7k stars, created Mar 2026, CC0. Narrower scope: PERMANENT free tiers
+      only, no trial credits. Adds context window and max output columns,
+      which cheahjs's list mostly omits. Good cross-check.
+
+  Note: these two disagree on Gemini's daily limit by roughly 75x. That
+  disagreement is itself the finding. See 3.2.
+
+--------------------------------------------------------------------------------
+3.2  PERMANENT FREE TIERS (rate-limited, no expiry, no card)
+--------------------------------------------------------------------------------
+
+  NAME             Google AI Studio / Gemini API
+  DOCS             https://ai.google.dev/gemini-api/docs/rate-limits
+  AUTH             API key, free, no credit card
+  FREE LIMIT       DISPUTED. Google's own rate-limits page NO LONGER PUBLISHES
+                   a free-tier table; it says limits "can be viewed in Google
+                   AI Studio" and are "not guaranteed". Third-party trackers
+                   for Flash-class models range from 20 RPD to 250 RPD to
+                   1,500 RPD depending on source and date, after a quota cut
+                   in Dec 2025 and Pro models leaving the free tier ~Apr 2026.
+                   Flash-Lite is consistently the more generous free model.
+                   Context window 1M tokens on Flash-class models.
+                   ==> Treat the number as UNVERIFIED. Read it in AI Studio
+                       for your own project and design for 429s regardless.
+  COMMERCIAL       Yes, but with two sharp restrictions, quoted below in 8.3.
+                   Notably: "You may use only Paid Services when making API
+                   Clients available to users in the European Economic Area,
+                   Switzerland, or the United Kingdom."
+  WORTH IT?        Best free frontier-ish model and a 1M context, but the
+                   free tier trains on your data and is barred for EU/UK/CH
+                   users. For this app that is close to disqualifying. See 8.3.
+
+  NAME             Groq
+  DOCS             https://console.groq.com/docs/rate-limits
+  AUTH             API key, free tier, no card required per community lists
+  FREE LIMIT       Verified from Groq's own Free Plan table:
+                       openai/gpt-oss-120b    30 RPM  1,000 RPD   8K TPM  200K TPD
+                       openai/gpt-oss-20b     30 RPM  1,000 RPD   8K TPM  200K TPD
+                       qwen/qwen3.6-27b       30 RPM  1,000 RPD   8K TPM  200K TPD
+                       groq/compound          30 RPM    250 RPD  70K TPM
+                       whisper-large-v3       20 RPM  2,000 RPD (audio sec caps)
+                   Context ~131K on gpt-oss models. Groq notes the table is
+                   "a high level summary" and your account page is canonical.
+                   Note the 8K TPM ceiling: that is the real constraint for
+                   long documents, not the request count.
+  COMMERCIAL       Yes. Groq's privacy policy explicitly carves API Customer
+                   Data OUT of the policy and puts it under the Groq Services
+                   Agreement + DPA, i.e. processor terms. No free-vs-paid
+                   training distinction was found stated anywhere.
+  WORTH IT?        Yes. Fastest inference available free, clean terms, and no
+                   "we train on free tier" language. Best default free LLM for
+                   short, bounded tasks. The 8K TPM cap makes whole-resume
+                   prompts awkward; chunk them.
+
+  NAME             Cerebras
+  DOCS             https://www.cerebras.ai/pricing (defers to console)
+  AUTH             API key, account required
+  FREE LIMIT       CONFLICTING. cheahjs reports a rate-limited free tier at
+                   5 RPM / 30,000 TPM / 1,000,000 tokens per hour /
+                   1,000,000 tokens per day on gpt-oss-120b, zai-glm-4.7,
+                   gemma-4-31b. The official pricing page instead describes a
+                   "Free Trial" of $5 in credits and says the paid Developer
+                   tier has "10x higher rate limits than free tier", which
+                   implies a rate-limited free tier does exist.
+                   Model availability is volatile (reportedly ~12 models down
+                   to 2 over several months).
+  COMMERCIAL       Unclear from the pricing page. Preview models are flagged
+                   "not intended for use in production environments".
+                   Context window: unverified.
+  WORTH IT?        Very fast, but 5 RPM and a shrinking model list make it a
+                   secondary fallback, not a primary.
+
+  NAME             OpenRouter (free models, ":free" suffix)
+  DOCS             https://openrouter.ai/docs/api-reference/limits
+  AUTH             API key, free
+  FREE LIMIT       Verified: 20 requests/minute, and 50 requests/DAY under
+                   $10 lifetime credit purchase, rising to 1,000 requests/day
+                   once you have bought $10 of credit lifetime. All :free
+                   models SHARE this quota. Extra accounts do not help
+                   ("we govern capacity globally").
+  COMMERCIAL       Yes. But note the data setting: OpenRouter has separate
+                   free-vs-paid toggles for "allow providers that may train
+                   on your data". If you do NOT allow training, OpenRouter
+                   "will not route to providers that train", which materially
+                   shrinks or removes your free-model pool.
+  WORTH IT?        Yes, as an ABSTRACTION LAYER rather than a source of
+                   capacity. One OpenAI-compatible endpoint, one key, dozens
+                   of providers, automatic failover. That is architecturally
+                   valuable even if you eventually pay. 50 free req/day is
+                   too small to build on; the $10 unlock to 1,000/day is the
+                   single best value on this page.
+
+  NAME             Cloudflare Workers AI
+  DOCS             https://developers.cloudflare.com/workers-ai/platform/pricing/
+  AUTH             Cloudflare account + API token, free
+  FREE LIMIT       Verified: 10,000 Neurons/day, resets 00:00 UTC. Neurons are
+                   a compute unit; conversions from the official table:
+                       llama-3.2-1b            2,457 neurons/M input tokens
+                                              18,252 neurons/M output tokens
+                       llama-3.3-70b-fp8-fast 26,668 in / 204,805 out per M
+                       gpt-oss-120b           31,818 in /  68,182 out per M
+                   So 10,000 neurons/day is roughly 4M input tokens on a 1B
+                   model, but under ~50,000 output tokens on a 70B model.
+                   75+ models on the free allocation. Some newer models
+                   (kimi-k2.6, glm-5.2, deepseek-v4-pro) REQUIRE paid billing
+                   and are not in the free allocation.
+  COMMERCIAL       Yes. Standard Cloudflare terms, no training language found.
+  WORTH IT?        Yes for small models and embeddings. The neuron accounting
+                   means a 70B model burns the daily budget in a handful of
+                   long generations. Good for classification and extraction,
+                   bad for long-form generation.
+
+  NAME             Mistral La Plateforme
+  DOCS             https://mistral.ai/pricing  |  https://console.mistral.ai/
+  AUTH             API key, phone number verification required
+  FREE LIMIT       Free mode enabled by default; official pricing page shows
+                   "$10/mo in API credits" on the Free plan. cheahjs reports
+                   limits are set per-model and per-organisation, "anywhere
+                   from 25,000 to 20,000,000 tokens/minute and 0.03 to 12.5
+                   requests/second" as of Jul 2026 (check admin.mistral.ai
+                   limits page). awesome-free-llm-apis reports ~1 RPS /
+                   500K TPM, 256K context on current models.
+                   ==> exact per-account limit is UNVERIFIED; it is per-org.
+  COMMERCIAL       Yes. But: free-mode prompts MAY BE USED TO TRAIN MISTRAL
+                   MODELS unless you opt out. The pricing page shows model
+                   training as "Opt-out" across plans, so the opt-out exists.
+                   Verify the toggle is off before sending anything real.
+  WORTH IT?        Decent, EU-hosted, large context. The phone verification
+                   and the training default are friction. Good "second
+                   provider" for redundancy.
+
+  NAME             Cohere (trial key)
+  DOCS             https://docs.cohere.com/docs/rate-limits
+  AUTH             Trial API key, free, no card
+  FREE LIMIT       Verified: 1,000 API calls per MONTH total, shared across
+                   models. 20 req/min on chat endpoints; Rerank 10/min;
+                   Embed 2,000 inputs/min; Tokenize 100/min. Context up to
+                   256K on Command A.
+  COMMERCIAL       DISPUTED, LEAN NO. Cohere's rate-limits page describes only
+                   "evaluation keys (free but limited in usage)" vs
+                   "production keys (paid)" and says nothing about commercial
+                   use. But awesome-free-llm-apis states flatly
+                   "Non-commercial use only" for the trial key, which matches
+                   Cohere's historical trial-key terms.
+                   ==> Read Cohere's ToS directly before any commercial use.
+                       Do not rely on either source above.
+  WORTH IT?        Rerank is genuinely excellent and there is no good free
+                   substitute for it. But 1,000 calls/month and an unresolved
+                   commercial-use question make it evaluation-only for now.
+
+  NAME             NVIDIA NIM (build.nvidia.com)
+  DOCS             https://build.nvidia.com/  |  https://developer.nvidia.com/nim
+  AUTH             NVIDIA Developer Program account (free), phone
+                   verification, nvapi- key. No credit card.
+  FREE LIMIT       Historically 1,000 credits on signup (up to 5,000 with a
+                   business email). NVIDIA staff have since described access
+                   as rate-limited rather than credit-based, community figure
+                   ~40 requests/minute, varying by model and traffic. Exact
+                   current limit is UNVERIFIED and shown only in your account.
+                   Models are often context-window limited vs their originals.
+  COMMERCIAL       NO, effectively. NVIDIA defines production use as anything
+                   beyond development, testing, research or evaluation,
+                   INCLUDING SERVING REAL END-USERS, and that requires an
+                   NVIDIA AI Enterprise licence.
+  WORTH IT?        No, not for a shipping product. Fine as a model-evaluation
+                   playground. The production-licence clause disqualifies it.
+
+  NAME             Hugging Face Inference Providers
+  DOCS             https://huggingface.co/docs/inference-providers/en/pricing
+  AUTH             HF user access token, free account
+  FREE LIMIT       Verified: $0.10/month in credits for free users, $2.00/mo
+                   for PRO, $2.00/seat for Team/Enterprise. Credits only apply
+                   to HF-routed requests, not when you bring your own provider
+                   key. Base URL https://router.huggingface.co/v1
+  COMMERCIAL       Yes.
+  WORTH IT?        $0.10/month is a rounding error, not a tier. The real value
+                   is the ROUTER: one token, one OpenAI-compatible endpoint,
+                   200+ models across Fireworks/Together/Nebius/Novita/etc.
+                   Useful as an abstraction, not as free capacity.
+
+  NAME             Z AI / Zhipu (GLM Flash models)
+  DOCS             https://open.bigmodel.cn/
+  AUTH             API key, no card
+  FREE LIMIT       Permanent free Flash models; awesome-free-llm-apis reports
+                   1 concurrent request, GLM-4.7-Flash at 200K context /
+                   128K max output. Numeric RPM/RPD: unverified.
+  COMMERCIAL       Unclear.
+  WORTH IT?        Large context for free is notable, but a China-hosted
+                   endpoint receiving user resumes is a hard no for this app.
+
+  NAME             Ollama / llama.cpp / local inference
+  DOCS             https://ollama.com/
+  AUTH             None. Runs on the user's machine.
+  FREE LIMIT       None. Bounded only by the user's hardware.
+  COMMERCIAL       Yes (open weights; check the individual model licence,
+                   they differ, and some are not commercially permissive).
+  WORTH IT?        YES, AND IT IS THE STRATEGICALLY CORRECT ANSWER FOR THIS
+                   APP. Ollama's own framing: "Nothing you run locally ever
+                   leaves your machine." For a local-first, privacy-focused
+                   desktop tool, a local model is the only option with zero
+                   rate limit, zero cost, zero ToS risk, zero data exposure,
+                   and zero vendor mortality. Quality is lower than frontier
+                   models. That is the trade, and for resume content it is
+                   very often the right one. See section 9.
+
+--------------------------------------------------------------------------------
+3.3  TRIAL CREDITS (one-off, expire, NOT a free tier)
+--------------------------------------------------------------------------------
+
+Do not build on these. They are for evaluating a model, then paying.
+Source: cheahjs/free-llm-api-resources unless noted.
+
+    Provider          Credit            Notes
+    ---------------   ---------------   -----------------------------------
+    Baseten           $30               pay by compute time
+    Modal             $30/month         Starter plan, compute-time billing
+    NLP Cloud         $15               phone verification required
+    AI21              $10 / 3 months
+    Upstage           $10 / 3 months
+    SambaNova Cloud   $5  / 3 months    deepseek-v3.x, gpt-oss-120b, etc.
+    Cerebras          $5                see 3.2, overlaps a rate-limited tier
+    Vercel AI Gateway $5/month          routes to many providers
+    Fireworks         $1
+    Nebius            $1
+    Hyperbolic        $1
+    Inference.net     $1 (+$25 survey)
+    Novita            $0.50 / 1 year
+    Scaleway          1,000,000 tokens  + 60 min audio transcription, EU-hosted
+    Alibaba Model Std 1M tokens/model   90 days, Singapore endpoint only
+
+  Chutes.ai       Decentralised (Bittensor) inference with genuinely free
+                  models subsidised by token incentives. No published hard
+                  cap; capacity is "community-powered" and fluctuates with
+                  subnet economics. Unverified limits by design. Interesting,
+                  unsuitable as a dependency.
+  Kluster.ai      Name collision with an unrelated IDE code-review product.
+                  The inference cloud's free-tier numbers are unverified.
+
+--------------------------------------------------------------------------------
+3.4  RETIRED / GONE (do not go looking)
+--------------------------------------------------------------------------------
+
+  GitHub Models   FULLY RETIRED as of 30 July 2026. Playground, model catalog,
+                  inference API and bring-your-own-key are "no longer
+                  available to any customer". Microsoft points users to Azure
+                  AI Foundry or GitHub Copilot. Any 2025-era blog post
+                  recommending GitHub Models as a free tier is now wrong.
+                  This is the cleanest recent example of why you never make a
+                  big-co loss leader a hard dependency.
+
+  DeepSeek        Not retired, but there is NO free tier. Paid API only
+                  (deepseek-v4-flash / v4-pro / v4-flash-vision-exp), OpenAI-
+                  and Anthropic-compatible at https://api.deepseek.com .
+                  Cheap is not free. Exact current per-token pricing:
+                  unverified, the pricing page did not render.
+
+
+================================================================================
+4. JOB AND CAREER DATA APIS
+================================================================================
+
+--------------------------------------------------------------------------------
+4.1  THE TWO EVERYONE ASKS ABOUT FIRST, ANSWERED: BOTH ARE CLOSED
+--------------------------------------------------------------------------------
+
+  INDEED      The public Publisher API is SHUT DOWN. New signups were rolled
+              back Oct 2022 and the XML feed was retired (2023-2024,
+              sources vary). indeed.com/publisher no longer resolves. What
+              remains: an iframe-only hosted search widget (no data access),
+              and an NDA-gated enterprise data partnership. The partner APIs
+              that do exist (Indeed Apply, Sponsored Jobs) are for ATSs and
+              staffing platforms and NONE of them returns job postings.
+              Even when alive, its terms were display-only: storing listings
+              or using them for analytics was prohibited.
+
+  LINKEDIN    There is NO public jobs-read API and there never will be one
+              for an app like this. All API access has required Partner
+              Program membership since 2015. Job data sits in the Talent API,
+              which is invitation-only to certified ATS/enterprise HR vendors.
+              LinkedIn explicitly REJECTS use cases including "job search
+              automation", scraping, and profile aggregation. Reported
+              partnership costs run $10k-50k+/year.
+
+  Conclusion: any job-data feature must be built on aggregators (4.2), on
+  per-company ATS boards (4.3), or on government sources (4.4).
+
+--------------------------------------------------------------------------------
+4.2  AGGREGATORS AND JOB BOARDS
+--------------------------------------------------------------------------------
+
+  NAME             Jobicy
+  DOCS             https://github.com/Jobicy/remote-jobs-api
+  BASE             https://jobicy.com/api/v2/remote-jobs
+  AUTH             NONE. No key, no account.
+  FREE LIMIT       count param 1-200, default 200 jobs/request. No numeric
+                   rate limit published; fair-use guidance says poll "a few
+                   times a day". 6-hour publish delay by design.
+  COMMERCIAL       YES, EXPLICITLY. README grants use in "websites,
+                   applications, newsletters, research tools, AI products,
+                   job boards, internal applications" without requesting
+                   individual permission, provided you keep attribution and
+                   canonical URLs and do not feed Jooble/Google Jobs/LinkedIn.
+                   High volume needs a separate agreement.
+  WORTH IT?        YES. Best-documented and most explicitly commercial-
+                   friendly free job feed found. Remote-focused. Start here.
+
+  NAME             Remotive
+  DOCS             https://github.com/remotive-com/remote-jobs-api
+  BASE             https://remotive.com/api/remote-jobs
+  AUTH             None.
+  FREE LIMIT       Unverified (no published numeric limit). Params: category,
+                   company_name, search, limit.
+  COMMERCIAL       Conditional yes. MUST credit and link back to Remotive or
+                   "API access may be terminated". Explicitly bans
+                   republishing to Jooble / Neuvoo / Google Jobs / LinkedIn
+                   Jobs, and bans gating listings behind a signup wall.
+                   Listings delayed 24h.
+  WORTH IT?        Yes, with a visible attribution link. Good remote coverage.
+
+  NAME             RemoteOK
+  DOCS             https://remoteok.com/api (self-documenting feed)
+  AUTH             None.
+  FREE LIMIT       Unverified; no published limit. Self-throttle.
+  COMMERCIAL       Conditional yes. Quoted verbatim from the live feed's own
+                   embedded legal object: "Please link back (with follow, and
+                   without nofollow!) to the URL on Remote OK and mention
+                   Remote OK as a source... If you do not we'll have to
+                   suspend API access."
+  WORTH IT?        Yes for zero-friction remote listings. The dofollow
+                   backlink is a real UI obligation, not boilerplate.
+
+  NAME             Arbeitnow
+  DOCS             https://www.arbeitnow.com/api/job-board-api
+  AUTH             None.
+  FREE LIMIT       Unverified. 100 results/page.
+  COMMERCIAL       CONTRADICTORY. arbeitnow.com/terms requires a backlink but
+                   the general site licence also bars using materials "for any
+                   commercial purpose". Access revocable at will.
+  WORTH IT?        Handy EU/remote feed for prototyping. Get written
+                   clearance before commercial use; their own terms conflict.
+
+  NAME             Himalayas
+  DOCS             https://himalayas.app/docs/remote-jobs-api
+  BASE             https://himalayas.app/jobs/api
+  AUTH             None.
+  FREE LIMIT       Max 20 records/request (cut from a higher cap in Mar 2025).
+                   Rate-limited (429s) but the number is unpublished.
+                   NO CORS: server-side / main-process calls only.
+  COMMERCIAL       Unverified. Not addressed in the docs pages reached.
+                   Email hi@himalayas.app for a higher limit and clarity.
+  WORTH IT?        Clean data, but a 20-record page size and unconfirmed
+                   terms make it a supplementary source.
+
+  NAME             Adzuna
+  DOCS             https://developer.adzuna.com/  (ToS: /docs/terms_of_service)
+  BASE             https://api.adzuna.com/v1/api
+  AUTH             app_id + app_key as query params, free self-serve signup
+  FREE LIMIT       Verified from official ToS: 25 hits/min, 250 hits/day,
+                   1,000 hits/week, 2,500 hits/month by default.
+  COMMERCIAL       NO, not on the free key. ToS: commercial, government or
+                   academic use is "permitted subject to a 14 day trial
+                   period" for validating coverage/quality/usability ONLY,
+                   and data "may not be used in its original format or in
+                   aggregation" beyond that without written permission.
+                   Also: you must not contact their upstream content
+                   providers; doing so revokes access immediately.
+  WORTH IT?        Excellent data, 16+ countries, includes salary analytics.
+                   But the free key is a 14-day commercial evaluation, not a
+                   tier. Great for prototyping, needs a licence to ship.
+
+  NAME             The Muse
+  DOCS             https://www.themuse.com/developers/api/v2
+  BASE             https://www.themuse.com/api/public
+  AUTH             Optional api_key query param; registration required for
+                   "any use beyond testing"
+  FREE LIMIT       Verified: 3,600 req/hour registered, 500 req/hour
+                   unregistered. 20 results/page. X-RateLimit-* headers
+                   returned. No daily/monthly cap documented.
+  COMMERCIAL       Conditional. ToS bars reselling/sublicensing the API,
+                   cloning Muse content, and scraping outside the API, and
+                   REQUIRES a link back to The Muse. Liability capped at $150.
+  WORTH IT?        Yes for display-with-attribution. Generous hourly cap.
+                   Also carries company-culture content, useful for the
+                   company-research feature.
+
+  NAME             JSearch (RapidAPI)
+  DOCS             https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
+  AUTH             X-RapidAPI-Key. CREDIT CARD REQUIRED ON FILE even on free.
+  FREE LIMIT       Verified from live pricing page: Basic $0.00/mo =
+                   200 requests/MONTH hard limit, 1,000 req/hour rate limit,
+                   10,240 MB/mo bandwidth + $0.001/MB overage.
+                   (Pro $25/mo=10k, Ultra $75/mo=50k, Mega $150/mo=200k.)
+  COMMERCIAL       Unverified; governed by RapidAPI marketplace terms.
+  WORTH IT?        Note the trap: "1,000 req/hour" is meaningless next to
+                   200 req/month. Prototyping only. It aggregates Google for
+                   Jobs, so coverage is broad, but you will pay to use it.
+
+  NAME             USAJOBS
+  DOCS             https://developer.usajobs.gov/
+  AUTH             Free key by email. Requires Host, User-Agent (your
+                   registered email) and Authorization-Key headers.
+  FREE LIMIT       No published calls/day. Official guide: Search Jobs max
+                   10,000 rows/query and max 500 rows/page; Code List and
+                   Dynamic Search documented as "No limits". Throttling is
+                   per-User-Agent at OPM's discretion.
+  COMMERCIAL       RESTRICTED. ToS: "data provided through the API is for the
+                   explicit use of the requesting company identified on the
+                   API Registration Form, and no other use of the data is
+                   permitted."
+  WORTH IT?        Yes if US federal jobs matter. Free, generous row caps,
+                   government-durable. Register your actual use case.
+
+  NAME             Reed.co.uk
+  DOCS             https://www.reed.co.uk/developers
+  AUTH             API key via HTTP Basic (key as username, blank password)
+  FREE LIMIT       Jobseeker API: resultsToTake "defaults and is limited to
+                   100 results" per call. Recruiter API: 2,000 req/hour
+                   default. No Jobseeker calls/day figure published.
+  COMMERCIAL       Likely restricted. Reed's site policies bar "copying for
+                   any commercial or business use"; no standalone API ToS
+                   found, and Reed states they cannot offer developer support.
+  WORTH IT?        Good UK coverage, ambiguous terms. Confirm in writing.
+
+  NAME             Jooble
+  DOCS             https://jooble.org/api/about
+  AUTH             Free key, POST https://jooble.org/api/{key}. Keys are
+                   PER COUNTRY DOMAIN (jooble.org, uk.jooble.org, de... all
+                   need separate keys).
+  FREE LIMIT       500 requests TOTAL, LIFETIME per key. Not per month.
+                   20 results/page.
+  COMMERCIAL       Unclear; the lifetime cap forces a sales conversation.
+  WORTH IT?        No. 500 lifetime calls is a demo, not a tier.
+
+  NAME             Findwork.dev
+  DOCS             https://findwork.dev/api/
+  AUTH             Token auth after free signup (exact header format
+                   unconfirmed; docs page is behind a login wall)
+  FREE LIMIT       Unverified. No rate-limit numbers on any reachable page.
+  COMMERCIAL       Unverified. No ToS text found.
+  WORTH IT?        Not without confirmation. Undocumented limits and terms.
+
+  NAME             Careerjet
+  DOCS             https://github.com/careerjet/careerjet-api-client-python
+  BASE             https://search.api.careerjet.net/v4/query
+  AUTH             Free affiliate ID (affid), HTTP Basic
+  FREE LIMIT       Unverified. Docs say frequency is "limited to avoid
+                   misuse". A widely-repeated "1,000 req/hour" is
+                   third-party only and unconfirmed.
+  COMMERCIAL       Commercial by design (affiliate/earn-per-click), governed
+                   by a partner agreement shown at signup.
+  WORTH IT?        Wide country coverage and commercially intended, but get
+                   the throughput limit in writing.
+
+  NAME             WhatJobs
+  DOCS             https://www.whatjobs.com/affiliates
+  AUTH             Credentials issued after contacting them. No self-serve.
+  FREE LIMIT       Unverified; no official self-serve number published.
+  COMMERCIAL       Paid publisher/CPC network, negotiated per partner.
+  WORTH IT?        No. Not self-serve, does not fit a "sign up and go" flow.
+
+--------------------------------------------------------------------------------
+4.3  PER-COMPANY ATS JOB-BOARD APIS  <-- MOST RELEVANT TO THIS PROJECT
+--------------------------------------------------------------------------------
+
+This is the highest-value section for Applyocalypse. These are free, need no
+key, and return exactly the jobs you are about to fill a form for. The app
+already has ATS adapters, so the same board token identifies both the listing
+source and the filling strategy.
+
+HOW THEY WORK
+    Each is a single-tenant public read endpoint keyed by the company's own
+    board slug. There is NO enumeration or lookup endpoint on ANY of them:
+    you must already know the slug, which you extract from the company's
+    careers-page URL.
+        Greenhouse   boards.greenhouse.io/{token}      or
+                     job-boards.greenhouse.io/{token}
+        Lever        jobs.lever.co/{site}
+        Ashby        jobs.ashbyhq.com/{name}
+    None of the three publishes a numeric rate limit for its public read
+    endpoint. Self-throttle and cache.
+
+  NAME             Greenhouse Job Board API
+  DOCS             https://docs.greenhouse.io/job-board.html
+  BASE             https://boards-api.greenhouse.io/v1/boards/{board_token}
+  AUTH             NONE for all GETs. Quoted: "Job Board data is publicly
+                   available, so authentication is not required." Only the
+                   application-submission POST needs Basic auth with a key.
+  FREE LIMIT       None documented anywhere.
+  COMMERCIAL       Not addressed; data is the company's own public postings.
+  RETURNS          title, location.name, absolute_url (application URL),
+                   updated_at, requisition_id, departments, offices.
+                   With ?content=true: full HTML description (entity-escaped).
+                   With ?questions=true on a single job: STRUCTURED CUSTOM
+                   QUESTIONS (label, required, fields[] with name/type/values;
+                   supports file upload, text, textarea, single/multi select),
+                   plus optional EEOC compliance and demographic_questions
+                   blocks, plus pay_input_ranges.
+  WORTH IT?        YES, HIGHEST VALUE ITEM IN THIS DOCUMENT FOR THIS APP.
+                   The ?questions=true payload is a machine-readable schema of
+                   the exact form the worker is about to fill, INCLUDING the
+                   EEOC/demographic fields that safety invariant #2 requires
+                   be flagged requires_review. You can pre-plan a fill, and
+                   pre-flag EEO questions, before opening a browser at all.
+
+  NAME             Lever Postings API
+  DOCS             https://github.com/lever/postings-api
+  BASE             https://api.lever.co/v0/postings/{site}
+  AUTH             None for reads (JSON/HTML/iframe/XML modes). The
+                   application POST uses ?key=APIKEY and is limited to
+                   ~2 requests/second.
+  FREE LIMIT       Read side undocumented.
+  COMMERCIAL       Not addressed. Note many customers disable the public feed.
+  RETURNS          title, categories (team/department/location/commitment/
+                   level), hostedUrl, applyUrl, description, optional salary.
+                   NO custom-question schema is exposed.
+  WORTH IT?        Yes for listings and metadata. Leanest of the three; you
+                   still have to discover the form fields in the browser.
+
+  NAME             Ashby Public Job Posting API
+  DOCS             https://developers.ashbyhq.com/docs/public-job-posting-api
+  BASE             https://api.ashbyhq.com/posting-api/job-board/{jobBoardName}
+  AUTH             None shown for this endpoint.
+  FREE LIMIT       Not documented for the public endpoint.
+  COMMERCIAL       Not addressed.
+  RETURNS          title, location + secondaryLocations[] with structured
+                   address, department, team, isRemote, workplaceType
+                   (OnSite/Remote/Hybrid), descriptionHtml AND
+                   descriptionPlain, employmentType, publishedAt, jobUrl,
+                   applyUrl, isListed. With ?includeCompensation=true a
+                   structured compensation object (tier summaries, min/max,
+                   currency, interval). NO question schema.
+  WORTH IT?        Yes. Best structured metadata of the three (plain-text
+                   description is a gift for JD analysis; compensation is
+                   structured). Stops at applyUrl.
+
+  ALSO PUBLIC, NO KEY:
+    Workable    GET https://apply.workable.com/api/v1/widget/accounts/{account}
+                add ?details=true for full descriptions. No key. Limits
+                unverified.
+    Personio    GET https://{company}.jobs.personio.de/xml?language=en
+                XML, no auth. Always alphabetical, not configurable.
+                Limits unverified.
+
+  KEY OR PLAN DEPENDENT:
+    SmartRecruiters  https://api.smartrecruiters.com/v1/companies/{id}/postings
+                     API key or OAuth2 (internal_postings_read); many
+                     customers leave it effectively open, so auth is
+                     inconsistent across companies. Better query/filter
+                     support than Lever or Ashby. Limits unverified.
+    Recruitee        https://{company}.recruitee.com/api/offers/
+                     Help centre now says the Careers Site API requires a
+                     token; older docs said public. Treat as token-required.
+                     Rate limiting reportedly introduced Oct 2025, number
+                     unverified. Docs flagged "work in progress".
+    Teamtailor       https://api.teamtailor.com/v1/jobs
+                     Requires X-Api-Key + X-Api-Version even to read one
+                     company. Aggregation needs a manual partner deal
+                     (techpartnerships@teamtailor.com). Most locked down.
+
+  FINDING BOARD TOKENS AT SCALE
+    Since none of the ATSes offer enumeration, the community solved it by
+    maintaining lists. Most useful:
+        https://github.com/Feashliaa/job-board-aggregator
+            Claims 1,000,000+ positions from 20,000+ companies across
+            Greenhouse, Lever, Ashby, Workday, BambooHR, iCIMS, Paylocity.
+            Daily refresh via GitHub Actions. The data/*_companies.json files
+            are effectively an off-the-shelf token directory.
+            Note their per-ATS concurrency tuning as a politeness reference:
+            50 Workday, 30 Greenhouse/Lever/iCIMS, 10 BambooHR,
+            5 Ashby/Paylocity.
+        https://github.com/plibither8/jobber
+            Small normalisation layer over Ashby/Greenhouse/Lever/BambooHR.
+            Good shape to copy for a unified internal model.
+        https://github.com/adgramigna/job-board-scraper
+            Greenhouse/Lever/Ashby/Rippling, normalised, daily.
+    Simplest first-party method: when the user pastes a job URL, parse the
+    slug out of it. You get the token for free, from the user, with no list
+    to maintain. Do that before you import anyone's JSON.
+
+--------------------------------------------------------------------------------
+4.4  GOVERNMENT LABOUR-MARKET DATA (not listings, but durable)
+--------------------------------------------------------------------------------
+
+  NAME             US Bureau of Labor Statistics API v2
+  DOCS             https://www.bls.gov/developers/api_faqs.htm
+  AUTH             Free registration key (v2); v1 works unregistered
+  FREE LIMIT       Verified from the official FAQ table:
+                       v2 registered:   500 queries/day, 50 series/query,
+                                        20 years/query, plus net/% changes,
+                                        annual averages, series catalog
+                       v1 unregistered: 25 queries/day, 25 series/query,
+                                        10 years/query, none of the extras
+                       both:            50 requests per 10 seconds
+  COMMERCIAL       US federal statistical data, standard public-domain
+                   posture. A dedicated commercial-use clause was not fetched,
+                   so treat that specific framing as unconfirmed.
+  WORTH IT?        Yes for salary and labour-market context. Most precisely
+                   documented free tier in this entire document.
+
+  NAME             O*NET Web Services
+  DOCS             https://services.onetcenter.org/  (ToS: /terms/)
+  AUTH             Free developer registration, X-API-Key header
+  FREE LIMIT       Verified from the ToS: throttled or suspended above
+                   5 requests/second OR 50,000 requests/day. Best effort, no
+                   SLA. On 429, retry after >= 200ms.
+  COMMERCIAL       Yes with conditions. Data is CC BY 4.0: you must credit
+                   "O*NET nn.0 Database" and USDOL/ETA and link the licence.
+                   Service is free "provided that a URL or link to the O*NET
+                   Web Services site is displayed in a prominent place".
+                   PAID OR REGISTRATION-GATED APPS NEED SEPARATE PERMISSION
+                   from the Center, unless the same information is also
+                   offered free and unregistered elsewhere. Must not imply
+                   ownership or exclusivity of O*NET content.
+                   ==> Relevant if Applyocalypse ever gains a paid tier or a
+                       sign-up wall. Read that clause then.
+  WORTH IT?        Yes. Occupation, skills and task taxonomy: excellent for
+                   normalising job titles and enriching JD analysis with a
+                   stable vocabulary. 50k/day is effectively unlimited here.
+
+
+================================================================================
+5. COMPANY / ENRICHMENT / CONTACT APIS
+================================================================================
+
+--------------------------------------------------------------------------------
+5.1  COMPANY DATA
+--------------------------------------------------------------------------------
+
+  NAME             SEC EDGAR (data.sec.gov)
+  DOCS             https://www.sec.gov/os/accessing-edgar-data
+  AUTH             NONE, but a declared identifying User-Agent is MANDATORY.
+                   Official sample format:
+                       User-Agent: Sample Company Name AdminContact@domain.com
+                       Accept-Encoding: gzip, deflate
+                       Host: www.sec.gov
+  FREE LIMIT       Verified: "Current max request rate: 10 requests/second".
+                   No daily or monthly cap published. Botnet-pattern traffic
+                   is throttled at SEC discretion. No tech support offered.
+  COMMERCIAL       Yes. US federal government data, public domain.
+  WORTH IT?        Yes for US public companies: filings, financials, risk
+                   factors, executive names. Free, effectively unlimited,
+                   and it will outlive every startup on this page.
+
+  NAME             UK Companies House API
+  DOCS             https://developer.company-information.service.gov.uk/
+  AUTH             Free API key, HTTP Basic
+  FREE LIMIT       Verified: 600 requests per rolling 5-minute window per
+                   application; full reset at window end; higher limits on
+                   request.
+  COMMERCIAL       Yes. UK government open company-register data.
+  WORTH IT?        Yes. No tiers, no card, no gimmicks. One of the best
+                   entries in this whole document.
+
+  NAME             Wikidata / Wikipedia (MediaWiki API)
+  DOCS             https://www.wikidata.org/wiki/Wikidata:Data_access
+  AUTH             None for reads; OAuth/bot flag for higher limits
+  FREE LIMIT       No single published req/s for the core API. Etiquette
+                   based: serial requests, <= 3 concurrent, honour 429 and
+                   Retry-After. A meaningful User-Agent with contact info is
+                   required, e.g.
+                       CoolBot/0.0 (https://example.org/bot/; me@example.org)
+                   A formal rate-limiting rollout is underway in 2026.
+  COMMERCIAL       Yes. Wikidata is CC0 (no rights reserved). Wikipedia text
+                   is CC BY-SA, so commercial reuse is fine with attribution.
+  WORTH IT?        Yes. Best pure free-and-open company/entity data. Ideal
+                   for company summaries, founding dates, HQ, industry, and
+                   for resolving a company name to a canonical entity.
+
+  NAME             Clearbit  (MOSTLY DEAD, READ THIS)
+  DOCS             https://developers.hubspot.com/changelog/
+                       upcoming-sunset-of-clearbits-free-logo-api
+  STATUS           Acquired by HubSpot. Timeline, verified:
+                       Mar 18 2025  Logo API deprecation announced
+                       Apr 30 2025  "Clearbit Free Tools" sunset
+                                    (Name-to-Domain API, Risk API)
+                       Dec  8 2025  logo.clearbit.com FULLY SHUT DOWN
+                   Enrichment now exists only inside HubSpot as paid,
+                   credit-based "Breeze Intelligence". No standalone API, no
+                   free tier for new customers.
+                   SURVIVOR: the Clearbit AUTOCOMPLETE API (company
+                   name -> domain) is still live and still free, no account,
+                   no key, 600 requests/minute. Little known. Genuinely useful
+                   for resolving a typed company name to a domain.
+  WORTH IT?        Dead for logos and enrichment: migrate off. The
+                   Autocomplete API is worth knowing about.
+
+  NAME             logo.dev
+  DOCS             https://logo.dev/pricing
+  AUTH             API key, free "Community" plan
+  FREE LIMIT       Verified: 500,000 requests/month
+  COMMERCIAL       Yes, CONDITIONALLY: the free plan explicitly requires a
+                   visible link back to Logo.dev for commercial use. Personal
+                   projects exempt. Paid tiers drop the requirement.
+  WORTH IT?        Yes. This is HubSpot's own recommended replacement for the
+                   dead Clearbit Logo API. Generous quota. Budget for the
+                   attribution link in the UI, or pay.
+
+  NAME             Brandfetch
+  DOCS             https://docs.brandfetch.com/brand-api/overview
+  AUTH             API key, free developer account
+  FREE LIMIT       Logo API + Brand Search API: 500,000 requests/month, fair
+                   use, no attribution required. Brand API (full structured
+                   data): docs say "100 free requests" on one page and
+                   "250 free requests per month" on another. Their own docs
+                   are internally inconsistent; verify in dashboard.
+  COMMERCIAL       Yes, no explicit ban found.
+  WORTH IT?        Yes for logos and brand colours. Treat the rich Brand API
+                   allowance as unverified.
+
+  NAME             OpenCorporates
+  DOCS             https://api.opencorporates.com/documentation/API-Reference
+  AUTH             API key, registration required
+  FREE LIMIT       Unverified. Official docs publish no number, only that
+                   limits "depend on account type and plan". Third-party
+                   figures (~50/day, ~200/month) are mutually inconsistent.
+  COMMERCIAL       NO ON THE FREE TIER, EXPLICITLY. Free access is for open
+                   data projects publishing under OpenCorporates' open/
+                   share-alike licence. Commercial use requires a paid plan.
+  WORTH IT?        No, for a commercial product. This is the clearest
+                   commercial-use ban in this document.
+
+  NAME             Crunchbase
+  DOCS             https://data.crunchbase.com/docs/using-the-api
+  AUTH             API key issued only to Enterprise/Applications licensees.
+                   No self-serve signup.
+  FREE LIMIT       ZERO. Official docs: "Access to the Full API Requires an
+                   Enterprise or Applications License." The old free
+                   "Crunchbase Basic" tier is gone. Licensed rate limit is
+                   200 calls/minute.
+  COMMERCIAL       n/a, no free tier exists.
+  WORTH IT?        No. Budget for an enterprise sales call or skip it.
+
+  NAME             Abstract API (Company Enrichment)
+  DOCS             https://www.abstractapi.com/api/company-enrichment
+  AUTH             API key, free registration (each Abstract product billed
+                   separately)
+  FREE LIMIT       Unverified for this specific product (pricing table did not
+                   render); third-party reports ~100 requests at 1 req/sec.
+  COMMERCIAL       Unclear. Their Enterprise tier is marketed as adding "a
+                   commercial license", which implies the free tier's
+                   commercial terms deserve a manual check.
+  WORTH IT?        Prototyping only until you verify both quota and terms.
+
+--------------------------------------------------------------------------------
+5.2  CONTACT FINDING AND EMAIL VERIFICATION
+--------------------------------------------------------------------------------
+
+  NAME             Hunter.io
+  DOCS             https://hunter.io/pricing
+  AUTH             API key, registration required
+  FREE LIMIT       Verified: 50 credits/month, shared across Email Finder,
+                   Email Verifier and Domain Search. Plus 100,000 saved leads
+                   and 10 AI searches/month.
+  COMMERCIAL       Yes, no explicit ban found.
+  WORTH IT?        Yes. Cleanest and best-documented free tier of any
+                   contact tool researched. 50/month is small but real and
+                   recurring, and it does both finding and verification.
+
+  NAME             Reoon Email Verifier
+  DOCS             https://www.reoon.com/email-verifier/
+  AUTH             Registration, API key after signup
+  FREE LIMIT       Verified from their own signup page: "Get maximum 600 free
+                   verification credits each month". Reported structure is
+                   100 on signup plus 20/day accrued on login. Unknown results
+                   are free and do not consume credits.
+  COMMERCIAL       Yes, no explicit ban found.
+  WORTH IT?        Yes. Most generous recurring free verification allowance
+                   found, if the daily-accrual mechanic suits you.
+
+  NAME             ZeroBounce
+  DOCS             https://www.zerobounce.net/pricing/
+  AUTH             API key, registration required
+  FREE LIMIT       Verified: Freemium 100 validation credits/month, recurring,
+                   plus 10 Email Finder credits, 1 inbox-placement test,
+                   1 email-server test, 1 blacklist monitor. Note their page
+                   also says the 100/month is tied to signing up with a
+                   business/premium domain, so a free webmail signup may not
+                   get the recurring tier.
+  COMMERCIAL       Yes, no explicit ban found.
+  WORTH IT?        Yes. One of few verifiers with a genuinely RECURRING
+                   monthly free allowance rather than a one-off grant.
+
+  NAME             MailboxLayer (apilayer)
+  DOCS             https://mailboxlayer.com/product
+  AUTH             API key, free registration
+  FREE LIMIT       Verified: 100 API requests/month, no support.
+  COMMERCIAL       Yes, no explicit ban found.
+  WORTH IT?        Marginal. Fine for a low-volume signup-form check.
+
+  NAME             Numverify (apilayer, phone validation)
+  DOCS             https://numverify.com/product
+  AUTH             API key, free registration
+  FREE LIMIT       Verified: 100 API requests/month.
+  COMMERCIAL       Yes, no explicit ban found.
+  WORTH IT?        Marginal. Same shape as MailboxLayer. For validating a
+                   phone number in a profile form, a local libphonenumber
+                   library is better than burning an API call.
+
+  NAME             NeverBounce
+  DOCS             https://www.neverbounce.com/pricing
+  AUTH             API key; card needed to lift throttling
+  FREE LIMIT       Verified: 10 free credits on signup. (Their help article's
+                   URL says "1000-free-credits" but the body says 10.)
+                   Larger grants require booking a sales demo.
+  COMMERCIAL       Yes.
+  WORTH IT?        No. Weakest free tier of the group.
+
+  NAME             Apollo.io
+  DOCS             https://www.apollo.io/pricing
+  AUTH             Registration; the full API is reportedly gated to paid or
+                   Custom plans
+  FREE LIMIT       Unverified. A free-forever "Starter" plan exists, but the
+                   official page did not surface its recurring monthly
+                   numbers. Third-party sources conflict wildly (50 to 10,000
+                   email credits/month) though they converge on 5 mobile
+                   credits and 10 export credits per month.
+  COMMERCIAL       Yes (it is a B2B sales tool).
+  WORTH IT?        Treat any specific credit number you read online as
+                   unverified until you see it in-app.
+
+  NAME             People Data Labs
+  DOCS             https://www.peopledatalabs.com/pricing
+  AUTH             API key, registration required
+  FREE LIMIT       Unverified. Pricing page would not render across attempts.
+                   Third parties converge on 100 person/company lookups +
+                   25 IP lookups per month. Officially confirmed instead:
+                   Autocomplete and Cleaner APIs cost no credits (rate
+                   limited instead); paid Pro starts at 350 credits / $98/mo.
+  COMMERCIAL       Unclear. The free tier reportedly returns email and phone
+                   as true/false FLAGS rather than actual values.
+  WORTH IT?        Fine for schema testing. Not a usable source of real
+                   contact data without paying.
+
+  SELF-HOSTED / LOCAL ALTERNATIVES (no account, no quota, no data leaving)
+      AfterShip/email-verifier (Go)   MIT, unrestricted
+          https://github.com/AfterShip/email-verifier
+      reacherhq/check-if-email-exists AGPL-3.0, or paid commercial licence
+          https://github.com/reacherhq/check-if-email-exists
+      python-email-validator          syntax + MX only, no SMTP probe
+          https://github.com/JoshData/python-email-validator
+      MailChecker                     disposable-domain blocklist, 55k+ domains
+          https://github.com/FGRibreau/mailchecker
+      CAVEAT: Gmail, Yahoo and Outlook now commonly return positive SMTP
+      responses regardless of whether the mailbox exists, as anti-harvesting.
+      SMTP-probe accuracy is materially worse in 2026 than it used to be,
+      for open-source AND paid tools alike. Syntax + MX + disposable-domain
+      checking locally gets you most of the real value at zero cost and zero
+      data exposure, which is the right trade for this app.
+
+
+================================================================================
+6. UTILITY APIS
+================================================================================
+
+--------------------------------------------------------------------------------
+6.1  DOCUMENT CONVERSION (DOCX / PDF)  <-- directly relevant to this app
+--------------------------------------------------------------------------------
+
+  The short version: for a local-first desktop app that already mutates DOCX
+  and TEX on disk, DO NOT send the user's resume to a conversion API. Both
+  hosted options below are small, and one of them explicitly forbids
+  production use. The local options are better on every axis including
+  privacy. This is the same argument as 8.3, applied to file conversion.
+
+  NAME             Gotenberg  (self-hosted)
+  DOCS             https://gotenberg.dev/
+  AUTH             None. Docker container you run.
+  FREE LIMIT       None. MIT licensed.
+  COMMERCIAL       Yes, unrestricted (MIT).
+  WORTH IT?        Yes, if you want a service boundary. Bundles Chromium
+                   (HTML/Markdown/URL to PDF) and LibreOffice (Word/Excel/
+                   PowerPoint and 100+ formats to PDF) plus merge, split,
+                   encrypt, watermark, PDF/A and Factur-X, with no host
+                   dependencies to install. One `docker run` and it works.
+                   Heavier than needed if you only convert DOCX to PDF.
+
+  NAME             LibreOffice headless  (local process)
+  DOCS             soffice --headless --convert-to pdf file.docx
+  AUTH             None.
+  FREE LIMIT       None. MPL 2.0.
+  COMMERCIAL       Yes.
+  WORTH IT?        Yes, and it is the simplest correct answer for this app.
+                   No network call, no key, no quota, no data leaving the
+                   machine, and it matches the existing local-first document
+                   pipeline. The cost is bundling or detecting a LibreOffice
+                   install, which is a packaging problem, not an API problem.
+
+  NAME             CloudConvert
+  DOCS             https://cloudconvert.com/pricing
+  AUTH             API key, no card required
+  FREE LIMIT       Verified: 10 credits/day, daily reset, no rollover.
+                   ~1 credit = 1 minute of conversion; general = 1 credit,
+                   Office to PDF = 2, PDF to Office = 4. Max 1GB file,
+                   5 min processing, 5 concurrent tasks, low priority queue.
+  COMMERCIAL       Not explicitly banned, but the tier is positioned "for
+                   personal use, testing and hobby projects"; SLA, DPA and
+                   team billing are paid-only. For a product handling
+                   resumes, the absence of a free-tier DPA matters.
+  WORTH IT?        No, for this app. Roughly 5 resume conversions a day
+                   across ALL users of a shared key, and no DPA.
+
+  NAME             ConvertAPI
+  DOCS             https://www.convertapi.com/pricing  |  /terms
+  AUTH             API token, no card required
+  FREE LIMIT       250 conversions, ONE-TIME on signup, not monthly.
+                   (Third-party listings say the trial expires after 30 days;
+                   that was NOT confirmed in ConvertAPI's own terms text.)
+  COMMERCIAL       NO. Their ToS states the free trial "is only offered for
+                   testing and development purposes, and shall not be used
+                   for any other purposes."
+  WORTH IT?        No. Explicitly not licensed for production by its own ToS.
+
+--------------------------------------------------------------------------------
+6.2  OCR
+--------------------------------------------------------------------------------
+
+  NAME             Tesseract  (local)
+  DOCS             https://github.com/tesseract-ocr/tesseract
+  AUTH             None.
+  FREE LIMIT       None. Apache 2.0 (Leptonica dependency is BSD-2-Clause).
+  COMMERCIAL       Yes, unrestricted.
+  WORTH IT?        Yes, and it is the right default here for the same reason
+                   as LibreOffice: a scanned resume is exactly the document
+                   you should not upload to a free API. Runs fully offline.
+
+  NAME             OCR.space
+  DOCS             https://ocr.space/ocrapi
+  AUTH             Free API key via email signup, no card
+  FREE LIMIT       Verified: 25,000 requests/month (Engines 1 and 2) plus
+                   2,500 Engine 3 conversions; 500 requests/day per IP;
+                   1MB max file size; 3-page max PDF; searchable-PDF output
+                   carries a "Generated by OCR.space" watermark. No SLA.
+  COMMERCIAL       YES, EXPLICITLY. Their FAQ: "Yes, you can use the free API
+                   in a commercial project, but the free plan comes with no
+                   (uptime) guarantees."
+  WORTH IT?        Yes as a fallback when local OCR quality is poor. Unusually
+                   generous and unusually clear on commercial use. The 1MB /
+                   3-page caps rule out long documents. Privacy caveat from
+                   8.3 still applies: this is a resume leaving the machine.
+
+  NAME             Google Cloud Vision (Text Detection)
+  DOCS             https://cloud.google.com/vision/pricing
+  AUTH             GCP API key or service account, tied to a Cloud Billing
+                   account (a card on file is standard GCP practice even
+                   within free usage; not stated on the pricing page itself)
+  FREE LIMIT       Verified: 1,000 units/month free, counted separately for
+                   Text Detection and Document Text Detection. Then $1.50 per
+                   1,000 units to 5M/month, $0.60 per 1,000 beyond.
+                   1 image = 1 unit; each PDF page = 1 unit.
+  COMMERCIAL       Yes, standard GCP terms.
+  WORTH IT?        Highest accuracy of the three, heaviest onboarding
+                   (billing account, service account, key management) and it
+                   sends the document to Google. Fallback only.
+
+--------------------------------------------------------------------------------
+6.3  GEOCODING AND LOCATION
+--------------------------------------------------------------------------------
+
+  Only marginally relevant to this app (normalising job locations, timezone
+  for interview scheduling). Included because the licensing traps here are
+  severe and widely tripped over.
+
+  NAME             Nominatim (OpenStreetMap public instance)
+  DOCS             https://operations.osmfoundation.org/policies/nominatim/
+  AUTH             None, BUT a real identifying User-Agent or Referer is
+                   MANDATORY. Their wording: "stock User-Agents as set by
+                   http libraries will not do."
+  FREE LIMIT       Verified, exact wording: "an absolute maximum of 1 request
+                   per second" per application, counted ACROSS ALL YOUR USERS
+                   combined. Recurring or 24h+ bulk jobs: 4 requests/minute.
+  COMMERCIAL       Allowed, but heavily constrained. Verbatim: "As a general
+                   rule, bulk geocoding of larger amounts of data is not
+                   encouraged." Recurring calls from apps count as bulk and
+                   are "strongly discouraged". Client-side autocomplete,
+                   systematic/grid queries and scraping the details page are
+                   banned outright. RESELLING geocoding results is forbidden,
+                   and any service whose core function is geocoding "must run
+                   their own service". Policy may change without notice and
+                   access can be withdrawn; they warn commercial operators
+                   explicitly not to depend on it.
+                   Attribution required (OSMF guidelines, ODbL share-alike).
+  WORTH IT?        Only for light, cached, low-volume lookups with an honest
+                   User-Agent. 1 req/sec across your whole user base is the
+                   number that kills it for anything real.
+
+  NAME             Geoapify
+  DOCS             https://www.geoapify.com/pricing/
+  AUTH             API key, no card required
+  FREE LIMIT       Verified: 3,000 credits/day (about 90,000/month),
+                   5 req/sec. One simple request (geocoding, places, routing)
+                   is about 1 credit. The Timezone API draws on the same pool.
+  COMMERCIAL       YES, EXPLICITLY. Their FAQ: "Yes, we do not restrict that."
+                   Condition: display "Powered by Geoapify" attribution.
+  WORTH IT?        Yes. Best all-round free geocoding option found: a real
+                   commercial grant, a workable daily quota, no card, and a
+                   timezone endpoint on the same key. Attribution is the price.
+
+  NAME             LocationIQ
+  DOCS             https://locationiq.com/pricing
+  AUTH             Access token
+  FREE LIMIT       Verified: 5,000 requests/day, 2 req/sec (also capped at
+                   60/min), one token.
+  COMMERCIAL       "Limited Commercial Use" per their own label: allowed with
+                   a required prominent link back to LocationIQ.com.
+  WORTH IT?        Yes, comparable to Geoapify with a higher daily cap and a
+                   lower per-second cap. Attribution mandatory.
+
+  NAME             OpenCage
+  DOCS             https://opencagedata.com/pricing  |  /faq
+  AUTH             API key, no card required
+  FREE LIMIT       Verified: 2,500 requests/day, 1 request/second, one key.
+  COMMERCIAL       NO. The free tier is explicitly a TRIAL for testing:
+                   usable "as long as you need for testing", but production
+                   or commercial deployment requires a paid plan ($50/mo+).
+                   Dormant trial accounts are deleted after 3 months.
+                   Attribution to OpenStreetMap is required on ALL tiers:
+                   "Geodata copyright OpenStreetMap contributors".
+  WORTH IT?        Development only. Do not ship on it.
+
+  NAME             Photon (Komoot public instance)
+  DOCS             https://photon.komoot.io/
+  AUTH             None
+  FREE LIMIT       None published. Official stance: "you can use the API for
+                   your project, but please be fair"; extensive usage is
+                   throttled; "We do not guarantee for the availability."
+  COMMERCIAL       Not restricted, but with no availability guarantee.
+  WORTH IT?        Self-host it (github.com/komoot/photon) and it is
+                   excellent and free. Do not depend on the shared instance.
+
+--------------------------------------------------------------------------------
+6.4  TIME ZONES
+--------------------------------------------------------------------------------
+
+  NAME             IANA tzdata via a local library  (Python zoneinfo, etc.)
+  AUTH             None. It is a local library, not a service.
+  FREE LIMIT       None.
+  COMMERCIAL       Yes.
+  WORTH IT?        Yes, and it should be the default. Timezone conversion is
+                   not a network problem. The Python worker has `zoneinfo` in
+                   the standard library. Reach for an API only if you need to
+                   resolve coordinates to a timezone, and even then Geoapify
+                   covers it on the key you already have.
+
+  NAME             timeapi.io
+  DOCS             https://timeapi.io/  |  /home/faqs
+  AUTH             Not evidently required
+  FREE LIMIT       No numeric limit published. FAQ: "TimeAPI is currently free
+                   to use for everyone", in beta, with a stated intent to keep
+                   "a generous free plan available for everyone" after paid
+                   tiers arrive.
+  COMMERCIAL       Not addressed. UNVERIFIED.
+  WORTH IT?        Works today, but it is pre-GA with no SLA and no stated
+                   commercial terms. Do not make it a dependency.
+
+  NAME             WorldTimeAPI
+  STATUS           DEAD. The site now reads "WorldTimeAPI has been sunset";
+                   operators cited unsustainable hosting costs after 7+ years.
+                   Any code or tutorial pointing at worldtimeapi.org is broken.
+
+--------------------------------------------------------------------------------
+6.5  CURRENCY EXCHANGE RATES
+--------------------------------------------------------------------------------
+
+  Relevant for normalising salary ranges across the multi-country job feeds
+  in section 4.
+
+  NAME             Frankfurter
+  DOCS             https://frankfurter.dev/   (frankfurter.app now redirects)
+  AUTH             NONE. No key, no account.
+  FREE LIMIT       NONE. Verbatim from their FAQ: "There are no quotas.
+                   Requests are rate-limited to prevent abuse, but there are
+                   no monthly or daily caps." (No specific req/sec published.)
+  COMMERCIAL       YES, EXPLICITLY. FAQ: "Yes, absolutely."
+                   No attribution required.
+  WORTH IT?        YES. Best entry in this section by a wide margin, and one
+                   of the cleanest free APIs in this entire document: no key,
+                   no quota, explicit commercial permission, no attribution,
+                   84 central bank sources, 201 currencies, history to 1948,
+                   and self-hostable via Docker if it ever goes away.
+
+  NAME             open.er-api.com  (ExchangeRate-API's open endpoint)
+  DOCS             https://www.exchangerate-api.com/docs/free
+  AUTH             None
+  FREE LIMIT       No numeric cap published. Rates update once per day;
+                   soft-throttled with a 429 and roughly 20 minutes of
+                   cooldown if abused. Intended usage: one call per 24h.
+  COMMERCIAL       Yes for conversion, personal and commercial. But
+                   REDISTRIBUTION OF THE RAW DATA IS NOT ALLOWED, and a
+                   specific HTML attribution snippet is required:
+                       <a href="https://www.exchangerate-api.com">Rates By
+                       Exchange Rate API</a>
+  WORTH IT?        Fine as a backup to Frankfurter. Frankfurter asks for less.
+
+  NAME             exchangerate.host
+  DOCS             https://exchangerate.host/pricing
+  STATUS           CHANGED. The old keyless community API is GONE; it is now
+                   an APILayer product requiring a key.
+  FREE LIMIT       100 requests/month. No card required.
+  COMMERCIAL       Unclear (APILayer terms).
+  WORTH IT?        No. Flagged here because a lot of existing code and a lot
+                   of LLM-generated snippets still call
+                   api.exchangerate.host/latest with no key. That is broken.
+
+  NAME             Fixer (APILayer)
+  DOCS             https://fixer.io/product
+  AUTH             API key
+  FREE LIMIT       100 API calls/month, hourly updates.
+  COMMERCIAL       Unclear. Their website ToS restricts SITE CONTENT to
+                   non-commercial use but does not address the API tier.
+  WORTH IT?        No. 100/month, and ambiguous terms, next to Frankfurter's
+                   unlimited-and-explicitly-commercial.
+
+--------------------------------------------------------------------------------
+6.6  REFERENCE DATA (COUNTRIES, HOLIDAYS)
+--------------------------------------------------------------------------------
+
+  NAME             restcountries.com   <-- BREAKING CHANGE, FLAGGING IT
+  DOCS             https://restcountries.com/plans
+  STATUS           The classic keyless v3.1 API IS GONE. restcountries.com/
+                   v3.1/... now redirects to a static legacy dump or errors.
+                   Current product is v5 and REQUIRES an API key
+                   (Authorization: Bearer <key>, or ?api-key=). A demo key
+                   `rc_live_demo` works without signup for testing.
+  FREE LIMIT       1,000 requests/month, 24h data sync, 2 keys. No card.
+  COMMERCIAL       Not restricted on the free tier per what is published, but
+                   bulk download, mirroring and offline copies are banned and
+                   caching is capped at 3 days.
+  WORTH IT?        Marginal. Country lists are static data: ship a JSON file.
+                   Listed mainly as a warning, because any existing code or
+                   generated snippet using the v3.1 keyless endpoint is now
+                   broken and will fail silently in a country dropdown.
+
+  NAME             Nager.Holidays  (formerly Nager.Date)
+  DOCS             https://nagerholidays.com/Api  (date.nager.at redirects)
+  BASE             /api/v4/Holidays/{CountryCode}/{Year}
+  AUTH             None for the hosted public API.
+  FREE LIMIT       Marketing states "No Rate Limits, unlimited queries".
+                   No formal numeric SLA published.
+  COMMERCIAL       Not explicitly restricted. Code is MIT
+                   (github.com/nager/Nager.Date), but note the MIT licence
+                   covers the CODE: the offline Docker/NuGet self-hosted
+                   deployment requires a separate sponsor licence key. The
+                   free keyless option is specifically the hosted API.
+  COVERAGE         200+ countries, subdivision (state/province) granularity.
+                   No city-level holidays; some Islamic holidays are excluded
+                   as not reliably predictable in advance.
+  WORTH IT?        Yes if you ever need "is this a public holiday where the
+                   recruiter is" for follow-up timing. Open, keyless, active.
+
+--------------------------------------------------------------------------------
+6.7  FILE STORAGE  (only if this app ever syncs)
+--------------------------------------------------------------------------------
+
+  NAME             Cloudflare R2
+  DOCS             https://developers.cloudflare.com/r2/pricing/
+  FREE LIMIT       Verified: 10 GB-month storage, 1M Class A operations/month,
+                   10M Class B operations/month. Key differentiator: EGRESS IS
+                   ALWAYS FREE on every tier, not just the free one.
+  COMMERCIAL       Yes.
+  WORTH IT?        Best free object storage for a desktop app, because egress
+                   is the cost that bites when users re-download their files.
+                   Note safety invariant #4 still applies: documents live on
+                   disk with paths and hashes in the DB, so any sync feature
+                   is storing user documents off-machine and needs its own
+                   consent flow, not just a bucket.
+
+  NAME             Backblaze B2
+  DOCS             https://www.backblaze.com/cloud-storage/pricing
+  FREE LIMIT       Verified: 10GB storage always free; egress free up to 3x
+                   average monthly stored data, then $0.01/GB; Class A/B/C API
+                   calls free; Class D 2,500/day free. Unlimited free egress
+                   via partner CDNs (Cloudflare, Fastly, bunny.net).
+  COMMERCIAL       Yes.
+  WORTH IT?        Good alternative. R2's unconditional free egress is simpler
+                   to reason about.
+
+--------------------------------------------------------------------------------
+6.8  ERROR TRACKING AND ANALYTICS  (a privacy decision, not just a quota)
+--------------------------------------------------------------------------------
+
+  For a local-first, privacy-positioned app, telemetry is a product decision
+  before it is a vendor decision. A crash report from this app can contain
+  file paths, company names, job URLs and error strings carrying user data.
+  Whatever you pick: scrub aggressively, make it opt-in, and say so.
+
+  NAME             Sentry (Developer plan)
+  DOCS             https://sentry.io/pricing/
+  FREE LIMIT       Verified: 5,000 errors/month, 5M spans, 50 replays/month,
+                   5GB logs, 5GB metrics, 1GB attachments, 30-day retention,
+                   unlimited projects, LIMITED TO 1 USER. New accounts get a
+                   14-day unlimited trial first.
+  CARD REQUIRED    No. Sentry's own docs: "The Developer plan is free and does
+                   not require a credit card", and it "does not support adding
+                   a credit card."
+  COMMERCIAL       Yes.
+  WORTH IT?        Yes for a solo developer. The 1-user cap is the constraint.
+
+  NAME             PostHog
+  DOCS             https://posthog.com/pricing
+  FREE LIMIT       Verified: 1M events/month, 5,000 session replays/month,
+                   1M feature flag requests/month, 100K error-tracking
+                   exceptions/month, 1 project, 1-year retention. NOT a trial:
+                   a permanent monthly allowance that resets, and usage simply
+                   halts at the cap rather than billing you.
+  CARD REQUIRED    No.
+  COMMERCIAL       Yes. Open source, and SELF-HOSTABLE, which is the relevant
+                   option here: it lets you get product analytics without user
+                   data leaving infrastructure you control.
+  WORTH IT?        Generous, but for this app the honest answer is that
+                   self-hosted or no analytics is more consistent with the
+                   product's own claims than shipping 1M events to a vendor.
+
+
+================================================================================
+7. WEB SEARCH APIS
+================================================================================
+
+--------------------------------------------------------------------------------
+7.1  THE STATE OF PLAY: THE TWO OBVIOUS ANSWERS ARE BOTH CLOSED
+--------------------------------------------------------------------------------
+
+  BING WEB SEARCH API
+      RETIRED 11 AUGUST 2025, announced mid-May 2025. Confirmed on
+      Microsoft's own lifecycle page: "Any existing instances of Bing Search
+      APIs will be decommissioned completely, and the product will no longer
+      be available to be used or new customer signup."
+      The retirement covered the ENTIRE family at once: Web, Image, Video,
+      News, Entity, Autosuggest, Spell Check, Visual Search, Custom Search.
+      Endpoints now return HTTP 410 Gone.
+      Microsoft's replacement is "Grounding with Bing Search" inside Azure AI
+      Agents ($14 per 1,000 transactions). It is NOT a drop-in: it returns
+      LLM-generated grounded answers rather than raw structured results, and
+      requires Azure AI Agent infrastructure.
+
+  GOOGLE PROGRAMMABLE SEARCH / CUSTOM SEARCH JSON API
+      CLOSED TO NEW CUSTOMERS. Google's own docs (last updated 2026-02-18)
+      state the API "is closed to new customers", and existing customers have
+      until 1 JANUARY 2027 to migrate. New GCP projects get a 403
+      PERMISSION_DENIED even after complete setup. The historic free tier was
+      100 queries/day then $5 per 1,000 up to 10,000/day.
+      Google points to Vertex AI Search, which is an enterprise product, not
+      a drop-in replacement.
+      ==> Do not build on this. It will not accept your signup and it sunsets
+          inside 16 months.
+
+  Consequence: every remaining option is either a paid SERP proxy with credits,
+  a self-hosted metasearcher, or a narrow special-purpose endpoint. There is no
+  longer a general-purpose, free, no-card web search API.
+
+--------------------------------------------------------------------------------
+7.2  WHAT IS ACTUALLY AVAILABLE
+--------------------------------------------------------------------------------
+
+  NAME             Tavily
+  DOCS             https://www.tavily.com/pricing
+  AUTH             API key
+  FREE LIMIT       Verified: 1,000 API credits/month on the Researcher plan,
+                   reset on the 1st, no rollover. Basic search = 1 credit,
+                   advanced = 2; extract/map/crawl cost more.
+  CARD REQUIRED    No. "No credit card required" stated explicitly.
+  COMMERCIAL       Not addressed on the pricing page. UNVERIFIED.
+  WORTH IT?        Best genuinely-free option here. Built for agent use
+                   (returns cleaned content, not just links), clearly
+                   documented, recurring monthly quota, no card. Default pick.
+
+  NAME             Exa
+  DOCS             https://exa.ai/pricing
+  AUTH             API key
+  FREE LIMIT       Verified: $20 in free credits on signup (about 2,800
+                   searches), then a Free Tier adding $10 in credits every
+                   month. Pay-as-you-go, no subscription or minimum.
+  CARD REQUIRED    Not stated on the pricing page. UNVERIFIED.
+  COMMERCIAL       Not addressed on the pricing page. UNVERIFIED.
+  WORTH IT?        Yes. Generous signup grant plus a real recurring monthly
+                   credit. Semantic/neural search, so it is better than
+                   keyword SERPs for "find pages about this company's culture"
+                   and worse for exact-string lookups.
+
+  NAME             Serper.dev
+  DOCS             https://serper.dev/
+  AUTH             API key
+  FREE LIMIT       2,500 free queries, ONE-TIME signup grant, not recurring.
+                   Paid is prepaid packs at roughly $0.30-$1.00 per 1,000
+                   (third-party figures as of Aug 2026; serper.dev/pricing was
+                   intermittently 404ing, so reconfirm in-dashboard).
+  CARD REQUIRED    No. "No credit card required" on the page.
+  COMMERCIAL       Not addressed. UNVERIFIED.
+  WORTH IT?        Cheapest Google-SERP proxy once past the trial. 2,500 free
+                   queries is a generous evaluation but it does not recur.
+
+  NAME             Brave Search API
+  DOCS             https://brave.com/search/api/
+  AUTH             API key via X-Subscription-Token header
+  FREE LIMIT       THE FREE PLAN IS GONE. Brave removed the old free tier
+                   (2,000 queries/month, no card) in FEBRUARY 2026. Every plan
+                   is now postpaid and includes $5 in free credits every month
+                   (about 1,000 Search queries at $5/1,000, 50 req/sec cap).
+                   Credits do not roll over.
+  CARD REQUIRED    YES, ALWAYS. Their FAQ frames it as an anti-fraud measure
+                   that "will not be charged" within the credit, but it is
+                   mandatory to sign up at all.
+  COMMERCIAL       Yes, but storing results or using them to train a model
+                   requires a specific plan.
+  WORTH IT?        No longer a free tier, and a mandatory card in a desktop
+                   app's setup flow is a real friction cost. About 1,000
+                   queries/month effective ceiling.
+
+  NAME             DuckDuckGo Instant Answer API
+  DOCS             https://duckduckgo.com/api
+  AUTH             None, no key
+  FREE LIMIT       No published numeric limit; undocumented soft throttling.
+  COMMERCIAL       NO BY DEFAULT. Their terms require EMAIL APPROVAL FROM
+                   DUCKDUCKGO before any commercial use, plus attribution to
+                   both DuckDuckGo and the underlying source, plus an app
+                   identifier on every request (&t=nameofapp).
+  BIG CAVEAT       IT IS NOT A WEB SEARCH API. It returns only Instant Answer
+                   content: abstracts and definitions for well-known entities.
+                   Most long-tail queries return an empty result. It is
+                   routinely and wrongly recommended as a free Google
+                   substitute. It is not one.
+  WORTH IT?        No, for this use case.
+
+  NAME             SearXNG  (self-hosted metasearch)
+  DOCS             https://docs.searxng.org/  |  https://searx.space/
+  AUTH             None (you run it)
+  FREE LIMIT       Unlimited if self-hosted. Aggregates 70+ upstream engines.
+                   PUBLIC INSTANCES (searx.space) are third-party operated,
+                   rate-limited and bot-detected by design (the built-in
+                   limiter + botdetection subsystem), and searx.space itself
+                   warns public instances "may yield less accurate results as
+                   they have much higher traffic" and are more likely to be
+                   blocked upstream. No common ToS: each admin sets their own.
+  COMMERCIAL       The software is AGPL and self-hosting has no usage cap. But
+                   self-hosting means YOU are now the party scraping Google
+                   and Bing, and you inherit THEIR terms. Relying on someone
+                   else's public instance for commercial traffic is explicitly
+                   discouraged by the project.
+  WORTH IT?        Only if you self-host and accept the upstream-ToS position.
+                   Do not point a shipping product at a public instance.
+
+  NAME             Marginalia Search
+  DOCS             https://about.marginalia-search.com/article/api/
+  AUTH             API-Key header. `public` is a usable shared demo key.
+  FREE LIMIT       The `public` key needs no signup but shares a GLOBAL rate
+                   limit across all users and returns 503 when exceeded, and
+                   cannot use custom filters. A free personal key with a
+                   higher limit is issued by emailing them.
+  COMMERCIAL       The free/personal key is CC-BY-NC-SA 4.0, i.e. NON-
+                   COMMERCIAL. A paid metered commercial key removes that
+                   restriction and the attribution requirement.
+  WORTH IT?        Interesting independent index (good for finding non-SEO
+                   content), but the free path is non-commercially licensed.
+
+  NAME             Mojeek Web Search API
+  DOCS             https://www.mojeek.com/services/search/web-search-api/
+  AUTH             API key, Stripe pay-as-you-go
+  FREE LIMIT       NO ongoing free tier. Only "a free trial version, with
+                   limited queries, get in touch" (quota unspecified,
+                   request-only). Cheapest real plan is GBP 2 per 1,000.
+  COMMERCIAL       Yes on paid plans.
+  WORTH IT?        Not a free-tier option. Listed so you do not chase it.
+
+  RELEVANCE TO THIS APP
+      Applyocalypse does not obviously need general web search. Company
+      research is better served by the structured, free, durable sources in
+      section 5 (SEC EDGAR, Companies House, Wikidata) than by a metered SERP
+      proxy, and those have no commercial-use ambiguity. If you do add search,
+      Tavily's 1,000 credits/month with no card is the cleanest fit, and it
+      should be an enrichment that degrades to nothing (see 8.5), never a
+      blocking step in the apply flow.
+
+
+================================================================================
+8. CAVEATS, TOS TRAPS AND PRIVACY WARNINGS
+================================================================================
+
+--------------------------------------------------------------------------------
+8.1  RATE-LIMIT PATTERNS
+--------------------------------------------------------------------------------
+
+  * READ ALL THE DIMENSIONS. Providers advertise the flattering one. JSearch
+    quotes "1,000 requests/hour" next to a 200 requests/MONTH cap. Groq's
+    1,000 RPD looks generous until you notice the 8,000 TPM ceiling that
+    actually binds on long documents. Always find the tightest dimension.
+
+  * THE LIMIT IS USUALLY GLOBAL, NOT PER KEY. OpenRouter says it plainly:
+    "we govern capacity globally", so extra accounts do not multiply it.
+    Groq enforces at ORGANISATION level. Google enforces per PROJECT, not
+    per key.
+
+  * EXPONENTIAL BACKOFF WITH JITTER, ALWAYS. On 429, honour Retry-After when
+    present (Groq sends it only on 429s). Retrying immediately on a daily-cap
+    429 just burns quota. Distinguish a per-minute 429 (retry) from a
+    per-day 429 (stop until reset, and tell the user).
+
+  * KNOW WHEN THE DAY RESETS. Google resets at midnight Pacific. Cloudflare
+    resets at 00:00 UTC. If you schedule background work, do not schedule it
+    right before a reset boundary.
+
+  * CACHE AGGRESSIVELY, AND PERSIST THE CACHE. This app already has SQLite.
+    A job posting fetched from an ATS board does not change minute to minute;
+    Jobicy explicitly delays 6 hours and Remotive 24 hours, so polling faster
+    than that gains you nothing but a ban.
+
+  * SELF-THROTTLE WHERE NO LIMIT IS PUBLISHED. "No documented rate limit" is
+    not "no rate limit". It means the limit is undocumented and enforcement is
+    at their discretion. The Greenhouse/Lever/Ashby endpoints are all in this
+    category. A sane default: 1-2 req/s per host, serial per company.
+
+--------------------------------------------------------------------------------
+8.2  KEY ROTATION ETHICS  (short section, firm line)
+--------------------------------------------------------------------------------
+
+  DO NOT rotate keys to defeat a rate limit. Creating multiple accounts to
+  multiply a free quota violates essentially every ToS in this document,
+  is explicitly called out by OpenRouter and Groq, is detectable, and ends
+  with the provider killing the free tier for everyone. cheahjs's list opens
+  with exactly this plea: "Please don't abuse these services, else we might
+  lose them."
+
+  DO NOT use a credential you found rather than one you were issued. Leaked
+  keys in public repos are a discovery signal that an API exists (see 1.2b),
+  never a credential. Using one is unauthorised access and bills a stranger.
+
+  LEGITIMATE rotation, all of which is fine:
+    - The USER supplies their own key for their own account. This is the
+      correct model for a local-first desktop app, and it is what this app
+      already does for LLM providers in Settings.
+    - Failing over between DIFFERENT providers when one is exhausted.
+    - Rotating your own key on a schedule for security hygiene.
+
+--------------------------------------------------------------------------------
+8.3  PRIVACY: THE ONE THAT ACTUALLY MATTERS FOR THIS APP
+--------------------------------------------------------------------------------
+
+  >>> READ THIS BEFORE WIRING ANY FREE LLM TIER INTO THE TAILORING PATH. <<<
+
+  A resume is one of the densest packets of personal data a person owns:
+  full legal name, home address, phone, personal email, complete employment
+  history, education, and often enough to infer age, nationality, and
+  immigration status. A cover letter frequently adds health, caring
+  responsibilities, or reasons for leaving a job. Applyocalypse also handles
+  EEO and criminal-history answers.
+
+  Sending that to a free LLM tier is, in the general case, sending it to be
+  trained on and read by strangers.
+
+  THE EXPLICIT CASE, quoted from Google's Gemini API Additional Terms:
+
+      "Google uses the content you submit to the Services and any generated
+       responses to provide, improve, and develop Google products and
+       services and machine learning technologies."   [Unpaid Services]
+
+      "human reviewers may read, annotate, and process your API input and
+       output"
+
+      "Do not submit sensitive, confidential, or personal information to the
+       Unpaid Services."                               [Google's own bold]
+
+      "You may use only Paid Services when making API Clients available to
+       users in the European Economic Area, Switzerland, or the United
+       Kingdom."
+
+  Read those four together. Google is telling you, in its own terms, that
+  the free tier is not for personal data, and that you may not serve EU, UK
+  or Swiss users on it at all. A resume is personal data. This is not a grey
+  area, and "the user consented" does not fix it if the user is in the EEA,
+  because the restriction there is on YOU, not on them.
+
+  Note the geographic nuance in Google's favour: for users located in the
+  EEA, Switzerland or the UK, Google applies PAID-tier data handling even to
+  free quota. But the prohibition on serving EEA/CH/UK users via free
+  Services stands regardless.
+
+  OTHER PROVIDERS, SAME SHAPE:
+    Mistral       Free-mode prompts may be used to train Mistral models
+                  UNLESS YOU OPT OUT. Default is opt-in to training on the
+                  free tier. Verify the toggle before sending anything real.
+    OpenRouter    Separate free/paid toggles for "providers that may train".
+                  If you refuse training, OpenRouter will not route to
+                  training providers, which shrinks or empties the free pool.
+                  In effect, the free models are free because of the data.
+    Kilo Gateway  "All free models may use your prompts for training."
+    OpenCode Zen  "Free models may use data for improvement."
+    NVIDIA NIM    Serving real end-users is not permitted without a paid
+                  enterprise licence, so the question does not arise.
+    Groq          Notably clean: API Customer Data is carved out of the
+                  privacy policy and governed by a Services Agreement and
+                  DPA (processor terms). No free-vs-paid training split
+                  found. This is the exception, not the rule.
+
+  THE RULE TO ENCODE IN THE PRODUCT:
+    1. NEVER send resume, cover-letter, or profile content to a free tier
+       that trains on input. Not by default, not opportunistically, not
+       "just for the fast JD-analysis path" if the JD prompt carries any
+       profile context.
+    2. If a free tier is offered at all, it must be an explicit, informed,
+       per-provider user choice with the training language shown verbatim,
+       not buried in a settings tooltip. The user is consenting to Google
+       training on their resume. Say that, in those words.
+    3. Segment by sensitivity. Public JD text is not personal data; sending
+       a scraped job description to a free tier is defensible. Sending the
+       user's resume is not. If the codebase cannot cleanly distinguish
+       those two paths, it cannot safely use a free tier at all.
+    4. For EEA/UK/CH users, do not use Google's free tier. This is a
+       jurisdiction check, not a preference.
+    5. Prefer local inference for anything touching the profile. See 9.
+    6. This is also true of NON-LLM APIs. Do not send a user's email address
+       to a free verification API without disclosure; you have just told a
+       third party that this person exists and is job hunting.
+
+  SECONDARY LEAK, EASY TO MISS: query patterns are data. Repeatedly asking a
+  free company-enrichment API about "Acme Corp" from one IP tells that vendor
+  someone is applying to Acme. Aggregated, that is a saleable signal about a
+  named individual's job search. A local-first product should care about that.
+
+--------------------------------------------------------------------------------
+8.4  TOS TRAPS: WHICH FREE TIERS ACTUALLY BAN OR RESTRICT COMMERCIAL USE
+--------------------------------------------------------------------------------
+
+  HARD NO ON THE FREE TIER
+    OpenCorporates   Free access is for open-data projects publishing under
+                     their open/share-alike licence. Commercial needs paid.
+    NVIDIA NIM       Production use, explicitly including serving real end
+                     users, requires an NVIDIA AI Enterprise licence.
+    Crunchbase       No free tier exists at all any more.
+    ConvertAPI       Free trial "is only offered for testing and development
+                     purposes, and shall not be used for any other purposes".
+    OpenCage         Free tier is testing only; production needs a paid plan.
+    Marginalia       Free key is CC-BY-NC-SA 4.0, i.e. non-commercial.
+    DuckDuckGo IA    Requires written email approval before commercial use.
+    Nominatim        Reselling geocoding results forbidden; a service whose
+                     core function is geocoding "must run their own service".
+
+  TIME-LIMITED, NOT A TIER
+    Adzuna           Commercial/government/academic orgs get a 14-DAY TRIAL
+                     to validate coverage and usability. Ongoing use, and any
+                     aggregate use (vacancy counts, average salaries),
+                     requires written permission.
+    Jooble           500 requests LIFETIME per key.
+    All "trial credit" LLM providers in 3.3.
+
+  RESTRICTED PURPOSE
+    USAJOBS          Data is for "the explicit use of the requesting company
+                     identified on the API Registration Form, and no other
+                     use of the data is permitted."
+    The Muse         No reselling or sublicensing; link-back required.
+    Reed             Site policies bar copying "for any commercial or
+                     business use"; no separate API ToS found.
+    Indeed (historic) Display-only; storing listings or using them for
+                     analytics was prohibited even when the API existed.
+
+  DISPUTED / VERIFY YOURSELF
+    Cohere           Rate-limits page says only "evaluation keys"; a major
+                     community list says "non-commercial use only". Unresolved.
+    Arbeitnow        Their own terms require a backlink AND bar commercial
+                     use of materials. Self-contradictory.
+    Abstract API     Enterprise tier "adds a commercial license", implying
+                     something about the free one. Ask them.
+
+  FREE, BUT ONLY WITH VISIBLE ATTRIBUTION (a UI requirement, plan for it)
+    RemoteOK         A DOFOLLOW backlink, explicitly not nofollow, plus a
+                     "Remote OK" source mention. Non-compliance = suspension.
+    Remotive         Credit and link back, or access may be terminated.
+    Jobicy           Attribution plus canonical URLs.
+    The Muse         Link back to The Muse.
+    logo.dev         Visible link back to Logo.dev for commercial free use.
+    O*NET            CC BY 4.0 credit plus a prominent link to O*NET Web
+                     Services. Paid or registration-gated apps need extra
+                     permission.
+    OpenStreetMap /  Attribution required (OSMF guidelines, ODbL).
+      Nominatim
+    OpenCage         Must credit OpenStreetMap, not OpenCage:
+                     "Geodata copyright OpenStreetMap contributors".
+                     Applies on PAID tiers too.
+    Geoapify         "Powered by Geoapify".
+    LocationIQ       Prominent link back to LocationIQ.com.
+    ExchangeRate-API A specific HTML snippet: "Rates By Exchange Rate API".
+                     (Frankfurter, by contrast, requires nothing.)
+    DuckDuckGo IA    Credit DuckDuckGo AND the underlying source, plus an
+                     app identifier (&t=nameofapp) on every request.
+    Wikipedia        CC BY-SA attribution (Wikidata itself is CC0, no
+                     attribution required).
+
+  REDISTRIBUTION BANS WORTH NOTING
+    Jobicy, Remotive Explicitly ban republishing their listings to Jooble,
+                     Neuvoo, Google Jobs or LinkedIn Jobs. Remotive also bans
+                     putting listings behind a signup wall. Applyocalypse is
+                     not an aggregator, so this is fine, but do not build a
+                     "share this job" feature that reposts.
+
+--------------------------------------------------------------------------------
+8.5  DESIGNING SO A VANISHED FREE API DEGRADES GRACEFULLY
+--------------------------------------------------------------------------------
+
+  Assume every free API in this document will, within 24 months, either
+  disappear, add a card requirement, or cut its quota by 10x. GitHub Models
+  and Clearbit both did exactly this inside the last 12 months. Design for it.
+
+  1. ONE ADAPTER INTERFACE PER CAPABILITY, NOT PER VENDOR.
+     The capability is "enrich a company", not "call Clearbit". The app
+     already does this correctly for ATS adapters; use the same shape.
+     A vendor should be deletable in one file.
+
+  2. EVERY ENRICHMENT IS OPTIONAL BY CONSTRUCTION.
+     If the company-logo call fails, the application still submits. Model
+     enrichment as a nullable column populated by a background job, never as
+     a precondition in the apply path. Ask of each integration: "if this
+     returns 500 forever starting tomorrow, what breaks?" If the answer is
+     "the core flow", it is not an enrichment, it is a dependency, and a free
+     tier is the wrong place for it.
+
+  3. NEVER LET A THIRD PARTY BLOCK THE USER.
+     Hard timeouts (2-5s), a circuit breaker that opens after N consecutive
+     failures and stays open for minutes, and a UI that shows the feature as
+     unavailable rather than spinning. A local-first app that hangs on a
+     dead API has thrown away its main advantage.
+
+  4. CACHE FOREVER, EXPIRE LAZILY.
+     Persist every response in SQLite with a fetched_at. When the API dies,
+     the cache is now your dataset and the feature degrades to "slightly
+     stale" instead of "gone". This is the single highest-leverage mitigation
+     and it costs almost nothing.
+
+  5. HAVE A NAMED FALLBACK CHAIN, AND TEST IT.
+     For each capability write down primary -> secondary -> local -> none.
+     Then actually run with the primary disabled, in CI if possible. An
+     untested fallback is not a fallback.
+
+  6. HEALTH-CHECK AND SURFACE IT.
+     A lightweight periodic probe per provider, with the result visible in
+     Settings. When a user reports "company info stopped working", you want
+     to already know it was the vendor.
+
+  7. VERSION AND DATE YOUR ASSUMPTIONS IN CODE.
+     A comment near each client with the limit, the ToS date, and the URL you
+     read. When it breaks in 18 months, that comment is the whole
+     investigation.
+
+  8. PREFER THE DURABLE TIER WHEN THE QUALITY GAP IS SMALL.
+     Government APIs and local inference do not get acquired. Where a
+     government source is 80% as good as a startup's, take the government
+     source. See the shortlist.
+
+  9. USER-SUPPLIED KEYS ARE A FEATURE, NOT A COMPROMISE.
+     This app already stores LLM keys via safeStorage. Extending that pattern
+     to other providers means quota is the user's, ToS is between them and
+     the vendor, and the app ships no shared secret. For a local-first
+     desktop product this is the correct default for anything metered.
+
+
+================================================================================
+9. RECOMMENDED SHORTLIST FOR APPLYOCALYPSE SPECIFICALLY
+================================================================================
+
+What I would actually wire up, in priority order, and why.
+
+TIER 1: WIRE THESE UP. High value, free, durable, no privacy problem.
+
+  1. GREENHOUSE JOB BOARD API  (+ Lever, + Ashby)
+     https://boards-api.greenhouse.io/v1/boards/{token}/jobs?questions=true
+     WHY: This is the best single find for this codebase. No auth, no key,
+     no quota, and Greenhouse returns a MACHINE-READABLE SCHEMA OF THE EXACT
+     FORM the worker is about to fill, including field types, required flags,
+     select options, file-upload fields, and separately-labelled EEOC and
+     demographic question blocks.
+     Concretely: you can pre-plan a fill and pre-flag every EEO question as
+     requires_review BEFORE launching a browser, which is a direct, cheap
+     reinforcement of safety invariant #2 rather than a detection heuristic
+     applied to rendered DOM. You can also detect an unfillable posting
+     early. The app already has per-ATS adapters, so the board slug is a key
+     you can derive from the job URL the user already pastes: no list to
+     maintain, no scraping, no ToS question.
+     Add Lever and Ashby for listing metadata (Ashby's descriptionPlain and
+     structured compensation are notably good for JD analysis).
+
+  2. LOCAL INFERENCE VIA OLLAMA, AS THE DEFAULT FOR PROFILE-TOUCHING WORK
+     https://ollama.com/
+     WHY: It is the only option in this document with zero cost, zero rate
+     limit, zero ToS risk, zero vendor mortality AND zero data exposure. For
+     a local-first, privacy-focused product, running resume tailoring against
+     a local model is not a budget compromise, it is the product thesis.
+     Section 8.3 is the argument: every mainstream free LLM tier either
+     trains on input, requires opting out of training, or forbids the use.
+     Local has none of those problems. Position hosted providers as an opt-in
+     quality upgrade with the training terms shown verbatim, and keep local
+     as the default for anything containing the user's data.
+
+  3. SEC EDGAR + WIKIDATA + UK COMPANIES HOUSE  (company research)
+     https://data.sec.gov/ | wikidata.org | developer.company-information...
+     WHY: The company-research feature is exactly where a startup free tier
+     would betray you, and it is exactly where government data is strongest.
+     Free, no commercial-use restriction, generous limits (10 req/s, 600 per
+     5 min), public-domain or CC0 licensing, and institutionally funded so
+     they will outlive the app. Covers filings, financials, officers,
+     founding date, industry, HQ. Add the still-free Clearbit Autocomplete
+     API (600 req/min, no key) purely to resolve a typed company name to a
+     domain, which is the awkward first step everything else depends on.
+
+  4. O*NET WEB SERVICES  (job-title and skills normalisation)
+     https://services.onetcenter.org/
+     WHY: 50,000 requests/day free, exact and documented, and it gives you a
+     stable occupational vocabulary to normalise wildly inconsistent job
+     titles and to map JD requirements to a canonical skills taxonomy. That
+     makes tailoring and matching measurably better without an LLM call.
+     Watch the ToS clause about registration-gated or paid apps if
+     Applyocalypse ever grows a paid tier.
+
+TIER 2: WORTH ADDING, WITH CONDITIONS.
+
+  5. JOBICY (+ REMOTIVE, + REMOTEOK)  (job discovery)
+     WHY: Jobicy is the only free job feed found with an EXPLICIT, broad
+     commercial grant naming "AI products" and "internal applications" as
+     permitted uses. No key, 200 jobs/request. Remotive and RemoteOK extend
+     coverage cheaply. All three cost a visible attribution link, which is
+     a small, honest price. Note RemoteOK requires a DOFOLLOW link
+     specifically.
+     Skip Adzuna and JSearch for shipping: Adzuna's free key is a 14-day
+     commercial trial and JSearch is 200 requests/month.
+
+  6. GROQ, AS THE HOSTED LLM FALLBACK  (not the default)
+     WHY: Of the hosted free tiers, Groq has the cleanest data posture:
+     API Customer Data sits under a Services Agreement and DPA rather than
+     being swept into product improvement, and no free-vs-paid training
+     split was found. Combined with 1,000 RPD and the fastest inference
+     available, it is the right hosted fallback when local inference is
+     unavailable or too slow. Mind the 8,000 TPM ceiling: chunk long
+     documents rather than sending a whole resume in one prompt.
+     Pair with OpenRouter as the abstraction layer so swapping providers is
+     a config change, not a rewrite. Note OpenRouter's own free models are
+     only 50 req/day until a one-time $10 credit purchase raises it to
+     1,000/day, which is the best value-per-dollar on this page.
+
+  7. HUNTER.IO OR REOON  (contact finding / email verification)
+     WHY: If the app verifies a recruiter email, Hunter's 50 credits/month
+     covers both finding and verification with the clearest terms; Reoon's
+     600/month is the most generous pure-verification allowance.
+     BUT FIRST: do syntax + MX + disposable-domain checking LOCALLY (see the
+     self-hosted list in 5.2). It is free, instant, leaks nothing, and
+     catches most bad addresses. Only escalate to an API for the residual,
+     and disclose it. Also note SMTP-probe accuracy against Gmail/Outlook/
+     Yahoo has degraded badly across all vendors, so the marginal value of
+     the paid check is lower than it looks.
+
+  8. LOCAL DOCUMENT TOOLING INSTEAD OF A CONVERSION OR OCR API
+     Tesseract (Apache 2.0) + LibreOffice headless (MPL 2.0), or Gotenberg
+     (MIT) if you want a service boundary.
+     WHY: The hosted alternatives are both small and legally awkward.
+     CloudConvert gives 10 credits/DAY shared across every user of a shared
+     key, with no DPA on the free tier. ConvertAPI's own terms forbid
+     production use outright. And both mean uploading the user's resume, the
+     exact thing section 8.3 says not to do. Local tooling has no quota, no
+     key, no ToS, and no data exposure. The only cost is packaging, which is
+     a problem this app already solves for the Python worker.
+     Keep OCR.space (25,000 req/month, explicitly commercial-friendly) as the
+     documented fallback for scans that Tesseract handles badly, gated behind
+     the same disclosure as any other upload.
+
+  9. FRANKFURTER, IF SALARIES EVER NEED NORMALISING ACROSS CURRENCIES
+     https://frankfurter.dev/
+     WHY: No key, no quota, explicit commercial permission, no attribution,
+     84 central-bank sources, self-hostable. It is the single cleanest free
+     API in this document and it costs nothing to adopt. Only wire it up if
+     the multi-country job feeds in 4.2 actually surface foreign salaries.
+
+DELIBERATELY NOT RECOMMENDED
+
+  Google Gemini free tier   Best free model, but its own terms say do not
+                            submit personal information and forbid serving
+                            EEA/UK/CH users on free Services. Disqualifying
+                            for the tailoring path. Fine for public JD text
+                            only, if you can guarantee no profile context
+                            leaks into that prompt.
+  NVIDIA NIM                Serving real end-users needs a paid enterprise
+                            licence.
+  OpenCorporates            Free tier bans commercial use outright.
+  Crunchbase                No free tier exists.
+  Adzuna / JSearch / Jooble Trial windows and micro-quotas, not tiers.
+  Indeed / LinkedIn         Closed. Do not plan around them at any price
+                            you would pay.
+  GitHub Models             Retired July 2026. Delete any reference.
+  Bing Search API           Retired August 2025, entire family, HTTP 410.
+  Google Custom Search      Closed to new customers; full sunset Jan 1 2027.
+  Brave Search API          Free plan removed Feb 2026; card now mandatory.
+  restcountries v3.1        Keyless endpoint gone; v5 needs a key. Any code
+                            still calling v3.1 is silently broken.
+  WorldTimeAPI              Sunset. Use a local tz library.
+  CloudConvert/ConvertAPI   See shortlist item 8. Use local tooling.
+  Z AI / Chutes             Unclear terms and, for Z AI, a China-hosted
+                            endpoint receiving resume content.
+
+ONE ARCHITECTURAL NOTE
+  Everything above metered belongs behind the existing user-supplied-key
+  pattern (safeStorage-encrypted in SQLite settings, handed to the worker
+  via the 0600 temp file, never via child-process env). Shipping a shared
+  key in a desktop binary means shipping a secret to every user and pooling
+  every user's quota into one bucket that the first heavy user exhausts.
+  User-supplied keys also put the ToS relationship between the user and the
+  vendor, which is where several of the restrictions in 8.4 stop mattering.
+
+
+================================================================================
+10. SOURCES
+================================================================================
+
+Every URL read or consulted for this document.
+(Three URLs below exceed the 100-column guide used everywhere else in this
+file. URLs cannot be wrapped without breaking them, so they are unindented
+and left whole.)
+
+DIRECTORIES AND METHODOLOGY
+  https://github.com/public-apis/public-apis
+  https://raw.githubusercontent.com/public-apis/public-apis/master/README.md
+  https://apis.guru/
+  https://api.apis.guru/v2/metrics.json
+  https://freepublicapis.com/
+  https://www.postman.com/explore
+  https://learning.postman.com/docs/postman-api-network/explore/overview
+  https://rapidapi.com/collection/list-of-free-apis
+  https://apilist.fun/
+  https://github.com/api-evangelist/programmableweb
+  https://apievangelist.com/2022/10/15/programmableweb-is-shutting-down/
+  https://en.wikipedia.org/wiki/ProgrammableWeb
+  https://catalog.data.gov/
+  https://data.europa.eu/en/faq
+  https://data.europa.eu/api/hub/search/
+  https://scrapfly.io/blog/posts/how-to-scrape-hidden-apis
+  https://inspectelement.org/apis.html
+  https://www.scrapingbee.com/blog/is-web-scraping-legal/
+  https://www.browserless.io/blog/is-web-scraping-legal
+  https://www.termsfeed.com/blog/web-scraping-laws/
+
+FREE LLM / AI APIS
+  https://github.com/cheahjs/free-llm-api-resources
+  https://github.com/mnfst/awesome-free-llm-apis
+  https://ai.google.dev/gemini-api/docs/rate-limits
+  https://ai.google.dev/gemini-api/terms
+  https://console.groq.com/docs/rate-limits
+  https://groq.com/privacy-policy
+  https://openrouter.ai/docs/api-reference/limits
+  https://openrouter.ai/docs/features/privacy-and-logging
+  https://www.cerebras.ai/pricing
+  https://inference-docs.cerebras.ai/support/pricing
+  https://mistral.ai/pricing
+  https://docs.mistral.ai/
+  https://developers.cloudflare.com/workers-ai/platform/pricing/
+  https://docs.cohere.com/docs/rate-limits
+  https://huggingface.co/docs/inference-providers/en/pricing
+  https://build.nvidia.com/
+  https://developer.nvidia.com/nim
+  https://api-docs.deepseek.com/quick_start/pricing
+  https://ollama.com/
+  https://docs.github.com/en/github-models/use-github-models/prototyping-with-ai-models
+      (documents the full retirement of GitHub Models on 2026-07-30)
+
+JOB AND CAREER DATA
+  https://developer.adzuna.com/
+  https://developer.adzuna.com/overview
+  https://developer.adzuna.com/docs/search
+  https://developer.adzuna.com/docs/terms_of_service
+  https://jooble.org/api/about
+  https://developer.usajobs.gov/
+  https://developer.usajobs.gov/guides/rate-limiting
+  https://www.reed.co.uk/developers
+  https://www.reed.co.uk/developers/jobseeker
+  https://www.themuse.com/developers/api/v2
+  https://www.themuse.com/developers/api/v2/terms
+  https://findwork.dev/api/
+  https://remotive.com/api/remote-jobs
+  https://github.com/remotive-com/remote-jobs-api
+  https://remoteok.com/api
+  https://www.arbeitnow.com/api/job-board-api
+  https://www.arbeitnow.com/terms
+  https://github.com/Jobicy/remote-jobs-api
+  https://jobicy.com/api/v2/remote-jobs
+  https://himalayas.app/docs/remote-jobs-api
+  https://rapidapi.com/letscrape-6bRBa3QguO5/api/jsearch
+  https://github.com/careerjet/careerjet-api-client-python
+  https://www.careerjet.com/partners/api/
+  https://www.whatjobs.com/affiliates
+  https://docs.greenhouse.io/job-board.html
+  https://github.com/lever/postings-api
+  https://developers.ashbyhq.com/docs/public-job-posting-api
+  https://developers.smartrecruiters.com/docs/posting-api
+  https://docs.recruitee.com/reference/intro-to-careers-site-api
+  https://developer.personio.de/v1.0/reference/get_xml
+  https://docs.teamtailor.com/
+  https://help.workable.com/  (articles 115013356548, 115012771647)
+  https://github.com/Feashliaa/job-board-aggregator
+  https://github.com/plibither8/jobber
+  https://github.com/adgramigna/job-board-scraper
+  https://www.bls.gov/developers/api_faqs.htm
+  https://services.onetcenter.org/
+  https://services.onetcenter.org/terms/
+  https://www.onetcenter.org/license_db.html
+  https://cavuno.com/blog/ats-platforms-public-job-posting-apis
+  https://jobspipe.dev/blog/indeed-api-key
+https://www.getphyllo.com/post/linkedin-api-access-in-2026-partner-program-approval-timeline-alternatives
+
+COMPANY / ENRICHMENT / CONTACT
+  https://clearbit.com/
+  https://developers.hubspot.com/changelog/upcoming-sunset-of-clearbits-free-logo-api
+https://help.clearbit.com/hc/en-us/articles/8502992633111-Autocomplete-Name-to-Domain-and-Risk-API-FAQ
+  https://hunter.io/pricing
+  https://www.apollo.io/pricing
+  https://support.peopledatalabs.com/hc/en-us/articles/25794271805211-Pricing-credits
+  https://data.crunchbase.com/docs/using-the-api
+  https://api.opencorporates.com/documentation/API-Reference
+  https://developer.company-information.service.gov.uk/
+  https://developer-specs.company-information.service.gov.uk/guides/rateLimiting
+  https://www.sec.gov/os/accessing-edgar-data
+  https://www.wikidata.org/wiki/Wikidata:Data_access
+  https://www.mediawiki.org/wiki/Wikimedia_APIs/Rate_limits
+  https://brandfetch.com/developers
+  https://docs.brandfetch.com/brand-api/overview
+  https://logo.dev/pricing
+  https://www.abstractapi.com/api/company-enrichment
+  https://www.abstractapi.com/api/email-verification-validation-api
+  https://www.zerobounce.net/pricing/
+  https://mailboxlayer.com/product
+  https://www.reoon.com/email-verifier/
+  https://emailverifier.reoon.com/register/
+  https://www.neverbounce.com/pricing
+  https://www.neverbounce.com/help/how-do-the-1000-free-credits-work
+  https://numverify.com/product
+  https://github.com/reacherhq/check-if-email-exists
+  https://github.com/AfterShip/email-verifier
+  https://github.com/JoshData/python-email-validator
+  https://github.com/FGRibreau/mailchecker
+
+UTILITY AND WEB SEARCH
+  https://brave.com/search/api/
+  https://api-dashboard.search.brave.com/app/plans
+  https://api-dashboard.search.brave.com/app/documentation/web-search/get-started
+  https://www.tavily.com/pricing
+  https://docs.tavily.com/documentation/api-credits
+  https://serper.dev/
+  https://exa.ai/pricing
+  https://developers.google.com/custom-search/v1/overview
+  https://duckduckgo.com/api
+  https://learn.microsoft.com/en-us/lifecycle/announcements/bing-search-api-retirement
+  https://docs.searxng.org/admin/searx.limiter.html
+  https://searx.space/
+  https://about.marginalia-search.com/article/api/
+  https://www.mojeek.com/services/search/web-search-api/
+  https://www.mojeek.com/support/api/
+  https://operations.osmfoundation.org/policies/nominatim/
+  https://opencagedata.com/pricing
+  https://opencagedata.com/credits
+  https://opencagedata.com/faq
+  https://photon.komoot.io/
+  https://github.com/komoot/photon
+  https://www.geoapify.com/pricing/
+  https://apidocs.geoapify.com/docs/timezone/
+  https://locationiq.com/pricing
+  https://frankfurter.dev/
+  https://www.exchangerate-api.com/docs/free
+  https://exchangerate.host/pricing
+  https://fixer.io/product
+  https://fixer.io/terms
+  https://timeapi.io/
+  https://timeapi.io/home/faqs
+  https://worldtimeapi.org/  (site now serves its own sunset notice)
+  https://cloudconvert.com/pricing
+  https://www.convertapi.com/pricing
+  https://www.convertapi.com/terms
+  https://www.convertapi.com/docs/getting-started
+  https://gotenberg.dev/
+  https://github.com/tesseract-ocr/tesseract
+  https://ocr.space/ocrapi
+  https://cloud.google.com/vision/pricing
+  https://developers.cloudflare.com/r2/pricing/
+  https://www.backblaze.com/cloud-storage/pricing
+  https://sentry.io/pricing/
+https://www.sentry.help/en/articles/13964872-can-i-add-more-reserved-volumes-to-my-free-developer-plan
+  https://posthog.com/pricing
+  https://restcountries.com/plans
+  https://restcountries.com/faq
+  https://nagerholidays.com/Api
+  https://github.com/nager/Nager.Date
+
+================================================================================
+END
+================================================================================

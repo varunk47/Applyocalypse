@@ -13,6 +13,8 @@ from typing import Literal
 
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
+from .browser.field_detection import is_secret_field
+from .browser.greenhouse_schema import GreenhouseQuestion, fetch_questions, unanswered_required
 from .browser.portal_adapters import (
     COMMON_STEP_PROGRESSION_LABELS,
     PortalRuntimePolicy,
@@ -22,6 +24,7 @@ from .browser.portal_adapters import (
 )
 from .browser.portal_state import PortalPageState, classify_portal_page_state
 from .browser.portal_workflows import PortalWorkflow, workflow_for_url
+from .browser.profile_pool import lease_profile
 from .control import WorkerControl, read_worker_control
 from .document_stage import _lazy_generate_cover_letter_for_portal, generate_application_documents
 from .event_protocol import EventType, Severity, WorkerEvent, fail_process, utc_now
@@ -36,6 +39,13 @@ from .field_resolution import (
 )
 from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
 from .secret_env import apply_provider_secrets_to_env
+from .submission_receipt import (
+    ReceiptAnswer,
+    ReceiptDocument,
+    SubmissionRecord,
+    sha256_of,
+    write_receipt,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -273,6 +283,74 @@ def final_submit_labels_for(workflow: PortalWorkflow | None) -> list[str]:
     return list(dict.fromkeys(labels))
 
 
+def emit_submission_receipt(
+    work_dir: Path,
+    run_id: str,
+    submission_record: SubmissionRecord | None,
+    *,
+    step_id: str | None,
+    confirmed: bool,
+    confirmation_url: object,
+    confirmation_title: object,
+) -> None:
+    """Write the record of what was sent, beside the run's other artifacts.
+
+    Written on both outcomes, not only the confirmed one. When the click landed
+    but no confirmation could be verified, the application may well have gone
+    through, and that is exactly the case where the user needs a record of what
+    was in it. The receipt says which of the two happened rather than assuming.
+
+    Called before the outcome event is emitted, so the file is already on disk by
+    the time anything reacts to that event and SUBMITTED stays the last word on a
+    submitted run.
+
+    Nothing here may change the outcome of a submission that has already
+    happened, so a failure to write the file is reported and dropped.
+    """
+    if submission_record is None:
+        return
+    try:
+        receipt_path, receipt_sha256 = write_receipt(
+            work_dir,
+            submission_record,
+            run_id=run_id,
+            submitted_at=utc_now(),
+            confirmed=confirmed,
+            confirmation_url=confirmation_url,
+            confirmation_title=confirmation_title,
+        )
+    except OSError as error:
+        WorkerEvent(
+            event_type=EventType.SUBMISSION_RECEIPT_WRITTEN,
+            run_id=run_id,
+            step_id=step_id,
+            severity=Severity.WARN,
+            message="The application was submitted, but its receipt could not be written",
+            machine_state={"written": False},
+            ui_state={"current_step": "submitted"},
+            payload={"written": False, "error": str(error)},
+        ).emit()
+        return
+    WorkerEvent(
+        event_type=EventType.SUBMISSION_RECEIPT_WRITTEN,
+        run_id=run_id,
+        step_id=step_id,
+        severity=Severity.INFO,
+        message=f"Wrote a receipt for this application: {len(submission_record.documents)} document(s), "
+        f"{len(submission_record.answers)} answer(s)",
+        machine_state={"written": True, "confirmed": confirmed},
+        ui_state={"current_step": "submitted"},
+        payload={
+            "written": True,
+            "local_path": str(receipt_path),
+            "sha256": receipt_sha256,
+            "document_count": len(submission_record.documents),
+            "answer_count": len(submission_record.answers),
+            "captured_at": utc_now(),
+        },
+    ).emit()
+
+
 async def perform_final_submit_with_control(
     adapter: BrowserAdapter,
     work_dir: Path,
@@ -280,6 +358,7 @@ async def perform_final_submit_with_control(
     final_submit_control: WorkerControl,
     *,
     workflow: PortalWorkflow | None = None,
+    submission_record: SubmissionRecord | None = None,
 ) -> bool:
     blockers = await adapter.detect_blockers()
     if blockers:
@@ -313,6 +392,15 @@ async def perform_final_submit_with_control(
     visible_text = await adapter.extract_visible_text()
     text = str(visible_text.payload.get("text") or "") if visible_text.ok else ""
     if submission_confirmation_detected(text):
+        emit_submission_receipt(
+            work_dir,
+            run_id,
+            submission_record,
+            step_id=final_submit_control.step_id,
+            confirmed=True,
+            confirmation_url=visible_text.payload.get("url"),
+            confirmation_title=visible_text.payload.get("title"),
+        )
         WorkerEvent(
             event_type=EventType.SUBMITTED,
             run_id=run_id,
@@ -332,6 +420,15 @@ async def perform_final_submit_with_control(
         ).emit()
         return True
 
+    emit_submission_receipt(
+        work_dir,
+        run_id,
+        submission_record,
+        step_id=final_submit_control.step_id,
+        confirmed=False,
+        confirmation_url=visible_text.payload.get("url") if visible_text.ok else None,
+        confirmation_title=visible_text.payload.get("title") if visible_text.ok else None,
+    )
     WorkerEvent(
         event_type=EventType.PAUSED,
         run_id=run_id,
@@ -358,11 +455,19 @@ async def perform_final_submit_after_approval(
     run_id: str,
     *,
     workflow: PortalWorkflow | None = None,
+    submission_record: SubmissionRecord | None = None,
 ) -> bool:
     final_submit_control = await asyncio.to_thread(wait_for_final_submit_decision, work_dir, run_id)
     if final_submit_control is None:
         return False
-    return await perform_final_submit_with_control(adapter, work_dir, run_id, final_submit_control, workflow=workflow)
+    return await perform_final_submit_with_control(
+        adapter,
+        work_dir,
+        run_id,
+        final_submit_control,
+        workflow=workflow,
+        submission_record=submission_record,
+    )
 
 
 def emit_worker_cancelled(run_id: str, control: WorkerControl, *, message: str) -> None:
@@ -1462,6 +1567,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--cover-letter-sample-file")
     parser.add_argument("--output-dir")
     parser.add_argument("--work-dir", required=True)
+    # Persistent Chrome profiles, pooled across runs. Omitted, a run keeps its
+    # own throwaway profile inside the work dir, which is what used to happen.
+    parser.add_argument("--browser-profile-root")
     return parser
 
 
@@ -1481,10 +1589,12 @@ async def run_url_observation_flow(
     work_dir: Path,
     canonical_profile: dict[str, object],
     adapter_name: str = "nodriver",
+    user_data_dir: Path | None = None,
 ) -> UrlObservationResult:
     workflow = workflow_for_url(job_url)
     adapter_candidates = adapter_candidates_for_workflow(workflow, adapter_name)
-    user_data_dir = work_dir / "browser-profile"
+    if user_data_dir is None:
+        user_data_dir = work_dir / "browser-profile"
     screenshot_dir = work_dir / "screenshots"
     emit_portal_workflow_selected(run_id, workflow, adapter_name=adapter_candidates[0], adapter_candidates=adapter_candidates)
     adapter, launch, launch_attempts = await launch_browser_for_workflow(
@@ -1753,6 +1863,22 @@ async def run_url_observation_flow(
     return UrlObservationResult(should_stop=False, job_text_file=job_text_file, scraped_url=scraped_url)
 
 
+def form_field_names(fields: list[BrowserField]) -> set[str]:
+    """What the portal calls its own inputs, which is the vocabulary an ATS schema uses.
+
+    Both attributes are collected because the two are not reliably the same element: a
+    Greenhouse custom question renders ``name="question_12345"`` while several portals
+    carry the meaningful token only on ``id``.
+    """
+    names: set[str] = set()
+    for browser_field in fields:
+        for key in ("name", "id"):
+            value = str(browser_field.metadata.get(key) or "").strip()
+            if value:
+                names.add(value)
+    return names
+
+
 async def run_browser_apply_after_review(
     *,
     run_id: str,
@@ -1760,10 +1886,12 @@ async def run_browser_apply_after_review(
     work_dir: Path,
     adapter_name: str,
     control: WorkerControl,
+    user_data_dir: Path | None = None,
 ) -> None:
     workflow = workflow_for_url(job_url)
     adapter_candidates = adapter_candidates_for_workflow(workflow, adapter_name)
-    user_data_dir = work_dir / "browser-profile"
+    if user_data_dir is None:
+        user_data_dir = work_dir / "browser-profile"
     emit_portal_workflow_selected(run_id, workflow, adapter_name=adapter_candidates[0], adapter_candidates=adapter_candidates)
     adapter, launch, launch_attempts = await launch_browser_for_workflow(
         run_id=run_id,
@@ -1901,12 +2029,25 @@ async def run_browser_apply_after_review(
     # browser. This prevents the infinite FIELD_REVIEW loop on fields that have no profile
     # value (Country, LinkedIn, work-auth, EEO, ...).
     presented_missing_answer_keys: set[str] = set()
+    # Every input name seen on any page of this application. Greenhouse publishes the
+    # posting's question set, so at the submit gate this answers a question the DOM cannot:
+    # which required questions never appeared at all, because they sit on a wizard page we
+    # never reached or behind a control discovery could not see. Fields that DID appear and
+    # were left blank are already reported by the FIELD_REVIEW_REQUIRED pause, so the two
+    # signals cover different failures rather than repeating one.
+    observed_field_names: set[str] = set()
+    # What the receipt is built from. Keyed by field so a form that is re-read
+    # after a re-render, or a wizard page revisited, records what finally landed
+    # in each control rather than one line per attempt.
+    receipt_documents: dict[tuple[str, str], ReceiptDocument] = {}
+    receipt_answers: dict[tuple[str, str], ReceiptAnswer] = {}
     while True:
         if upload_attempt > 0:
             if await handle_runtime_control(work_dir, run_id, context="required document retry field detection"):
                 await adapter.close()
                 return
             fields = await adapter.detect_fields()
+        observed_field_names |= form_field_names(fields)
         cl_requirement = emit_cover_letter_requirement_from_fields(run_id, fields, context="approved_field_detection")
         if (
             cl_requirement is not None
@@ -1996,6 +2137,21 @@ async def run_browser_apply_after_review(
                 result = await adapter.upload_file(field, local_path)
                 if result.ok:
                     uploaded_document_targets.add(upload_target)
+                    try:
+                        uploaded_sha256 = sha256_of(local_path)
+                        uploaded_size_bytes = local_path.stat().st_size
+                    except OSError:
+                        # The upload itself already succeeded. Failing to read the
+                        # file back afterwards is not a reason to fail the run.
+                        uploaded_sha256, uploaded_size_bytes = "unavailable", 0
+                    receipt_documents[(field.label or "", field.selector or "")] = ReceiptDocument(
+                        field_label=field.label or "Document",
+                        filename=str(generated_file_value(generated_file, "filename") or local_path.name),
+                        file_kind=str(generated_file_value(generated_file, "file_kind") or "DOCUMENT"),
+                        file_format=str(generated_file_value(generated_file, "format") or ""),
+                        size_bytes=uploaded_size_bytes,
+                        sha256=uploaded_sha256,
+                    )
                     WorkerEvent(
                         event_type=EventType.FILE_UPLOADED,
                         run_id=run_id,
@@ -2010,6 +2166,7 @@ async def run_browser_apply_after_review(
                             "format": generated_file_value(generated_file, "format"),
                             "filename": generated_file_value(generated_file, "filename"),
                             "local_path": str(local_path),
+                            "sha256": uploaded_sha256,
                             "field_label": field.label,
                             "field_type": field.field_type,
                             "selector": field.selector,
@@ -2095,6 +2252,13 @@ async def run_browser_apply_after_review(
             result = await adapter.apply_field_value(field, value)
             if result.ok:
                 is_secret_value = secret_source is not None
+                receipt_answers[(field.label or "", field.selector or "")] = ReceiptAnswer(
+                    field_label=field.label or "Unlabelled field",
+                    # Stricter than the event log on purpose. A receipt is a file the
+                    # user can hand to someone else, so a field that merely looks like
+                    # it holds a secret is withheld as well as one that provably does.
+                    value=None if is_secret_value or is_secret_field(field) else value,
+                )
                 WorkerEvent(
                     event_type=EventType.FIELD_VALUE_APPLIED,
                     run_id=run_id,
@@ -2343,33 +2507,94 @@ async def run_browser_apply_after_review(
     if runtime_policy.review_evidence_required:
         visible = await adapter.extract_visible_text()
         visible_before_submit = str(visible.payload.get("text") or "") if visible.ok else None
+    # The ATS knows its own form. Greenhouse serves the posting's questions
+    # unauthenticated, so a required question that never appeared in anything we filled can
+    # be named here instead of being discovered by the candidate weeks later as silence. A
+    # portal we cannot read returns nothing and the gate is exactly as it was.
+    unanswered_questions: list[GreenhouseQuestion] = []
+    published_questions = await asyncio.to_thread(fetch_questions, job_url)
+    if published_questions:
+        unanswered_questions = unanswered_required(published_questions, observed_field_names)
+    if unanswered_questions:
+        WorkerEvent(
+            event_type=EventType.USER_REVIEW_REQUIRED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message=(
+                f"{len(unanswered_questions)} required question(s) this posting publishes never "
+                "appeared in the form that was filled"
+            ),
+            machine_state={
+                "reason": "PUBLISHED_REQUIRED_QUESTION_UNSEEN",
+                "portal_id": runtime_policy.portal_id,
+                "published_question_count": len(published_questions or []),
+                "unseen_count": len(unanswered_questions),
+            },
+            ui_state={"requires_user_review": True, "current_step": "final_submit"},
+            payload={
+                "questions": [
+                    {
+                        "label": question.label,
+                        "field_type": question.field_type,
+                        "options": list(question.options),
+                    }
+                    for question in unanswered_questions
+                ],
+                "instructions": (
+                    "Check these in the visible browser before approving submission. They are "
+                    "required by the posting and Applyocalypse never saw them."
+                ),
+            },
+        ).emit()
     gate = evaluate_final_submit_gate(
         policy=runtime_policy,
         auto_submit_enabled=auto_submit_enabled,
         visible_text=visible_before_submit,
     )
     auto_submit_enabled = gate.auto_submit_enabled
+    # Preapproved auto-submit is withdrawn on this evidence, the same way it is withdrawn
+    # when a portal that always shows a review page did not. The costs are not symmetric:
+    # a false alarm costs the user one click, and being right costs them an application
+    # submitted without an answer the employer required.
+    auto_submit_withdrawn_for_unseen = bool(unanswered_questions) and auto_submit_enabled
+    if auto_submit_withdrawn_for_unseen:
+        auto_submit_enabled = False
     WorkerEvent(
         event_type=EventType.READY_TO_SUBMIT,
         run_id=run_id,
         step_id=None,
         severity=Severity.INFO if auto_submit_enabled else Severity.WARN,
-        message=gate.message,
+        message=(
+            "Final submission needs approval: the posting publishes required questions that "
+            "never appeared in the form"
+            if auto_submit_withdrawn_for_unseen
+            else gate.message
+        ),
         machine_state={
             "gate": "FINAL_SUBMIT",
             "auto_submit_enabled": auto_submit_enabled,
             "portal_id": runtime_policy.portal_id,
             "review_evidence_required": runtime_policy.review_evidence_required,
             "review_text_detected": gate.review_text_detected,
-            "auto_submit_withdrawn": gate.withdrawn,
+            "auto_submit_withdrawn": gate.withdrawn or auto_submit_withdrawn_for_unseen,
+            "unseen_required_question_count": len(unanswered_questions),
         },
         ui_state={"requires_user_review": not auto_submit_enabled},
         payload={
             "auto_submit_enabled": auto_submit_enabled,
             "review_text_detected": gate.review_text_detected,
-            "auto_submit_withdrawn": gate.withdrawn,
+            "auto_submit_withdrawn": gate.withdrawn or auto_submit_withdrawn_for_unseen,
+            "unseen_required_questions": [question.label for question in unanswered_questions],
         },
     ).emit()
+    submission_record = SubmissionRecord(
+        job_url=job_url,
+        portal_id=runtime_policy.portal_id,
+        auto_submit=auto_submit_enabled,
+        documents=tuple(receipt_documents.values()),
+        answers=tuple(receipt_answers.values()),
+    )
     if auto_submit_enabled:
         auto_submit_control = WorkerControl(
             command="RESUME",
@@ -2388,9 +2613,22 @@ async def run_browser_apply_after_review(
             ui_state={"current_step": "final_submit"},
             payload={"approval_type": "AUTO_SUBMIT"},
         ).emit()
-        await perform_final_submit_with_control(adapter, work_dir, run_id, auto_submit_control, workflow=workflow)
+        await perform_final_submit_with_control(
+            adapter,
+            work_dir,
+            run_id,
+            auto_submit_control,
+            workflow=workflow,
+            submission_record=submission_record,
+        )
     else:
-        await perform_final_submit_after_approval(adapter, work_dir, run_id, workflow=workflow)
+        await perform_final_submit_after_approval(
+            adapter,
+            work_dir,
+            run_id,
+            workflow=workflow,
+            submission_record=submission_record,
+        )
     await adapter.close()
 
 
@@ -2415,6 +2653,23 @@ def main() -> None:
         raise
 
 
+def _emit_driver_self_check() -> None:
+    """Report whether this build still carries the browser drivers it will need.
+
+    A packaged binary is the only place the question has a real answer, and nothing else
+    in the packaged suite reaches an adapter: the worker smoke stops at PAUSED, which is
+    document review, before a browser is ever asked for. Exits non-zero when a driver in
+    the automatic chain is missing, so a bundle that lost one fails the build instead of
+    someone's application.
+    """
+    from .browser.driver_check import check_all_drivers, missing_required
+
+    statuses = check_all_drivers()
+    print(json.dumps({"drivers": [status.to_payload() for status in statuses]}, sort_keys=True), flush=True)
+    if missing_required(statuses):
+        sys.exit(1)
+
+
 def _main_impl() -> None:
     # Provider API keys arrive via the 0600 worker-secrets file, never spawn env;
     # export them for LiteLLM/boto before any subcommand or pipeline work runs.
@@ -2434,9 +2689,14 @@ def _main_impl() -> None:
         pipeline_main()
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "self-check":
+        _emit_driver_self_check()
+        return
+
     args = build_parser().parse_args()
     work_dir = Path(args.work_dir)
     work_dir.mkdir(parents=True, exist_ok=True)
+    browser_profile_root = Path(args.browser_profile_root) if args.browser_profile_root else None
     output_dir = Path(args.output_dir) if args.output_dir else work_dir
     output_dir.mkdir(parents=True, exist_ok=True)
     canonical_profile: dict[str, object] = {}
@@ -2494,15 +2754,17 @@ def _main_impl() -> None:
                 "workflow": workflow.to_event_payload(),
             },
         ).emit()
-        observation = asyncio.run(
-            run_url_observation_flow(
-                run_id=args.run_id,
-                job_url=args.job_url,
-                work_dir=work_dir,
-                canonical_profile=canonical_profile,
-                adapter_name=workflow.default_adapter,
+        with lease_profile(browser_profile_root, fallback=work_dir / "browser-profile") as profile_dir:
+            observation = asyncio.run(
+                run_url_observation_flow(
+                    run_id=args.run_id,
+                    job_url=args.job_url,
+                    work_dir=work_dir,
+                    canonical_profile=canonical_profile,
+                    adapter_name=workflow.default_adapter,
+                    user_data_dir=profile_dir,
+                )
             )
-        )
         if observation.should_stop or observation.job_text_file is None:
             return
         job_text_source_path = str(observation.job_text_file)
@@ -2557,15 +2819,17 @@ def _main_impl() -> None:
 
     if args.job_url:
         workflow = workflow_for_url(args.job_url)
-        asyncio.run(
-            run_browser_apply_after_review(
-                run_id=args.run_id,
-                job_url=args.job_url,
-                work_dir=work_dir,
-                adapter_name=workflow.default_adapter,
-                control=control,
+        with lease_profile(browser_profile_root, fallback=work_dir / "browser-profile") as profile_dir:
+            asyncio.run(
+                run_browser_apply_after_review(
+                    run_id=args.run_id,
+                    job_url=args.job_url,
+                    work_dir=work_dir,
+                    adapter_name=workflow.default_adapter,
+                    control=control,
+                    user_data_dir=profile_dir,
+                )
             )
-        )
     else:
         auto_submit_enabled = control_auto_submit_enabled(control)
         ready_message = (

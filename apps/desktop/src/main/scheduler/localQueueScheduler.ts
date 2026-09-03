@@ -258,7 +258,10 @@ export class LocalQueueScheduler {
         outputDir,
         ...(providerEnv ? { providerEnv } : {}),
         ...(secretsForRedaction ? { secretsForRedaction } : {}),
-        workDir: runWorkDir
+        workDir: runWorkDir,
+        // Deliberately a sibling of runs/, not a child: sweepStaleRunWorkDirs deletes
+        // anything under runs/ after 7 days, and these profiles are meant to persist.
+        browserProfileRoot: join(app.getPath("userData"), "browser-profiles")
       });
     } catch (error) {
       const runWorkDir = join(app.getPath("userData"), "runs", runId);

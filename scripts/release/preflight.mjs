@@ -44,7 +44,7 @@ const checks = [
   },
   { id: "release_readiness_doc", ok: existsSync(join(rootDir, "docs", "release-readiness.md")) },
   { id: "live_certification_targets_template", ok: existsSync(join(rootDir, "certification", "live-portal-targets.example.json")) },
-  { id: "electron_builder_config", ok: readFileSync(join(desktopDir, "electron-builder", "electron-builder.yml"), "utf8").includes("afterSign") }
+  { id: "electron_builder_config", ok: readFileSync(join(desktopDir, "electron-builder", "electron-builder.yml"), "utf8").includes("afterPack") }
 ];
 
 const git = checkGit();

@@ -85,12 +85,37 @@ const main = async () => {
 
   const hiddenImportArgs = hiddenImports.flatMap((m) => ["--hidden-import", m]);
 
+  // Patchright drives playwright_adapter.py, and hidden imports alone are not enough for
+  // it: the package ships a Node driver (node.exe plus a JS package directory) that the
+  // Python side spawns as a subprocess, and PyInstaller's static analysis sees only
+  // Python. Without the data files the import succeeds, the launch starts a driver that
+  // is not there, and the failure surfaces halfway through an application. --collect-all
+  // takes the submodules and the driver tree together; PyInstaller ships a hook for
+  // "playwright" but knows nothing about the fork's name.
+  const collectAllArgs = ["patchright"].flatMap((pkg) => ["--collect-all", pkg]);
+
   await run(venvPython, [
     "-m",
     "PyInstaller",
     "--noconfirm",
     "--clean",
-    "--onefile",
+    // --onefile bundles everything into a single executable that unpacks itself into a
+    // fresh temp directory on every launch, and this worker is 148 MB. Measured against
+    // the packaged binary, that cost about 11 seconds per invocation: `self-check`, which
+    // imports two browser drivers and then does nothing, took 12.9s while a full resume
+    // parse took 10.9s. When doing nothing costs more than doing the work, the number is
+    // startup, not workload. The desktop app spawns this worker once per document parse,
+    // so every upload paid it twice over, and the packaged end-to-end smoke failed on it:
+    // two parses could not finish inside that phase's 25s budget.
+    //
+    // --onedir writes the same binary next to its dependencies and loads them in place,
+    // so the extraction happens once at build time instead of once per run. The directory
+    // is what ships; electron-builder copies it to the same resources/automation-python
+    // path the app already resolves, so nothing downstream changes. Same two commands
+    // after the switch: self-check 2.3s, parse-source 1.1s. The trade is disk, since a
+    // onedir bundle is not compressed: 148 MB of executable becomes about 376 MB of
+    // directory.
+    "--onedir",
     "--name",
     "applyocalypse-worker",
     "--paths",
@@ -102,10 +127,12 @@ const main = async () => {
     "--specpath",
     join(buildDir, "specs"),
     ...hiddenImportArgs,
+    ...collectAllArgs,
     join(serviceDir, "applyocalypse_worker_entry.py")
   ]);
 
-  const binaryPath = join(distDir, workerBinaryName);
+  const bundleDir = join(distDir, "applyocalypse-worker");
+  const binaryPath = join(bundleDir, workerBinaryName);
   if (!existsSync(binaryPath)) {
     throw new Error(`PyInstaller finished without producing ${binaryPath}`);
   }
@@ -120,7 +147,7 @@ const main = async () => {
     createdAt: new Date().toISOString()
   };
 
-  await writeFile(join(distDir, "worker-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
+  await writeFile(join(bundleDir, "worker-manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
 };
 
 main().catch((error) => {

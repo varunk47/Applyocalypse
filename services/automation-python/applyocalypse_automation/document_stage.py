@@ -26,6 +26,7 @@ from .documents.artifact_generation import (
     split_legal_name,
     write_text_artifact,
 )
+from .documents.ats_lint import lint_resume_docx
 from .documents.docx_builder import build_cover_letter_docx
 from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_anchors, mutate_docx_placeholders
 from .documents.export_flow import RESUME_DOCX_TAIL, RESUME_TEX_TAIL, run_resume_render_tail
@@ -34,6 +35,7 @@ from .documents.pdf_export import export_docx_to_pdf
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent
 from .jd_analysis import analyze_with_optional_llm
+from .llm import usage as llm_usage
 from .llm.litellm_client import LiteLlmClient
 from .resume_tailoring import tailor_resume_sections
 from .tailoring.engine import TailoringEngine
@@ -432,6 +434,38 @@ def generate_application_documents(
     if editable_master:
         master_path = Path(str(editable_master["localPath"]))
         master_format = str(editable_master["sourceFormat"])
+        if master_format == "DOCX":
+            # Reported against the template rather than the generated copy, because
+            # these hazards are properties of the template: they travel to every
+            # application sent from it, and hearing about them once is more use than
+            # hearing about them on the fiftieth tailored document.
+            #
+            # Advisory only. A table in a resume is a tradeoff the user is entitled to
+            # make; what they cannot do is make it without being told, since a bad
+            # parse is silent and the application still submits.
+            try:
+                parse_risks = lint_resume_docx(master_path)
+            except Exception:
+                # A diagnostic that costs a run is worse than one that is missing.
+                parse_risks = ()
+            if parse_risks:
+                WorkerEvent(
+                    event_type=EventType.RESUME_PARSE_RISK_DETECTED,
+                    run_id=run_id,
+                    step_id=None,
+                    severity=Severity.WARN,
+                    message=(
+                        f"Your resume template has {len(parse_risks)} formatting issue(s) that Greenhouse "
+                        "documents as causes of a failed resume parse"
+                    ),
+                    machine_state={"source_format": "DOCX", "risk_codes": [risk.code for risk in parse_risks]},
+                    ui_state={"current_step": "document_review"},
+                    payload={
+                        "source_master_path": str(master_path),
+                        "reference": "https://support.greenhouse.io/hc/en-us/articles/200989175-Unsuccessful-resume-parse",
+                        "risks": [risk.to_payload() for risk in parse_risks],
+                    },
+                ).emit()
         replacements = build_placeholder_replacements(canonical_profile=canonical_profile, tailoring_plan=tailoring_plan)
         if master_format == "DOCX":
             output_path = choose_collision_safe_path(
@@ -596,16 +630,22 @@ def generate_application_documents(
 
                     from .documents.docx_mutation import collect_tailorable_bullets, tailor_master_docx_in_place
                     from .resume_tailoring import tailor_bullets_1to1
+                    from .tailoring.fabrication import technical_terms
 
                     inplace_model = os.getenv("LITELLM_MODEL_STRONG") or os.getenv("LITELLM_MODEL")
                     master_bullets = collect_tailorable_bullets(_MasterDocument(str(master_path)))
                     tailored_by_index: dict[int, str] = {}
                     if master_bullets and inplace_model and job_text:
+                        # Every tool the candidate already claims anywhere on the master, so a
+                        # rewrite may move one into the bullet this job cares about without
+                        # being read as an invention.
+                        resume_terms = technical_terms(extract_docx_text(master_path))
                         rewritten_bullets = asyncio.run(
                             tailor_bullets_1to1(
                                 [text for _, text in master_bullets],
                                 job_description=job_text,
                                 llm_client=LiteLlmClient(model=inplace_model),
+                                known_terms=resume_terms,
                             )
                         )
                         if rewritten_bullets and len(rewritten_bullets) == len(master_bullets):
@@ -848,3 +888,28 @@ def generate_application_documents(
                 ui_state={"current_step": "document_review", "requires_user_review": True},
                 payload={"artifact_kind": "cover_letter", "blocking_issues": [{"code": "INSUFFICIENT_VERIFIED_EVIDENCE"}]},
             ).emit()
+
+    # Every LLM call in this run went through one client, so the ledger is complete
+    # by the time the last document is written. Emitted here rather than per stage
+    # because the tailoring path can call the model three times on its own (initial,
+    # a retry when the bullets fail validation, another when the PDF runs to two
+    # pages), and a per-stage number would report the first of those as the total.
+    #
+    # Skipped entirely when nothing was called, which is the ordinary case for a run
+    # with no provider configured. An all-zeros event is noise in the feed.
+    usage_snapshot = llm_usage.snapshot()
+    if usage_snapshot["calls"]:
+        WorkerEvent(
+            event_type=EventType.LLM_USAGE_REPORTED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.INFO,
+            message=(
+                f"LLM usage: {usage_snapshot['calls']} calls, "
+                f"{usage_snapshot['prompt_tokens']} prompt tokens, "
+                f"{usage_snapshot['cached_prompt_tokens']} served from cache"
+            ),
+            machine_state={"cost_is_partial": usage_snapshot["cost_is_partial"]},
+            ui_state={"current_step": "document_review"},
+            payload=usage_snapshot,
+        ).emit()

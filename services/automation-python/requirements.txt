@@ -6,8 +6,10 @@
 #
 aiohappyeyeballs==2.6.2
     # via aiohttp
-aiohttp==3.14.1
-    # via litellm
+aiohttp==3.14.3
+    # via
+    #   -r requirements.in
+    #   litellm
 aiosignal==1.4.0
     # via aiohttp
 altgraph==0.17.5
@@ -63,8 +65,10 @@ colorama==0.4.6
     #   pytest
     #   seleniumbase
     #   tqdm
-cryptography==49.0.0
-    # via google-auth
+cryptography==50.0.1
+    # via
+    #   -r requirements.in
+    #   google-auth
 cssselect==1.4.0
     # via seleniumbase
 deprecated==1.3.1
@@ -111,6 +115,8 @@ google-auth-oauthlib==1.4.0
     # via -r requirements.in
 googleapis-common-protos==1.75.0
     # via google-api-core
+greenlet==3.5.5
+    # via patchright
 h11==0.16.0
     # via
     #   httpcore
@@ -219,13 +225,15 @@ parse-type==0.6.6
     # via
     #   behave
     #   seleniumbase
+patchright==1.62.3
+    # via -r requirements.in
 pdbp==1.8.2
     # via seleniumbase
 pdf2docx==0.5.13
     # via -r requirements.in
 pefile==2024.8.26
     # via pyinstaller
-pip-tools==7.5.3
+pip-tools==7.6.1
     # via -r requirements.in
 platformdirs==4.10.0
     # via seleniumbase
@@ -260,6 +268,8 @@ pydantic==2.13.4
     #   openai
 pydantic-core==2.46.4
     # via pydantic
+pyee==13.0.1
+    # via patchright
 pygments==2.20.0
     # via
     #   pdbp
@@ -278,7 +288,7 @@ pyotp==2.10.0
     # via seleniumbase
 pyparsing==3.3.2
     # via httplib2
-pypdf==6.14.2
+pypdf==6.16.2
     # via -r requirements.in
 pyproject-hooks==1.2.0
     # via
@@ -411,6 +421,7 @@ typing-extensions==4.15.0
     #   openai
     #   pydantic
     #   pydantic-core
+    #   pyee
     #   python-docx
     #   referencing
     #   selenium

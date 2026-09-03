@@ -3,8 +3,15 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import json
+import sys
 
-from applyocalypse_automation.browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
+import pytest
+
+from applyocalypse_automation.browser.adapter_factory import (
+    SUPPORTED_BROWSER_ADAPTERS,
+    adapter_candidates_for_workflow,
+    create_browser_adapter,
+)
 from applyocalypse_automation.browser.field_detection import (
     blockers_from_dom_snapshot,
     build_apply_field_value_script,
@@ -20,7 +27,7 @@ from applyocalypse_automation.browser.portal_adapters import (
 )
 from applyocalypse_automation.browser.portal_registry import PORTALS, detect_portal
 from applyocalypse_automation.browser.portal_state import classify_portal_page_state
-from applyocalypse_automation.browser.portal_workflows import workflow_for_url
+from applyocalypse_automation.browser.portal_workflows import workflow_for_portal, workflow_for_url
 from applyocalypse_automation.runner import SAFE_STEP_PROGRESSION_LABELS
 
 
@@ -62,12 +69,76 @@ def test_browser_adapter_factory_keeps_nodriver_default_and_playwright_fallback(
     assert create_browser_adapter("playwright").name == "playwright"
 
 
+# Adapter name -> the third-party module its launch() imports. The playwright adapter is
+# named for the protocol it speaks; patchright is the driver that speaks it.
+_ADAPTER_DRIVER_MODULES = {
+    "nodriver": "nodriver",
+    "playwright": "patchright",
+    "seleniumbase": "seleniumbase",
+}
+
+
+def test_every_portal_defaults_to_an_adapter_that_is_actually_installed() -> None:
+    """A declared default nobody can launch is worse than a wrong default.
+
+    Every ATS here used to declare "playwright", which is absent from
+    requirements.in, from the lock file and from the PyInstaller hidden imports.
+    On a real install the launch returned "playwright is not installed" and the
+    run fell through to nodriver without ever saying so. Nothing looked broken,
+    which is why it survived: the Playwright-only cross-origin frame support was
+    simply never the code any user ran.
+
+    Asserting against the installed environment is the point. A default that only
+    works on a developer's machine is exactly the failure being pinned.
+    """
+    missing = sorted(
+        {
+            f"{portal.portal_id} -> {portal.default_adapter}"
+            for portal in PORTALS
+            if importlib.util.find_spec(_ADAPTER_DRIVER_MODULES[portal.default_adapter]) is None
+        }
+    )
+
+    assert missing == [], f"portals default to adapters that are not installed: {missing}"
+
+
+def test_adapter_driver_module_map_covers_every_supported_adapter() -> None:
+    """Otherwise the check above silently stops covering a newly added adapter."""
+    assert set(_ADAPTER_DRIVER_MODULES) == set(SUPPORTED_BROWSER_ADAPTERS)
+
+
+def test_the_automatic_adapter_chain_never_offers_an_adapter_that_is_not_installed() -> None:
+    """The declared default was only half of it; the fallback chain was the other half.
+
+    Every ATS used to fall back nodriver -> playwright -> seleniumbase. With no
+    playwright in the build, a nodriver failure spent a launch on an adapter that
+    could not start and wrote that dead attempt into the record the UI shows, ahead
+    of the seleniumbase fallback that could actually have worked.
+    """
+    offered = {
+        name for portal in PORTALS for name in adapter_candidates_for_workflow(workflow_for_portal(portal))
+    }
+    not_installed = sorted(
+        name for name in offered if importlib.util.find_spec(_ADAPTER_DRIVER_MODULES[name]) is None
+    )
+
+    assert not_installed == [], f"the automatic chain offers uninstalled adapters: {not_installed}"
+
+
+def test_an_explicitly_named_adapter_leads_the_chain() -> None:
+    """Naming an adapter moves it to the front; it never drops the others."""
+    workflow = workflow_for_url("https://jobs.lever.co/example/abc")
+
+    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow, "seleniumbase") == ("seleniumbase", "nodriver", "playwright")
+
+
 def test_detect_portal_from_known_url() -> None:
     portal = detect_portal("https://boards.greenhouse.io/example/jobs/123")
 
     assert portal is not None
     assert portal.portal_id == "greenhouse"
-    assert portal.default_adapter == "playwright"
+    assert portal.default_adapter == "nodriver"
 
 
 def test_detect_portal_for_ashby_url() -> None:
@@ -75,7 +146,7 @@ def test_detect_portal_for_ashby_url() -> None:
 
     assert portal is not None
     assert portal.portal_id == "ashby"
-    assert portal.default_adapter == "playwright"
+    assert portal.default_adapter == "nodriver"
     assert portal.requires_high_stealth is False
 
 
@@ -84,8 +155,8 @@ def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
 
     assert workflow.portal_id == "lever"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
-    assert workflow.default_adapter == "playwright"
-    assert adapter_candidates_for_workflow(workflow) == ("playwright", "nodriver", "seleniumbase")
+    assert workflow.default_adapter == "nodriver"
+    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
     assert "Apply for this job" in workflow.entry_action_labels
     assert workflow.requires_manual_review_before_fill is True
     payload = workflow.to_event_payload()
@@ -100,7 +171,10 @@ def test_workflow_for_high_stealth_board_keeps_nodriver_and_login_watch() -> Non
     assert workflow.workflow_kind == "JOB_BOARD_REDIRECT_OR_STEALTH"
     assert workflow.default_adapter == "nodriver"
     assert workflow.requires_high_stealth is True
-    assert adapter_candidates_for_workflow(workflow, "playwright") == ("nodriver", "seleniumbase")
+    # A high-stealth board used to drop a named playwright on the floor, because the
+    # adapter could not launch at all. It can now, so the name is honoured here too.
+    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
     assert workflow.requires_login_watch is True
     payload = workflow.to_event_payload()
     assert "Confirm trusted application surface" in payload["expected_steps"]
@@ -388,12 +462,21 @@ def test_blocker_detection_normalizes_dom_snapshot() -> None:
     assert blockers[3].metadata["matched_patterns"] == ["sponsorship"]
 
 
-def test_playwright_adapter_fails_safely_when_runtime_is_absent(tmp_path) -> None:
-    if importlib.util.find_spec("playwright") is not None:
-        return
+def test_playwright_adapter_fails_safely_when_runtime_is_absent(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A driver missing from the bundle has to degrade to a soft failure, not an exception.
+
+    This used to skip itself whenever the driver was importable, which made it assert
+    nothing on any machine that had it -- and now that the driver is a hard dependency,
+    that would have been every machine, forever. The absence is simulated instead:
+    ``None`` in ``sys.modules`` is what makes an ``import`` raise ``ImportError``, which
+    is the failure a trimmed PyInstaller bundle actually produces, and no browser is
+    started either way.
+    """
+    monkeypatch.setitem(sys.modules, "patchright.async_api", None)
 
     adapter = create_browser_adapter("playwright")
     result = asyncio.run(adapter.launch(run_id="run-1", user_data_dir=tmp_path / "browser"))
 
     assert result.ok is False
     assert "playwright is not installed" in result.message
+    assert result.payload["install_hint"] == "pip install patchright"

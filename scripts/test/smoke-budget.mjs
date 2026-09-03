@@ -6,6 +6,18 @@
 const DEFAULT_BUDGET_MS = 120_000;
 
 /**
+ * Extra patience the runner keeps beyond the operator's value.
+ *
+ * The desktop suites arm a deadline inside the app too (see
+ * apps/desktop/src/main/smokeDeadline.ts), and both read the same variable. The
+ * app's timer is the one worth reaching: it prints which suite stalled and what
+ * the renderer last reported, where this one can only say the child went quiet.
+ * Matching the two exactly would make which fires first a coin toss, so the
+ * runner buys a few seconds for the app to name its own failure and exit.
+ */
+export const RUNNER_HEADROOM_MS = 5_000;
+
+/**
  * @param {number} [fallback] budget when the environment does not override it
  * @returns {number} milliseconds to wait before declaring a smoke child hung
  */
@@ -15,12 +27,14 @@ export const smokeBudgetMs = (fallback = DEFAULT_BUDGET_MS) => {
     return fallback;
   }
 
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
+  // Deliberately stricter than parseInt, which stops at the first character it
+  // cannot use: it reads "15s" as 15 and "1.5" as 1, so a typo silently becomes
+  // a budget of a millisecond or two. Kept identical to the app-side check.
+  if (!/^\d+$/.test(raw) || Number(raw) <= 0) {
     throw new Error(`APPLYO_SMOKE_TIMEOUT_MS must be a positive integer of milliseconds, got "${raw}"`);
   }
 
-  return parsed;
+  return Number(raw) + RUNNER_HEADROOM_MS;
 };
 
 /**

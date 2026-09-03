@@ -138,9 +138,16 @@ class FakeBrowser:
         return self.page
 
 
+def instant_warm_up(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep the front-door visit that precedes a navigation from taking real seconds."""
+    monkeypatch.setattr(nodriver_adapter_module, "WARM_UP_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(nodriver_adapter_module, "dwell_seconds", lambda: 0.0)
+
+
 def test_open_url_waits_for_rendered_text(monkeypatch: pytest.MonkeyPatch) -> None:
     """open_url must poll the page until text renders, not return immediately."""
     monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
+    instant_warm_up(monkeypatch)
     page = FakePage([0, 0, 9239, 9239])
     adapter = NodriverBrowserAdapter()
     adapter._browser = FakeBrowser(page)  # noqa: SLF001 - unit wiring test
@@ -158,6 +165,7 @@ def test_open_url_reports_not_ready_after_timeout(monkeypatch: pytest.MonkeyPatc
     """A page that never renders still navigates, but reports ready=False."""
     monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
     monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_TIMEOUT_S", 0.0)
+    instant_warm_up(monkeypatch)
     page = FakePage([0])
     adapter = NodriverBrowserAdapter()
     adapter._browser = FakeBrowser(page)  # noqa: SLF001 - unit wiring test

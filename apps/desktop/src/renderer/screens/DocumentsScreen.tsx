@@ -1,9 +1,11 @@
 import { createMemo, createResource, For, Show } from 'solid-js'
+import { useNavigate } from '@solidjs/router'
 import type { GeneratedFile } from '@applyocalypse/shared-types'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { jobLabel, useQueueStore } from '../contexts/QueueStore'
 import { buildAnchorRepairEditorModel } from '../features/documents/anchorRepairEditor'
 import { buildEditableMasterDiagnostics } from '../features/documents/documentDiagnostics'
+import { buildMergeReport, reasonText } from '../features/documents/mergeReport'
 
 const statusTag = (status: string): { text: string; ok: boolean } => {
   if (status === 'VERIFIED_EDITABLE_MASTER') return { text: 'MASTER ✓', ok: true }
@@ -21,8 +23,15 @@ export default function DocumentsScreen() {
     confirmEditableMaster,
     repairEditableMasterAnchors,
     openLocalPath,
+    dismissMergeReceipt,
   } = useProfileStore()
   const { state: queueState } = useQueueStore()
+  const navigate = useNavigate()
+
+  // What the last upload did to the profile. The merge silently drops entries it
+  // is not confident about, so an upload can look like it worked while the roles
+  // it read never arrive. This is where that gets said out loud.
+  const mergeReport = createMemo(() => (state.lastMerge ? buildMergeReport(state.lastMerge) : null))
 
   // Constant source so the fetcher runs once on mount and thereafter only on an
   // explicit refetch. Splitting source from fetcher also keeps the tracked scope
@@ -57,6 +66,59 @@ export default function DocumentsScreen() {
               <button class="btn-mono" type="button" onClick={() => void pickAndRegisterSupportingDetails()}>+ DETAILS</button>
               <button class="btn-mono" type="button" onClick={() => void pickAndRegisterCoverLetter()}>+ COVER SAMPLE</button>
             </div>
+
+            <Show when={mergeReport()}>
+              {(report) => (
+                <div class="paper-card section-card" role="status">
+                  <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
+                    <span class="kicker">PARSE CHECK</span>
+                    <span class="rule" />
+                    <span class="field-state" classList={{ yours: report().lostWork, applied: !report().lostWork }}>
+                      {report().lostWork ? 'NEEDS YOU' : 'CLEAN'}
+                    </span>
+                    <button class="btn-mono" type="button" onClick={dismissMergeReceipt}>DISMISS</button>
+                  </div>
+
+                  <div style={{ font: '500 12px var(--sans)' }}>{report().headline}</div>
+
+                  <Show when={report().notImported.length > 0}>
+                    <div class="kicker">NOT IMPORTED</div>
+                    <For each={report().notImported}>
+                      {(entry) => (
+                        <div style={{ display: 'flex', gap: '8px', 'align-items': 'baseline', 'flex-wrap': 'wrap' }}>
+                          <span class="mono-chip">{entry.kind.toUpperCase()}</span>
+                          <span style={{ font: '500 12px var(--sans)' }}>{entry.label}</span>
+                          <span style={{ 'font-size': '10.5px', color: 'var(--ink-3)' }}>{reasonText(entry.reason)}</span>
+                        </div>
+                      )}
+                    </For>
+                    <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', 'flex-wrap': 'wrap' }}>
+                      <button class="btn-outline-wax" type="button" onClick={() => navigate('/profile')}>
+                        Add them by hand
+                      </button>
+                      <span style={{ 'font-size': '10.5px', color: 'var(--ink-3)' }}>
+                        the file on disk is untouched, only the profile is missing them
+                      </span>
+                    </div>
+                  </Show>
+
+                  <Show when={report().alreadyOnFile.length > 0}>
+                    <div style={{ 'font-size': '10.5px', color: 'var(--ink-3)' }}>
+                      {report().alreadyOnFile.length} already on your profile, left exactly as they were.
+                    </div>
+                  </Show>
+
+                  <Show when={report().warnings.length > 0}>
+                    <div class="kicker">PARSER NOTES</div>
+                    <For each={report().warnings}>
+                      {(warning) => (
+                        <div style={{ 'font-size': '10.5px', color: 'var(--ink-3)' }}>{warning}</div>
+                      )}
+                    </For>
+                  </Show>
+                </div>
+              )}
+            </Show>
 
             <Show
               when={masterFiles().length > 0}

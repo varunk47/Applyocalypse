@@ -102,7 +102,7 @@ pnpm release:preflight
 - Reviewed local cover-letter uploads are passed to the worker as upload-eligible artifacts during document approval, without storing document bytes in SQLite.
 - Required upload fixes now resume in the same live worker: Python waits for document approval, refreshes upload-eligible files, redetects form fields, and recognizes manual browser-side file uploads by file-count metadata only.
 - The Playwright fallback adapter has real optional launch, navigation, field, upload, screenshot, and DOM methods. It fails safely when the Playwright runtime or browser binaries are not bundled.
-- Electron packaging now verifies the bundled PyInstaller worker and includes an environment-gated `afterSign` hook for signing the worker binary in release CI. Local development builds remain unsigned unless `APPLYO_REQUIRE_CODE_SIGNING=1`.
+- Electron packaging now verifies the bundled PyInstaller worker and includes an environment-gated `afterPack` step that signs the worker executable and every native binary in its `_internal` directory in release CI. Local development builds remain unsigned unless `APPLYO_REQUIRE_CODE_SIGNING=1`.
 - Packaged desktop smoke now verifies that the command center renders, the theme is applied before paint, and the strict preload API is available; the preload bundle is emitted as CommonJS because Electron sandbox preload scripts cannot load ESM imports.
 - Packaged user-flow smoke verifies profile creation, job enqueue, queue metadata, theme IPC, and renderer isolation through the strict preload API.
 - Packaged full-flow smoke verifies onboarding, local upload ingestion, parser persistence, queue persistence across restart, and renderer isolation through the strict preload API.

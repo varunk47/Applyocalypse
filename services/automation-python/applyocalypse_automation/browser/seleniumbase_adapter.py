@@ -10,9 +10,10 @@ or otherwise defeat a bot challenge; when a Cloudflare interstitial is detected
 the blocker is flagged for human handoff so the runner pauses and the user takes
 over in the visible browser.
 
-Candidate order (from adapter_factory):
-  high-stealth boards : nodriver -> seleniumbase
-  ATS portals         : playwright -> nodriver -> seleniumbase
+Candidate order (from adapter_factory): nodriver -> playwright -> seleniumbase,
+for high-stealth boards and ATS portals alike. This adapter is last on purpose --
+it has no frame traversal at all, so it is what gets tried when the two adapters
+that can reach inside an iframe have both failed to start.
 
 Fail-safe: when seleniumbase is not installed the launch() call returns
 BrowserStepResult(ok=False) exactly like the Playwright adapter does.
@@ -35,6 +36,8 @@ from .field_detection import (
     build_apply_field_value_script,
     build_click_by_text_script,
     build_final_submit_script,
+    dom_path_for,
+    driver_can_locate,
     fields_from_dom_snapshot,
     parse_apply_field_result,
     parse_click_by_text_result,
@@ -337,6 +340,12 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
     async def fill_field(self, field: BrowserField, value: str) -> BrowserStepResult:
         if self._driver is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        if not driver_can_locate(field):
+            return BrowserStepResult(
+                False,
+                "field is inside an embedded document the driver cannot address",
+                {"field_id": field.field_id},
+            )
         try:
             def _fill() -> None:
                 el = self._driver.find_element("css selector", field.selector)
@@ -348,7 +357,7 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
         return BrowserStepResult(True, "field value applied", {"field_id": field.field_id})
 
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
-        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES:
+        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES and driver_can_locate(field):
             filled = await self.fill_field(field, value)
             if not filled.ok:
                 return filled
@@ -356,7 +365,9 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
         if self._driver is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
         try:
-            raw_result = await self._evaluate(build_apply_field_value_script(field.selector, value))
+            raw_result = await self._evaluate(
+                build_apply_field_value_script(field.selector, value, dom_path_for(field))
+            )
         except Exception as exc:
             return BrowserStepResult(False, "field value application failed", {"field_id": field.field_id, "error": str(exc)})
         return parse_apply_field_result(raw_result, field)
@@ -394,6 +405,15 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "upload file does not exist", {"path": str(path)})
         if self._driver is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        if not driver_can_locate(field):
+            # Uploading is the one write with no scripted equivalent: a file input
+            # can only be set by the driver. Attaching the resume to whatever input
+            # the parent page happens to expose is worse than handing this back.
+            return BrowserStepResult(
+                False,
+                "file input is inside an embedded document the driver cannot address",
+                {"field_id": field.field_id},
+            )
         try:
             revealed = await asyncio.to_thread(self._upload_sync, field.selector, path)
         except Exception as exc:

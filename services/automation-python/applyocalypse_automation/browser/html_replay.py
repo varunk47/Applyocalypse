@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from html.parser import HTMLParser
 from typing import Any
 
 from .adapter import BrowserBlocker, BrowserField
 from .field_detection import (
+    CAPTCHA_CHALLENGE_PHRASES,
+    CAPTCHA_INTERSTITIAL_PHRASES,
     ControlCandidate,
     choose_safe_click_target,
     fields_from_dom_snapshot,
@@ -23,6 +26,14 @@ class PortalReplayAnalysis:
     fields: tuple[BrowserField, ...]
     controls: tuple[ControlCandidate, ...]
     blockers: tuple[BrowserBlocker, ...]
+
+
+# Both of these mirror the injected discovery script in field_detection. A control
+# this twin reports and the browser does not is a phantom question: the offline
+# fixture tests would assert an answer for something no user will ever be asked.
+_NATIVE_FIELD_TAGS = frozenset({"input", "textarea", "select"})
+_SKIPPED_INPUT_TYPES = frozenset({"hidden", "submit", "button", "image", "reset", "search"})
+_CAPTCHA_NAME_RE = re.compile(r"recaptcha|captcha|turnstile")
 
 
 # `html.parser` never emits an end tag for these, so they never open a frame.
@@ -69,6 +80,7 @@ class _PortalHtmlParser(HTMLParser):
                     "tag": tag_name,
                     "id": attrs_map.get("id"),
                     "for": attrs_map.get("for"),
+                    "editable": self._is_rich_text_host(attrs_map),
                     "text": [],
                 }
             )
@@ -90,7 +102,7 @@ class _PortalHtmlParser(HTMLParser):
                 )
             )
         widget_role = self._aria_widget_role(attrs_map)
-        if widget_role is not None:
+        if widget_role is not None and not self._is_captcha_control(attrs_map):
             # Mirrors the ARIA sweep in ``field_detection.py``: a picker built from
             # divs owns no value the browser can set, and an <input role="combobox">
             # must NOT fall through to the plain-text path below or a write would
@@ -144,9 +156,44 @@ class _PortalHtmlParser(HTMLParser):
                 }
             )
             return
+        if self._is_rich_text_host(attrs_map) and tag_name not in _NATIVE_FIELD_TAGS | _VOID_TAGS:
+            # Mirrors the contenteditable sweep in ``field_detection.py``. Quill,
+            # ProseMirror, TipTap and Lexical all render their editing surface as a
+            # styled div, so the branch below cannot see one and a required long-form
+            # question leaves a form that reads as having nothing missing.
+            #
+            # ``self._frames`` already holds this element, so the ancestors are
+            # everything before it; skipping when one of them is editable is how
+            # ``parentElement.closest()`` behaves in the real script. Where editable
+            # regions genuinely nest, the outer one is the surface a person types into.
+            if not any(bool(frame.get("editable")) for frame in self._frames[:-1]):
+                self.raw_fields.append(
+                    {
+                        "_label_attrs": {
+                            "aria_label": attrs_map.get("aria-label") or "",
+                            "title": attrs_map.get("title") or "",
+                            "placeholder": attrs_map.get("placeholder") or "",
+                            "name_or_id": attrs_map.get("name") or attrs_map.get("id") or "",
+                        },
+                        "_aria_labelledby": attrs_map.get("aria-labelledby") or "",
+                        "_label_frame_uid": self._enclosing_uid("label"),
+                        "_fieldset_uid": self._enclosing_uid("fieldset"),
+                        "field_type": "richtext",
+                        "selector": self._rich_text_selector_for(tag_name, attrs_map),
+                        "required": attrs_map.get("aria-required") == "true" or "required" in attrs_map,
+                        "metadata": {
+                            "tag_name": tag_name,
+                            "id": attrs_map.get("id"),
+                            "name": attrs_map.get("name"),
+                            "aria_role": attrs_map.get("role"),
+                            "current_length": 0,
+                        },
+                    }
+                )
+            return
         if tag_name in {"input", "textarea", "select"}:
             field_type = (attrs_map.get("type") or "text").lower() if tag_name == "input" else tag_name
-            if field_type in {"hidden", "submit", "button", "image", "reset"}:
+            if field_type in _SKIPPED_INPUT_TYPES or self._is_captcha_control(attrs_map):
                 return
             self.raw_fields.append(
                 {
@@ -199,6 +246,30 @@ class _PortalHtmlParser(HTMLParser):
         if not name:
             return None
         return f'{tag_name}[name="{name}"]'
+
+    @staticmethod
+    def _is_rich_text_host(attrs_map: dict[str, str | None]) -> bool:
+        if "contenteditable" not in attrs_map:
+            return False
+        return (attrs_map.get("contenteditable") or "").lower() in {"", "true", "plaintext-only"}
+
+    @classmethod
+    def _rich_text_selector_for(cls, tag_name: str, attrs_map: dict[str, str | None]) -> str | None:
+        """A rich-text host is usually a bare styled div with no id and no name.
+
+        ``aria-label`` is how these actually get named, so it is the fallback the
+        real script reaches for. That script also requires the selector to match
+        exactly one element; a streaming parser holds no document to ask, so the
+        twin can only agree about markup where the question does not arise.
+        """
+        direct = cls._aria_selector_for(tag_name, attrs_map)
+        if direct:
+            return direct
+        for attribute in ("aria-label", "data-testid", "aria-labelledby"):
+            value = attrs_map.get(attribute)
+            if value:
+                return f'{tag_name}[{attribute}="{value}"]'
+        return None
 
     def _enclosing_uid(self, tag_name: str) -> int | None:
         for frame in reversed(self._frames):
@@ -330,6 +401,12 @@ class _PortalHtmlParser(HTMLParser):
         return f'{tag_name}[name="{name}"]'
 
     @staticmethod
+    def _is_captcha_control(attrs_map: dict[str, str | None]) -> bool:
+        """A challenge is never an application question, however it is labelled."""
+        name_id = f"{attrs_map.get('name') or ''} {attrs_map.get('id') or ''}".lower()
+        return _CAPTCHA_NAME_RE.search(name_id) is not None
+
+    @staticmethod
     def _is_hidden(attrs_map: dict[str, str | None]) -> bool:
         style = (attrs_map.get("style") or "").lower()
         return "display:none" in style.replace(" ", "") or "visibility:hidden" in style.replace(" ", "")
@@ -370,20 +447,7 @@ def _blockers_from_replay_text(text: str, fields: tuple[BrowserField, ...]) -> l
     # Only an ACTIVE challenge blocks the run. A passive "protected by reCAPTCHA"
     # notice (present on most application forms) must not pause automation — this
     # mirrors the visibility-gated detection in DOM_BLOCKER_DISCOVERY_SCRIPT.
-    captcha_challenge_phrases = (
-        "i'm not a robot",
-        "i am not a robot",
-        "verify you are human",
-        "verify you're human",
-        "are you human",
-        "select all images",
-        "select each image",
-        "complete the captcha",
-        "solve the captcha",
-        "checking your browser before",
-        "just a moment",
-        "press and hold",
-    )
+    captcha_challenge_phrases = CAPTCHA_CHALLENGE_PHRASES + CAPTCHA_INTERSTITIAL_PHRASES
     if any(phrase in normalized for phrase in captcha_challenge_phrases):
         blockers.append(BrowserBlocker("CAPTCHA", "Interactive CAPTCHA or bot challenge detected", 0.9))
     if "multi-factor" in normalized or "multifactor" in normalized or "authenticator app" in normalized or " mfa " in f" {normalized} ":

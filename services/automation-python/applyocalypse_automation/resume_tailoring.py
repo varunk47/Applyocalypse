@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import re
 import sys
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from typing import Any
+
+from .tailoring.fabrication import is_faithful_rewrite
 
 _TAILOR_SYSTEM_PROMPT_TEMPLATE = """\
 You are an ATS optimization expert tailoring a resume to one job description.
@@ -137,7 +140,12 @@ async def tailor_resume_sections(
     system_prompt = build_tailor_system_prompt(font_size)
     # Bound prompt size: a scraped JD full of site boilerplate can be enormous, and
     # provider context limits should degrade to truncated input, not a hard failure.
-    user_message = f"JOB DESCRIPTION:\n{job_description[:20000]}\n\n---\n\nCANDIDATE RESUME:\n{resume_text[:20000]}"
+    #
+    # The resume comes first because it is the half that does not change: twenty
+    # applications in a batch are twenty different job descriptions against one
+    # resume, and a provider can only reuse a prefix that is actually a prefix.
+    cached_prefix = f"CANDIDATE RESUME:\n{resume_text[:20000]}"
+    user_message = f"---\n\nJOB DESCRIPTION:\n{job_description[:20000]}"
 
     last_exc: Exception | None = None
     for attempt in range(2):
@@ -146,6 +154,7 @@ async def tailor_resume_sections(
                 system=system_prompt,
                 user=user_message,
                 schema_name="TailoredResume",
+                cached_prefix=cached_prefix,
             )
             data = _parse_json_response(raw)
 
@@ -205,29 +214,55 @@ Output JSON only, with exactly the same number of items as the input, in the sam
 """
 
 
-async def tailor_bullets_1to1(bullets: list[str], *, job_description: str, llm_client: Any) -> list[str] | None:
+def _accept_or_keep(original: str, rewritten: Any, *, known_terms: Collection[str]) -> str:
+    """The rewritten bullet, or the original when the rewrite cannot be trusted."""
+    text = str(rewritten).strip() if rewritten is not None else ""
+    if not is_faithful_rewrite(original, text, known_terms=known_terms):
+        return original
+    return text
+
+
+async def tailor_bullets_1to1(
+    bullets: list[str],
+    *,
+    job_description: str,
+    llm_client: Any,
+    known_terms: Collection[str] = (),
+) -> list[str] | None:
     """Rewrite each resume bullet 1:1 for the JD, preserving order and count. Returns a
     list the SAME length as ``bullets`` (blanks fall back to the original), or None when
-    the model output can't be used (caller then keeps the original formatting untouched)."""
+    the model output can't be used (caller then keeps the original formatting untouched).
+
+    A rewrite that claims something the original did not is dropped on its own rather
+    than failing the batch: the bullet keeps the candidate's honest text and every
+    other bullet still gets tailored. ``known_terms`` is the rest of their resume, so a
+    tool they genuinely list can move into the bullet the job cares about."""
     if not bullets:
         return []
     numbered = "\n".join(f"{index + 1}. {text}" for index, text in enumerate(bullets))
-    user_message = (
-        f"JOB DESCRIPTION:\n{job_description[:20000]}\n\n---\n\n"
-        f"RESUME BULLETS ({len(bullets)} total; rewrite each, keep order and count):\n{numbered}"
-    )
+    # Same batch of bullets, one job description after another: the bullets lead
+    # so that the part being repeated is the part a provider can reuse.
+    cached_prefix = f"RESUME BULLETS ({len(bullets)} total; rewrite each, keep order and count):\n{numbered}"
+    user_message = f"---\n\nJOB DESCRIPTION:\n{job_description[:20000]}"
     for _ in range(2):
         try:
             raw = await llm_client.complete_json(
-                system=_BULLET_REWRITE_SYSTEM, user=user_message, schema_name="bullet_rewrite"
+                system=_BULLET_REWRITE_SYSTEM,
+                user=user_message,
+                schema_name="bullet_rewrite",
+                cached_prefix=cached_prefix,
             )
         except Exception as exc:  # noqa: BLE001 - degrade to no-tailor; format stays preserved
             print(f"bullet rewrite LLM failed: {type(exc).__name__}: {exc}", file=sys.stderr)
             return None
         candidate = raw.get("bullets") if isinstance(raw, dict) else None
         if isinstance(candidate, list) and len(candidate) == len(bullets):
-            return [
-                (str(rewritten).strip() if rewritten is not None else "") or original
+            accepted = [
+                _accept_or_keep(original, rewritten, known_terms=known_terms)
                 for original, rewritten in zip(bullets, candidate, strict=True)
             ]
+            rejected = sum(1 for original, text in zip(bullets, accepted, strict=True) if text == original)
+            if rejected:
+                print(f"bullet rewrite: kept {rejected}/{len(bullets)} originals", file=sys.stderr)
+            return accepted
     return None

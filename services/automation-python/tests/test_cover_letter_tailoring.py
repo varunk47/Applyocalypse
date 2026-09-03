@@ -54,7 +54,7 @@ def _fake_client(response: dict[str, Any] | Exception, *, call_count: list[int] 
     """Return a mock LLM client whose complete_json returns the given response."""
     calls: list[int] = call_count if call_count is not None else []
 
-    async def _complete_json(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _complete_json(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         calls.append(1)
         if isinstance(response, Exception):
             raise response
@@ -70,7 +70,7 @@ def _two_response_client(first: dict[str, Any], second: dict[str, Any]) -> Any:
     responses = [first, second]
     index = [0]
 
-    async def _complete_json(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _complete_json(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         resp = responses[index[0]]
         index[0] = min(index[0] + 1, len(responses) - 1)
         return resp
@@ -101,8 +101,8 @@ def test_generate_cover_letter_returns_generated_cover_letter() -> None:
 def test_generate_cover_letter_with_sample_text_passes_snippet_in_prompt() -> None:
     calls: list[tuple[str, str]] = []
 
-    async def _capture(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
-        calls.append((system, user))
+    async def _capture(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
+        calls.append((system, f"{cached_prefix}\n\n{user}"))
         return {"cover_letter_text": _VALID_CL}
 
     client = AsyncMock()
@@ -126,7 +126,7 @@ def test_generate_cover_letter_with_sample_text_passes_snippet_in_prompt() -> No
 def test_generate_cover_letter_no_sample_omits_sample_section() -> None:
     calls: list[tuple[str, str]] = []
 
-    async def _capture(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _capture(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         calls.append((system, user))
         return {"cover_letter_text": _VALID_CL}
 
@@ -251,8 +251,13 @@ def test_generated_cover_letter_word_count_empty() -> None:
 # ---------------------------------------------------------------------------
 
 
+def whole_message(**kwargs: Any) -> str:
+    """Both halves of the user turn, as the model sees them."""
+    return "\n\n".join(_build_user_message(**kwargs))
+
+
 def test_build_user_message_includes_candidate_name() -> None:
-    msg = _build_user_message(
+    msg = whole_message(
         job_description="Some JD",
         canonical_profile=_PROFILE,
         cover_letter_sample=None,
@@ -261,7 +266,7 @@ def test_build_user_message_includes_candidate_name() -> None:
 
 
 def test_build_user_message_includes_experience_bullets() -> None:
-    msg = _build_user_message(
+    msg = whole_message(
         job_description="Some JD",
         canonical_profile=_PROFILE,
         cover_letter_sample=None,
@@ -271,7 +276,7 @@ def test_build_user_message_includes_experience_bullets() -> None:
 
 
 def test_build_user_message_handles_empty_profile_gracefully() -> None:
-    msg = _build_user_message(
+    msg = whole_message(
         job_description="JD text",
         canonical_profile={},
         cover_letter_sample=None,
@@ -282,7 +287,7 @@ def test_build_user_message_handles_empty_profile_gracefully() -> None:
 
 def test_build_user_message_truncates_sample_to_1200_chars() -> None:
     long_sample = "x" * 2000
-    msg = _build_user_message(
+    msg = whole_message(
         job_description="JD",
         canonical_profile=_PROFILE,
         cover_letter_sample=long_sample,

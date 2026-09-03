@@ -34,12 +34,41 @@ class StubHTMLElement {
     this._text = "";
     this.parentElement = null;
     this.ownerDocument = null;
-    this.rect = { width: 200, height: 30 };
+    this.__root = null;
+    this.rect = { left: 0, top: 0, width: 200, height: 30 };
     this.styleMap = { display: "block", visibility: "visible", opacity: "1" };
     this.disabled = false;
     this.required = false;
     this.focusCount = 0;
     this.blurCount = 0;
+    this.scrollIntoViewCount = 0;
+    this.clickCount = 0;
+    this.textContentWrites = 0;
+  }
+
+  /**
+   * Editability inherits, and `contenteditable="false"` stops it again, so this has
+   * to be answered by walking rather than by reading one attribute. Form controls
+   * are separated from editing surfaces by owning a `value`, not by this flag.
+   */
+  get isContentEditable() {
+    let node = this;
+    while (node) {
+      const raw = node.getAttribute("contenteditable");
+      if (raw !== null) return ["", "true", "plaintext-only"].includes(raw.toLowerCase());
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  /** What `execCommand("insertText")` does to a plain editable element. */
+  __insertText(text, replacesSelection) {
+    if (replacesSelection) {
+      this._childNodes = [];
+      this._text = text;
+    } else {
+      this._text = `${this._text}${text}`;
+    }
   }
 
   get children() {
@@ -49,8 +78,13 @@ class StubHTMLElement {
   appendChild(node) {
     node.parentElement = this;
     node.ownerDocument = this.ownerDocument;
+    if (node.__root === null) node.__root = this.__root;
     this._childNodes.push(node);
     return node;
+  }
+
+  getRootNode() {
+    return this.__root;
   }
 
   getAttribute(name) {
@@ -100,22 +134,49 @@ class StubHTMLElement {
     return [own, nested].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
   }
 
+  set textContent(next) {
+    this.textContentWrites += 1;
+    this._childNodes = [];
+    this._text = next == null ? "" : String(next);
+  }
+
   get innerText() {
     return this.textContent;
   }
 
   getBoundingClientRect() {
-    return { width: this.rect.width, height: this.rect.height };
+    const { left, top, width, height } = this.rect;
+    return { x: left, y: top, left, top, width, height, right: left + width, bottom: top + height };
   }
 
+  scrollIntoView() {
+    this.scrollIntoViewCount += 1;
+  }
+
+  click() {
+    this.clickCount += 1;
+    this.dispatchEvent(new StubEvent("click", { bubbles: true }));
+  }
+
+  contains(other) {
+    let node = other;
+    while (node) {
+      if (node === this) return true;
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  // Both take a selector list, exactly as querySelectorAll below does. Matching the
+  // raw string instead quietly answers "no" to every comma-separated question.
   matches(selector) {
-    return matchesSelector(this, selector);
+    return splitSelector(selector).some((part) => matchesSelector(this, part));
   }
 
   closest(selector) {
     let node = this;
     while (node) {
-      if (matchesSelector(node, selector)) return node;
+      if (node.matches(selector)) return node;
       node = node.parentElement;
     }
     return null;
@@ -167,6 +228,22 @@ class StubHTMLInputElement extends StubHTMLElement {
 
 class StubHTMLTextAreaElement extends StubHTMLInputElement {}
 
+/**
+ * `href` on a real anchor is resolved against the document, so a relative link
+ * comes back absolute. `isExternalLink` in the click script compares that
+ * against `location.origin`, and would wave every relative link through if the
+ * stub handed back the raw attribute.
+ */
+class StubHTMLAnchorElement extends StubHTMLElement {
+  get href() {
+    const raw = this.getAttribute("href");
+    if (raw === null) return "";
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw) || raw.startsWith("#")) return raw;
+    const origin = (this.ownerDocument && this.ownerDocument.__origin) || "";
+    return raw.startsWith("/") ? origin + raw : origin + "/" + raw;
+  }
+}
+
 class StubHTMLOptionElement extends StubHTMLElement {
   constructor() {
     super("option");
@@ -184,6 +261,7 @@ class StubHTMLSelectElement extends StubHTMLElement {
   constructor(tag) {
     super(tag);
     this.options = [];
+    this.multiple = false;
     this.nativeValueWrites = 0;
   }
 
@@ -203,6 +281,39 @@ class StubHTMLSelectElement extends StubHTMLElement {
     }
   }
 }
+
+const isPaintedAt = (element, x, y) => {
+  const style = element.styleMap;
+  if (style.display === "none" || style.visibility === "hidden") return false;
+  const { left, top, width, height } = element.rect;
+  if (width <= 0 || height <= 0) return false;
+  return x >= left && x <= left + width && y >= top && y <= top + height;
+};
+
+const stackingOrder = (element) => {
+  const raw = element.styleMap["z-index"] ?? element.styleMap.zIndex;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+/**
+ * Topmost element covering a point: highest z-index wins, and within one layer
+ * the element painted last does. Because `descendants` walks in document order,
+ * "last" is also the deepest, which is what the real hit test settles on.
+ */
+const hitTest = (root, x, y) => {
+  let winner = null;
+  let winningLayer = -Infinity;
+  for (const element of descendants(root)) {
+    if (!isPaintedAt(element, x, y)) continue;
+    const layer = stackingOrder(element);
+    if (layer >= winningLayer) {
+      winner = element;
+      winningLayer = layer;
+    }
+  }
+  return winner;
+};
 
 const descendants = (root) => {
   const out = [];
@@ -285,6 +396,32 @@ const installReactTracker = (node, property) => {
 };
 
 /**
+ * Simulates Quill, ProseMirror, TipTap, Lexical or Draft.js.
+ *
+ * All of them keep their own document model and treat the DOM as a projection of
+ * it. Assigning textContent updates only the projection, and the editor's next
+ * render paints the model straight back over it, so that write silently loses --
+ * the field looks filled for an instant and is empty by the time anyone checks.
+ * `execCommand("insertText")` raises the real beforeinput they listen for, which
+ * is why it is the one write all of them accept. Modelling that here is the whole
+ * reason this stub can tell a correct fill from a plausible-looking one.
+ */
+const installRichTextEditor = (node) => {
+  let model = node._text || "";
+  Object.defineProperty(node, "textContent", {
+    configurable: true,
+    get: () => model,
+    set: () => {
+      node.textContentWrites += 1;
+    },
+  });
+  Object.defineProperty(node, "innerText", { configurable: true, get: () => model });
+  node.__insertText = (text, replacesSelection) => {
+    model = replacesSelection ? text : `${model}${text}`;
+  };
+};
+
+/**
  * Simulates a controlled component that refuses (or reformats) the value it was
  * given: on `change` the framework writes its own value straight back through
  * the native prototype setter, exactly as a React re-render would.
@@ -300,16 +437,18 @@ const installRevertOnChange = (node, property, revertTo) => {
   });
 };
 
-const createElement = (spec, document) => {
+const createElement = (spec, document, root = document) => {
   const tag = String(spec.tag || "div").toLowerCase();
   let element;
   if (tag === "select") element = new StubHTMLSelectElement(tag);
   else if (tag === "textarea") element = new StubHTMLTextAreaElement(tag);
   else if (tag === "input") element = new StubHTMLInputElement(tag);
   else if (tag === "option") element = new StubHTMLOptionElement();
+  else if (tag === "a") element = new StubHTMLAnchorElement(tag);
   else element = new StubHTMLElement(tag);
 
   element.ownerDocument = document;
+  element.__root = root;
   element._attrs = { ...(spec.attrs || {}) };
   element._text = spec.text || "";
   if (spec.rect) element.rect = { ...element.rect, ...spec.rect };
@@ -318,9 +457,11 @@ const createElement = (spec, document) => {
   if (spec.disabled) element.disabled = true;
 
   if (tag === "select") {
+    if (spec.multiple) element.multiple = true;
     for (const optionSpec of spec.options || []) {
       const option = new StubHTMLOptionElement();
       option.ownerDocument = document;
+      option.__root = root;
       option._text = optionSpec.label == null ? "" : String(optionSpec.label);
       if (optionSpec.value !== undefined && optionSpec.value !== null) {
         option.setAttribute("value", String(optionSpec.value));
@@ -335,7 +476,28 @@ const createElement = (spec, document) => {
   if (spec.value !== undefined && element instanceof StubHTMLSelectElement) element.value = String(spec.value);
   if (spec.checked !== undefined && element instanceof StubHTMLInputElement) element._checked = Boolean(spec.checked);
 
-  for (const childSpec of spec.children || []) element.appendChild(createElement(childSpec, document));
+  for (const childSpec of spec.children || []) element.appendChild(createElement(childSpec, document, root));
+
+  // `frame: {elements: [...]}` on an iframe spec gives it a same-origin document of
+  // its own, and `shadow: [...]` on any element opens a shadow root under it. Both
+  // are roots the top document's querySelector cannot see into, which is the whole
+  // reason the discovery script walks rather than sweeps.
+  if (spec.frame) {
+    element.contentDocument = buildRoot(spec.frame, {
+      kind: "document",
+      origin: document.__origin,
+      host: element,
+    });
+  }
+  if (spec.shadow) {
+    element.shadowRoot = buildRoot({ elements: spec.shadow }, {
+      kind: "shadow",
+      document,
+      host: element,
+    });
+  }
+
+  if (spec.richTextEditor) installRichTextEditor(element);
 
   if (spec.react) {
     const type = (element.getAttribute("type") || "").toLowerCase();
@@ -349,35 +511,143 @@ const createElement = (spec, document) => {
   return element;
 };
 
-export const buildDom = (spec) => {
-  const document = {
-    title: spec.title || "",
-    activeElement: null,
-    forms: [],
-  };
-  const body = new StubHTMLElement("body");
-  body.ownerDocument = document;
-  document.body = body;
-  document.documentElement = body;
-  for (const childSpec of spec.elements || []) body.appendChild(createElement(childSpec, document));
+const computedStyleOf = (element) => ({ ...element.styleMap });
 
-  document.querySelectorAll = (selector) => body.querySelectorAll(selector);
-  document.querySelector = (selector) => body.querySelector(selector);
-  document.getElementById = (id) => body.querySelector(`#${id}`);
-  document.forms = body.querySelectorAll("form");
+/**
+ * Selection is per-document in a real browser, which is exactly why the fill
+ * script reaches for it through the element's own view rather than through the
+ * top window.
+ */
+const makeView = (root) => ({
+  getComputedStyle: computedStyleOf,
+  getSelection: () => root.__selection,
+});
+
+/**
+ * Build a queryable root and fill it from `spec.elements`.
+ *
+ * `options.kind` is "document" for the page and for each frame's own document, and
+ * "shadow" for an open shadow root. A shadow root is a DocumentFragment: it answers
+ * querySelector and getElementById, and it is what getRootNode returns for the
+ * elements inside it, but it is not their ownerDocument, which stays the containing
+ * document.
+ */
+const buildRoot = (spec, options) => {
+  const isShadow = options.kind === "shadow";
+  const root = isShadow
+    ? { host: options.host, __shadow: true }
+    : { title: spec.title || "", activeElement: null, forms: [], __origin: options.origin };
+  const document = isShadow ? options.document : root;
+  root.__host = options.host || null;
+  if (!isShadow) {
+    // Injected scripts reach getComputedStyle through the element's own view, so a
+    // frame document with no defaultView silently falls back to the top window and
+    // reads the wrong styles. Every document here has one.
+    root.defaultView = makeView(root);
+    root.__selection = {
+      __range: null,
+      removeAllRanges() {
+        this.__range = null;
+      },
+      addRange(range) {
+        this.__range = range;
+      },
+    };
+    root.createRange = () => ({
+      __node: null,
+      selectNodeContents(node) {
+        this.__node = node;
+      },
+    });
+    // Only insertText is modelled, because it is the only command the fill script
+    // issues. `spec.execCommandFails` is how a test asks for the browser that
+    // refuses, so the script's fallback is exercised rather than assumed.
+    root.execCommand = (command, showUI, value) => {
+      if (spec.execCommandFails || command !== "insertText") return false;
+      const target = root.activeElement;
+      if (!target || target.isContentEditable !== true) return false;
+      const range = root.__selection.__range;
+      // A real insertion replaces the selection. Whether the script selected the
+      // node's contents first is the difference between replacing a pre-filled
+      // draft and appending the answer to the end of it.
+      target.__insertText(String(value == null ? "" : value), Boolean(range) && range.__node === target);
+      return true;
+    };
+  }
+
+  const body = new StubHTMLElement(isShadow ? "shadow-root" : "body");
+  body.ownerDocument = document;
+  body.__root = root;
+  root.__body = body;
+  if (!isShadow) {
+    root.body = body;
+    root.documentElement = body;
+  }
+  for (const childSpec of spec.elements || []) body.appendChild(createElement(childSpec, document, root));
+
+  root.querySelectorAll = (selector) => body.querySelectorAll(selector);
+  root.querySelector = (selector) => body.querySelector(selector);
+  root.getElementById = (id) => body.querySelector(`#${id}`);
+  if (!isShadow) {
+    root.forms = body.querySelectorAll("form");
+    root.elementFromPoint = (x, y) => hitTest(body, x, y);
+  }
+  return root;
+};
+
+/** Every root reachable from `document`, outermost first, the way discovery walks. */
+const reachableRoots = (document) => {
+  const roots = [];
+  const queue = [document];
+  while (queue.length > 0) {
+    const root = queue.shift();
+    if (roots.includes(root)) continue;
+    roots.push(root);
+    for (const element of descendants(root.__body)) {
+      if (element.contentDocument) queue.push(element.contentDocument);
+      if (element.shadowRoot) queue.push(element.shadowRoot);
+    }
+  }
+  return roots;
+};
+
+/** How a test names the root a control was found in: "document", "frame:#id", "shadow:#id". */
+const rootLabel = (root, document) => {
+  if (root === document) return "document";
+  const host = root.__host ? root.__host.getAttribute("id") : null;
+  return `${root.__shadow ? "shadow" : "frame"}:${host ? `#${host}` : "?"}`;
+};
+
+export const buildDom = (spec) => {
+  const document = buildRoot(spec, {
+    kind: "document",
+    origin: spec.origin || "https://jobs.example.com",
+  });
+  const body = document.__body;
 
   const window = {
+    innerWidth: (spec.viewport || {}).width ?? 1280,
+    innerHeight: (spec.viewport || {}).height ?? 800,
     HTMLInputElement: StubHTMLInputElement,
     HTMLTextAreaElement: StubHTMLTextAreaElement,
     HTMLSelectElement: StubHTMLSelectElement,
-    HTMLAnchorElement: StubHTMLElement,
-    getComputedStyle: (element) => ({ ...element.styleMap }),
+    HTMLAnchorElement: StubHTMLAnchorElement,
+    getComputedStyle: computedStyleOf,
+    getSelection: () => document.__selection,
   };
 
+  const location = { origin: document.__origin, href: document.__origin + (spec.path || "/") };
+
   const snapshot = () =>
-    descendants(body)
-      .filter((element) => ["input", "textarea", "select"].includes(element.tagName.toLowerCase()))
-      .map((element) => ({
+    reachableRoots(document)
+      .flatMap((root) => descendants(root.__body).map((element) => ({ element, root })))
+      .filter(
+        ({ element }) =>
+          ["input", "textarea", "select"].includes(element.tagName.toLowerCase()) ||
+          (element.isContentEditable === true && !("value" in element)),
+      )
+      .map(({ element, root }) => ({
+        root: rootLabel(root, document),
         id: element.getAttribute("id"),
         name: element.getAttribute("name"),
         tag: element.tagName.toLowerCase(),
@@ -387,6 +657,9 @@ export const buildDom = (spec) => {
         selected_labels: (element.options || [])
           .filter((option) => option.selected === true)
           .map((option) => option.textContent),
+        text: element.innerText,
+        editable: element.isContentEditable === true,
+        text_content_writes: element.textContentWrites ?? 0,
         native_value_writes: element.nativeValueWrites ?? 0,
         native_checked_writes: element.nativeCheckedWrites ?? 0,
         focus_count: element.focusCount,
@@ -395,5 +668,12 @@ export const buildDom = (spec) => {
         react_saw_change: element.__reactSawChange === undefined ? null : element.__reactSawChange,
       }));
 
-  return { window, document, CSS: { escape: (value) => String(value) }, Event: StubEvent, snapshot };
+  return {
+    window,
+    document,
+    location,
+    CSS: { escape: (value) => String(value) },
+    Event: StubEvent,
+    snapshot,
+  };
 };

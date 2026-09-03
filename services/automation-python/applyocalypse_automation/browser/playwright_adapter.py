@@ -10,6 +10,7 @@ from .field_detection import (
     DOM_BLOCKER_DISCOVERY_SCRIPT,
     DOM_FIELD_DISCOVERY_SCRIPT,
     DOM_METADATA_CAPTURE_SCRIPT,
+    DOM_REACHED_FRAME_URLS_JS,
     DOM_VISIBLE_TEXT_SCRIPT,
     SCRIPTED_WRITE_FIELD_TYPES,
     FrameRef,
@@ -17,6 +18,8 @@ from .field_detection import (
     build_apply_field_value_script,
     build_click_by_text_script,
     build_final_submit_script,
+    dom_path_for,
+    driver_can_locate,
     fields_from_dom_snapshot,
     frame_url_is_worth_scanning,
     parse_apply_field_result,
@@ -43,6 +46,22 @@ PAGE_FINGERPRINT_PROBE_FUNCTION = (
 
 
 class PlaywrightBrowserAdapter(BrowserAdapter):
+    """The Playwright-protocol adapter, driven by Patchright rather than Playwright.
+
+    Patchright is a drop-in fork of Playwright -- same package layout, same API,
+    same two dependencies -- with the tells patched out of the driver rather than
+    papered over from inside the page. It runs its own scripts in isolated
+    execution contexts instead of enabling ``Runtime`` (the leak we hand-built
+    ``isolated_world.py`` to avoid on nodriver), drops the ``--enable-automation``
+    flag family, and reaches into closed shadow roots, which our own F9 traversal
+    cannot. Vanilla Playwright is not kept as a fallback: an adapter that silently
+    downgrades to the leaky driver would report a stealth posture it does not have.
+
+    The adapter keeps the name "playwright" because that is what it speaks and what
+    every persisted run record already says. ``driver_check`` reports the module it
+    actually imports, so the build can still be asked which driver it carries.
+    """
+
     name = "playwright"
 
     def __init__(self) -> None:
@@ -52,21 +71,30 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
 
     async def launch(self, *, run_id: str, user_data_dir: Path) -> BrowserStepResult:
         try:
-            from playwright.async_api import async_playwright  # type: ignore
+            from patchright.async_api import async_playwright  # type: ignore
         except ImportError:
             return BrowserStepResult(
                 False,
                 "playwright is not installed",
-                {"run_id": run_id, "user_data_dir": str(user_data_dir), "install_hint": "pip install playwright && playwright install chromium"},
+                {"run_id": run_id, "user_data_dir": str(user_data_dir), "install_hint": "pip install patchright"},
             )
 
         user_data_dir.mkdir(parents=True, exist_ok=True)
         try:
             self._playwright = await async_playwright().start()
+            # Patchright's documented configuration, and every part of it is load-bearing.
+            # ``channel="chrome"`` drives the real Chrome the user already has, which is
+            # also the browser nodriver drives, so no bundled Chromium has to be shipped
+            # or downloaded and the fingerprint is a genuine one rather than Chromium's.
+            # ``no_viewport`` leaves the window at its natural size instead of the fixed
+            # 1280x720 that Playwright otherwise forces on every page. Nothing else is
+            # passed: custom args, headers and user agents are what give the fork away,
+            # and the defaults already include --no-first-run.
             self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=str(user_data_dir),
+                channel="chrome",
                 headless=False,
-                args=["--no-first-run"],
+                no_viewport=True,
             )
             self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
         except Exception as exc:
@@ -118,13 +146,41 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             if frame is not main_frame and frame_url_is_worth_scanning(frame.url)
         ]
 
+    async def _frame_urls_the_dom_walk_reached(self) -> set[str]:
+        """Subframes discovery already covered from the top document, so we skip them.
+
+        Playwright lists every frame in the page, same-origin ones included, and the
+        discovery script descends into those by itself. Scanning both ways offers each
+        embedded question twice. Asking the page which documents it could reach is the
+        same test discovery makes, rather than a guess about origins made out here.
+        """
+        if self._page is None:
+            return set()
+        try:
+            reached = await self._page.main_frame.evaluate(DOM_REACHED_FRAME_URLS_JS)
+        except Exception:
+            # Losing this leaves duplicates, which the reviewer can see and dismiss.
+            # Losing detection outright because one probe failed is the worse trade.
+            return set()
+        if isinstance(reached, str):
+            try:
+                reached = json.loads(reached)
+            except json.JSONDecodeError:
+                return set()
+        if not isinstance(reached, list):
+            return set()
+        return {url for url in reached if isinstance(url, str) and url}
+
     async def detect_fields(self) -> list[BrowserField]:
         if self._page is None:
             return []
         main_frame = self._page.main_frame
         frames = self._page.frames
+        already_walked = await self._frame_urls_the_dom_walk_reached()
         fields: list[BrowserField] = []
         for frame in self._form_frames():
+            if frame is not main_frame and frame.url in already_walked:
+                continue
             try:
                 raw_result = await frame.evaluate(DOM_FIELD_DISCOVERY_SCRIPT)
             except Exception:
@@ -246,6 +302,12 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
     async def fill_field(self, field: BrowserField, value: str) -> BrowserStepResult:
         if self._page is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        if not driver_can_locate(field):
+            return BrowserStepResult(
+                False,
+                "field is inside an embedded document the driver cannot address",
+                {"field_id": field.field_id},
+            )
         frame, frame_error = self._frame_for(field)
         if frame is None:
             return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
@@ -261,7 +323,7 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
         frame, frame_error = self._frame_for(field)
         if frame is None:
             return BrowserStepResult(False, frame_error, {"field_id": field.field_id})
-        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES:
+        if field.field_type not in SCRIPTED_WRITE_FIELD_TYPES and driver_can_locate(field):
             filled = await self.fill_field(field, value)
             if not filled.ok:
                 return filled
@@ -269,7 +331,9 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             # against the top document would read a field that was never touched.
             return await verify_or_repair_text_write(frame.evaluate, field, value, fill_payload=filled.payload)
         try:
-            raw_result = await frame.evaluate(build_apply_field_value_script(field.selector, value))
+            raw_result = await frame.evaluate(
+                build_apply_field_value_script(field.selector, value, dom_path_for(field))
+            )
         except Exception as exc:
             return BrowserStepResult(False, "field value application failed", {"field_id": field.field_id, "error": str(exc)})
         return parse_apply_field_result(raw_result, field)
@@ -347,6 +411,15 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "upload file does not exist", {"path": str(path)})
         if self._page is None or not field.selector:
             return BrowserStepResult(False, "field selector unavailable", {"field_id": field.field_id})
+        if not driver_can_locate(field):
+            # Uploading is the one write with no scripted equivalent: a file input
+            # can only be set by the driver. Attaching the resume to whatever input
+            # the parent page happens to expose is worse than handing this back.
+            return BrowserStepResult(
+                False,
+                "file input is inside an embedded document the driver cannot address",
+                {"field_id": field.field_id},
+            )
         frame, frame_error = self._frame_for(field)
         if frame is None:
             return BrowserStepResult(False, frame_error, {"field_id": field.field_id})

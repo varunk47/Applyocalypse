@@ -11,6 +11,24 @@ def _string_list(value: Any) -> list[str]:
     return [str(item).strip() for item in value if str(item).strip()]
 
 
+def _date_range(entry: dict[str, Any]) -> str:
+    """``2019-06`` and no end date reads as ``2019-06 to Present``.
+
+    The canonical profile keeps the two endpoints in separate fields, so a
+    missing end date on an entry that has a start date is a role still held,
+    not an unknown one. A resume without dates is not merely thinner: an ATS
+    parses employment history by date, so omitting them mangles the history it
+    reconstructs.
+    """
+    start = str(entry.get("startDate") or "").strip()
+    end = str(entry.get("endDate") or "").strip()
+    if start and end:
+        return f"{start} to {end}"
+    if start:
+        return f"{start} to Present"
+    return end
+
+
 def build_cover_letter_docx(
     text: str,
     canonical_profile: dict[str, Any],
@@ -117,7 +135,10 @@ def build_resume_docx(
     email = str(profile.get("email") or "").strip()
     phone = str(profile.get("phone") or "").strip()
     location = str(profile.get("location") or "").strip()
-    linkedin = str(profile.get("linkedin") or "").strip()
+    # `linkedinUrl` is the canonical key. Reading `linkedin` matched nothing the
+    # profile ever emits, so this line silently resolved to "" on every run and
+    # the URL never reached a generated resume.
+    linkedin = str(profile.get("linkedinUrl") or "").strip()
     contact_parts = [part for part in [email, phone, location, linkedin] if part]
 
     one_page_plan = tailoring_plan.get("one_page_plan") if isinstance(tailoring_plan.get("one_page_plan"), dict) else {}
@@ -208,7 +229,7 @@ def build_resume_docx(
                 continue
             title = str(entry.get("title") or "").strip()
             company_name = str(entry.get("company") or "").strip()
-            heading = " | ".join(part for part in [title, company_name] if part)
+            heading = " | ".join(part for part in [title, company_name, _date_range(entry)] if part)
             if heading:
                 _add_plain(heading, bold=True)
             bullets_raw = _string_list(entry.get("bullets"))
@@ -241,7 +262,7 @@ def build_resume_docx(
             institution = str(entry.get("institution") or "").strip()
             degree = str(entry.get("degree") or "").strip()
             field_name = str(entry.get("field") or "").strip()
-            line = " | ".join(part for part in [institution, degree, field_name] if part)
+            line = " | ".join(part for part in [institution, degree, field_name, _date_range(entry)] if part)
             if line:
                 _add_plain(line)
 

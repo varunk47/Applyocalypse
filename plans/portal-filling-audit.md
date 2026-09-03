@@ -41,6 +41,30 @@ ATSes defaults to `playwright`**, whose method bodies have zero executable test 
 playwright test (`tests/test_portal_registry.py:391`) early-returns when playwright *is* installed, so
 on any dev machine it asserts nothing at all.
 
+> **Update.** This understated the problem. Playwright is not installed *anywhere*: it is absent from
+> `requirements.in`, from the lock file, from `pyproject.toml` and from the packaged worker's hidden
+> imports. So the declared default could never launch, and every ATS run silently fell back to nodriver.
+> All defaults are now `nodriver`. Read the "Adapter" column below as "was playwright"; the correction
+> at row 9 has the details and the guard that stops it recurring.
+>
+> **Second update, `d680eaa`.** The adapter is installed now. Its driver is Patchright, a drop-in
+> fork of Playwright with the automation tells patched out of the driver itself, and it is in
+> `requirements.in`, in the lock, in the PyInstaller bundle and required by `self-check`. The
+> defaults stay `nodriver`, but the fallback chain is `nodriver -> playwright -> seleniumbase` for
+> every portal, because the playwright adapter can enumerate frames and write inside the one that
+> owns a field and seleniumbase cannot. `tests/test_portal_registry.py` no longer has a test that
+> asserts nothing when the driver is present: the early-return case is the absent-driver case now.
+
+> **Third update, `9770f39`.** Driving the newly promoted adapter through the F9 nested-roots
+> fixture found it reporting six fields for four controls. Playwright lists frames regardless of
+> origin, so a same-origin embed arrived twice: once from the DOM walk that descends through
+> `contentDocument`, once from the frame loop. Every question inside it was offered twice, and the
+> second write would land on a control the first had already answered. Nodriver never showed this,
+> because a same-origin iframe is not a CDP target of its own. The adapter now asks the page which
+> subframes the walk actually entered and skips those, and `tests/test_browser_nested_roots.py` is
+> parametrised over both adapters, so the next one of these is caught by the suite rather than by
+> a hand-written probe.
+
 | Portal | Registered | Adapter | Workflow | Selectors | Tests | Genuinely usable? | Notes |
 |---|---|---|---|---|---|---|---|
 | workday | `portal_registry.py:37` | playwright | `ATS_DIRECT_FORM`, entry actions `portal_workflows.py:41` | none | ideal-HTML replay fixture `tests/test_portal_replay_fixtures.py:23-40` | **Partial** | ARIA comboboxes are now discovered and safely handled (`69c898f`); they were previously invisible. Still uncertified against a live posting, and the account-creation wall remains unhandled. Was: real Workday uses `data-automation-id` ARIA comboboxes, not `select`, so discovery could not see them. The repo's own quirk note says so (`portal_workflows.py:158-159`). Also an account-creation wall before the form, unhandled. |
@@ -203,6 +227,15 @@ No `iframe` traversal, no `shadowRoot` walk, no `[role="combobox"]`, `[role="lis
 roots; extend the selector set to ARIA widget roles and `[contenteditable]`; give each discovered
 field a frame path so the adapters can re-enter the right frame to write. This is the single largest
 functional gap.
+
+> **F3 status (2026-09-01).** Closed in four pieces. ARIA widget roles shipped in `69c898f`;
+> cross-origin iframes in the nodriver frame port; same-origin iframes and open shadow roots in
+> `a66d223`; `[contenteditable]` rich-text editors in `a753401`. Discovery now sweeps the top
+> document, every frame worth scanning, and every open shadow root, and each field records the
+> path back so the adapters re-enter the exact root to write. The rich-text case needed more than
+> a selector: Quill and ProseMirror keep their own document model and treat the DOM as a
+> projection, so the write goes through `execCommand('insertText')` rather than assigning
+> `textContent`, which the editor would simply repaint over.
 
 ### F4. Fields without a resolvable label are silently dropped [CRITICAL]
 
@@ -412,10 +445,15 @@ after upload.
 > `tests/test_hidden_file_input_discovery.py` (real JS against the DOM stub) and
 > `tests/test_seleniumbase_file_upload.py` (fake driver).
 >
+> The re-detect after upload, the other half of this finding, shipped under F11 —
+> see the status block there.
+>
 > **Still open from this finding:** the synthetic `DataTransfer` + `drop` fallback for a
-> dropzone with no `<input type="file">` at all, and the re-detect after upload (tracked
-> under F11). No evidence yet that a major ATS ships a dropzone without a backing input —
-> react-dropzone, which Greenhouse, Lever and Ashby build on, always renders one.
+> dropzone with no `<input type="file">` at all. No evidence yet that a major ATS ships a
+> dropzone without a backing input — react-dropzone, which Greenhouse, Lever and Ashby
+> build on, always renders one. Left unbuilt deliberately: writing a drop-event path
+> against a portal shape nobody has produced would be speculative, and it is the kind of
+> code that rots untested. If a real dropzone without an input turns up, this is the fix.
 
 ### F11. Workday's resume parse overwrites the fields we just filled, and nothing re-checks [HIGH]
 
@@ -438,6 +476,20 @@ It also silently reintroduces content the validator was supposed to gate.
 (`wait_for_page_text` already exists and is well-built — `page_readiness.py:40-59`), then re-detect,
 then apply text values, then verify. This is the one place a targeted per-portal quirk (Workday) is
 genuinely justified.
+
+> **Status: fixed.** `runner.py:2075-2086` splits the discovered fields into uploads and
+> everything else and walks `upload_fields + value_fields`, so nothing is typed until every
+> file has landed. At the boundary it takes a page fingerprint from before the uploads,
+> waits for the form to actually change (`wait_for_portal_page_change`, bounded by
+> `RESUME_PARSE_SETTLE_S`), and breaks out of the pass. `restart_after_uploads` then
+> `continue`s the outer loop (`:2295`), which re-reads the form from scratch at `:2049`
+> because `upload_attempt` was incremented on the way out. So the values written are the
+> ones written *after* Workday's parser has had its say, not before.
+>
+> `uploads_settled` makes this happen once per run rather than once per pass, and
+> `uploaded_document_targets` (`:2025`) keeps a restarted pass from attaching the same file
+> twice, which matters because Workday's attachment list appends rather than replaces.
+> Covered by `tests/test_upload_before_typing.py`.
 
 ### F12. Step progression clicks are unverified [HIGH]
 
@@ -631,33 +683,86 @@ and driving `PlaywrightAdapter` end to end would close the largest gap for modes
 - **`type="date"`/`"number"`/`"tel"` go through the plain typing path** (F8's routing at
   `nodriver_adapter.py:170`) with no format normalization; portal date pickers commonly reject typed
   input.
-- **CAPTCHA vendor coverage** is limited to recaptcha/hcaptcha/cloudflare/datadome
+- ~~**CAPTCHA vendor coverage** is limited to recaptcha/hcaptcha/cloudflare/datadome
   (`field_detection.py:186-215`); Arkose/FunCaptcha, PerimeterX, and Akamai are not detected, so those
-  interstitials read as "no fields found" rather than "blocked".
+  interstitials read as "no fields found" rather than "blocked".~~
+
+  > **Status: fixed**, and the finding understated it. The detector lives at
+  > `field_detection.py:641-745` now, not `:186-215`. Arkose and PerimeterX are detected, but chasing
+  > vendors one at a time was never going to close this: the list can only ever name the vendors we
+  > have already met, and an unrecognised challenge is exactly the case that hurts, because the field
+  > scan behind it comes back empty and the run reads the page as "nothing to fill here".
+  >
+  > So the live script gained the vendor-agnostic backstop its own offline twin already had. The twin
+  > (`html_replay._blockers_from_replay_text`) matched "press and hold" -- PerimeterX's challenge --
+  > while the browser matched nothing, so the two implementations disagreed about the same page,
+  > which defeats the point of the parity suite. Both now read one shared list,
+  > `CAPTCHA_CHALLENGE_PHRASES`, interpolated into the injected JS through the same `.replace()` the
+  > field-discovery script uses. Anything a challenge tells a person to do stops the run and hands
+  > over, whether or not we can name who served it.
+  >
+  > Vendors are matched on the origin they serve from, never on the element the integrator wrapped
+  > them in: Arkose's own setup guide hands the caller a trigger element that "can exist anywhere in
+  > your page" and serves its client API from a per-customer subdomain, so `arkoselabs.com` is the
+  > stable half and the container id is not.
+  >
+  > The phrase list is kept free of vendor names on purpose. Matching the word "recaptcha" in page
+  > text is the bug that once paused every run against a form whose only captcha was a passive footer
+  > badge, so `TestPhrasesCannotNameAVendor` in `tests/test_captcha_detection.py` fails if a vendor
+  > name is ever added to it, and re-checks that exact Greenhouse footer sentence against both the
+  > twin and a real browser.
+  >
+  > **Deliberately not covered:** Akamai Bot Manager, whose block page is usually a plain "Access
+  > Denied / Reference #" rather than a challenge -- that is a hard block, not something a person can
+  > solve, so filing it under CAPTCHA would tell the user the wrong thing. AWS WAF, Imperva and
+  > GeeTest are plausible but their selectors could not be confirmed against vendor documentation
+  > here, and a guessed selector is worse than a known gap: it reads as coverage while detecting
+  > nothing. All four are caught by the phrase backstop when their challenge asks the user to do
+  > something, which is the case that matters.
+  >
+  > Covered by `tests/test_captcha_detection.py` (default gate) and
+  > `tests/test_browser_blocker_detection.py` (real Chrome). The second exists because
+  > `detect_blockers` swallows every exception and returns `[]`, so a syntax error in the injected
+  > script is indistinguishable from a clean page -- the offline twin would keep passing while the
+  > shipped detector reported nothing on every page in the world.
 - **`field_resolution.py:51` reads `APPLYO_AUTOFILL_APPROVED_DEFAULTS`** to auto-approve defaults. I
   did not trace every path this env var opens; worth confirming it cannot bypass the EEO /
   criminal-history / previous-employer `requires_review=True` invariants (`answers.py:254,270-274,
-  277-282`). What would prove it: a parametrized test asserting those three categories stay
-  `requires_review=True` with the env var set to `1`.
+  277-282`). ~~What would prove it: a parametrized test asserting those three categories stay
+  `requires_review=True` with the env var set to `1`.~~
+
+  > **Status: fixed.** That test is `tests/test_runner_autofill_env.py`; the three categories hold
+  > `requires_review=True` with the variable set. This bullet outlived the fix.
 
 ## Prioritized fix plan
 
 Ordered by expected reduction in real-application failures per unit of effort.
 
-> **Status as of 2026-07-29.** 17 of the 19 rows are struck through, each naming the test
-> that pins it. What is genuinely still open is small and deliberately so:
+> **Status as of 2026-09-01.** 18 of the 19 rows are struck through, each naming the test
+> that pins it. What is genuinely still open is one thing, deliberately so:
 >
-> - **Row 9, open shadow roots.** ARIA widgets and cross-origin iframes shipped; shadow
->   roots did not, because no major ATS is known to put form fields in one. Building for
->   that would be speculative.
 > - **Row 15, the synthetic `DataTransfer` drop.** Only needed for a dropzone with no
 >   backing `<input type="file">` at all, and react-dropzone always renders one.
-> - **Row 16, a Playwright fixture-page E2E suite.** The saved-HTML replay suite and the
->   Node DOM-stub harness cover what they can offline; a real headless browser against
->   local fixture pages is the remaining gap.
 >
-> Struck rows are covered by unit and replay tests, not by a live application to a real
-> employer. Nothing here moves a portal off `FILL_CAPABILITY_UNPROVEN`.
+> Closed since the 2026-07-29 revision of this block:
+>
+> - **Row 9, same-origin iframes and open shadow roots** (`a66d223`). Discovery recurses into
+>   `iframe.contentDocument` where the same-origin policy permits it, and into every open
+>   `shadowRoot`. Shadow roots were previously called speculative; they were built because the
+>   traversal is the same walk as the same-origin frame case, not because an ATS was found
+>   using one.
+> - **Row 9, `[contenteditable]`** (`a753401`). See the F3 status note above.
+> - **Row 16, a fixture-page E2E suite.** It shipped as a real-Chrome suite driven by the
+>   adapter that actually ships, rather than by Playwright, which was not installed
+>   (`d680eaa` installs it, as Patchright, and puts it back in the fallback chain;
+>   `9770f39` parametrises `tests/test_browser_nested_roots.py` over both adapters that
+>   can reach a nested root, so the fixture page is now driven by Playwright too, while
+>   nodriver remains the adapter tried first):
+>   `tests/test_browser_fixture_parity.py` stands the fixture up in real Chrome and asserts
+>   that the offline twin in `browser/html_replay.py` agrees with it, field for field.
+>
+> Struck rows are covered by unit, replay and real-browser tests, not by a live application
+> to a real employer. Nothing here moves a portal off `FILL_CAPABILITY_UNPROVEN`.
 
 | # | Fix | Severity | Effort | Files to touch | Test to write first |
 |---|---|---|---|---|---|
@@ -669,7 +774,7 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 6 | ~~Stop dropping unlabeled fields; extend the label chain (`aria-labelledby`, `legend`, `title`)~~ **(done: `tests/test_label_resolution.py`)** | CRITICAL | S | `browser/field_detection.py`, `browser/html_replay.py` (keep chains identical) | Replay test on saved real HTML: an `aria-labelledby`-only required input is discovered with a usable label |
 | 7 | ~~Verify progression clicks actually advanced; surface portal validation errors~~ **(done: `tests/test_portal_step_progression.py`)** | HIGH | M | `runner.py`, `browser/field_detection.py` | Fixture test: a "Next" click that the page rejects returns `"blocked"` with the extracted error text, and does not increment the step index |
 | 8 | ~~Uploads first → settle via `wait_for_page_text` → re-detect → then text fields~~ **(done: `tests/test_upload_before_typing.py`)** | HIGH | M | `runner.py` | Fixture test emulating Workday: values written after a resume-parse repopulation survive |
-| 9 | ARIA widget roles **(done, 69c898f)** / cross-origin iframes **(done, Playwright)** / shadow roots **still open** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
+| 9 | ~~ARIA widget roles / cross-origin iframes / same-origin iframes / open shadow roots / `[contenteditable]`~~ **(done: `69c898f` ARIA; nodriver frame port for cross-origin; `a66d223` same-origin frames and shadow roots; `a753401` rich text)** | CRITICAL | L | `browser/field_detection.py`, all three adapters (frame-scoped writes), `browser/adapter.py` | Replay + Playwright tests: saved Greenhouse iframe embed yields its fields; a `role=combobox` renders as a selectable field with its options |
 
 > **F9 status (2026-07-29).** The ARIA half shipped in `69c898f`: `role=combobox|listbox|radiogroup`
 > and the Workday `aria-haspopup` + `data-automation-id` pickers are discovered, options are harvested
@@ -677,7 +782,34 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > fallthrough so an `<input role="combobox">` can no longer report a false success. A picker whose
 > popup was never opened refuses with `requires_human` rather than guessing.
 >
-> **Cross-origin iframes: done for the Playwright adapter.** The Greenhouse `grnhse_iframe` is served
+> **Correction — the Playwright-only version of this shipped to nobody.** Every ATS in
+> `portal_registry.py` declared `default_adapter="playwright"`, and `adapter_candidates_for_workflow`
+> put it first. But playwright is not in `requirements.in`, not in the lock file, not in
+> `pyproject.toml` and not in the PyInstaller hidden-import list. On a real install
+> `create_browser_adapter("playwright").launch(...)` returned `ok=False | playwright is not installed`
+> and the run fell through to nodriver silently. Nothing looked broken, which is exactly why it
+> survived: the frame work below was never the code any user ran.
+>
+> The fix was not to add playwright. It ships its own Chromium (~150MB), needs an awkward
+> driver-node-binary story under PyInstaller, and its patched Chromium is *worse* against the bot
+> detection this app exists to survive — which is why nodriver, which drives the user's real installed
+> Chrome, is in the stack at all. So: every ATS default is now `nodriver`, the frame support below was
+> ported to `nodriver_adapter.py`, and `test_portal_registry.py` asserts against the **installed
+> environment** that every declared default is importable. A default that only works on a developer's
+> machine is the failure being pinned, so a comment would not have been enough.
+>
+> **Coverage difference between the two adapters.** Playwright's `page.frames` enumerates same-origin
+> frames too; nodriver reaches frames through Chrome's site isolation, where a cross-origin iframe gets
+> its own renderer and its own CDP target and comes back as a connectable `IFrame`. So the nodriver
+> port covers out-of-process frames only. That is not a regression: the discovery JS
+> (`field_detection.py:255`) is a plain `document.querySelectorAll` that never descends into any
+> iframe, so same-origin embeds were already missed by every adapter. It is a separate open gap.
+>
+> One nodriver-specific hazard: `get_frames()` is rebuilt from `Target.getTargets` on every call and
+> does not promise a stable order. The frame **URL** is therefore the key and `frame_index` is only a
+> tiebreaker between same-URL frames, and only when it agrees with the URL.
+>
+> **Cross-origin iframes: done for the Playwright adapter, and now for nodriver.** The Greenhouse `grnhse_iframe` is served
 > from `job-boards.greenhouse.io` on an employer domain, so walking `iframe.contentDocument` from the
 > injected script never reaches it. `detect_fields` now sweeps the top document plus every subframe
 > that could hold form content (`frame_url_is_worth_scanning` skips CAPTCHA, analytics, chat and media
@@ -689,16 +821,25 @@ Ordered by expected reduction in real-application failures per unit of effort.
 > would look like a success while leaving the real field empty. Clicks try the top document first and
 > only then the embedded frames, so a portal that hosts its own form behaves exactly as before.
 >
-> No protocol change was needed: `BrowserField.metadata` is already `dict[str, Any]`, so only
-> `playwright_adapter.py` changed. The SeleniumBase and nodriver adapters never set frame metadata and
-> keep their top-frame behaviour.
+> No protocol change was needed: `BrowserField.metadata` is already `dict[str, Any]`, so only the two
+> adapters changed. SeleniumBase never sets frame metadata and keeps its top-frame behaviour.
+> `tests/test_nodriver_cross_origin_frames.py` mirrors the Playwright suite against nodriver's shape
+> (a fake tab whose `get_frames()` returns fakes carrying a `.target.url`), including the two failures
+> that must never be silent: a vanished frame refusing instead of writing to the top document, and
+> ambiguous same-URL frames refusing rather than guessing.
 >
 > **Known limitation:** `_probe_page_fingerprint` stays top-document-only. Making it frame-aware would
 > let a transient frame-evaluate failure register as a spurious "page changed" — a false positive in
 > the one direction that would wrongly claim a submit worked. Top-only reports "unchanged" on an
 > embedded portal, which routes to a human check instead.
 >
-> **Still open:** open shadow roots.
+> **Closed (`a66d223`).** Same-origin iframes and open shadow roots are swept too. The discovery
+> script descends into `iframe.contentDocument` where the same-origin policy permits it and into
+> every open `shadowRoot`, and each field carries the path back through those hops so a write
+> re-enters the exact root the field was found in. The refusal behaviour is unchanged and matters
+> more here, not less: a root that has gone away, or a selector that answers in more than one,
+> refuses rather than falling back to the top document, because a wrong-document write looks like
+> a success while leaving the real field empty.
 
 | 10 | ~~Rank option/answer matching, require a unique winner, pause on ties~~ **(done: `tests/test_select_option_matching.py`)** | HIGH | M | `browser/field_detection.py`, `runner.py`, `answers.py` | Table-driven test: `"India"` does not select `"Indiana"`; `"No, I do not require sponsorship"` does not select the first `"No"`-adjacent option; ambiguous cases return `ok:false` |
 | 11 | ~~Replace fixed post-click sleeps with `wait_for_page_text` + change detection~~ **(done: `tests/test_post_click_readiness.py`)** | MEDIUM | S | all three adapters, `runner.py` | Existing `tests/test_page_readiness.py` pattern, extended to the click paths with an injected clock |
@@ -706,10 +847,11 @@ Ordered by expected reduction in real-application failures per unit of effort.
 | 13 | ~~Make the Cloudflare auto-solve path reachable~~ **(done: `tests/test_seleniumbase_readiness_and_cloudflare.py`)** | MEDIUM | XS | `browser/seleniumbase_adapter.py` or `browser/field_detection.py` | Test that a Cloudflare-vendor blocker satisfies `_is_cloudflare_blocker` |
 | 14 | ~~Wire up or delete inert plan metadata (`review_text_detected`, per-portal `max_automated_steps`)~~ **(done: `tests/test_portal_plan_metadata.py, tests/test_final_submit_gate.py`)** | MEDIUM | M | `browser/portal_adapters.py`, `runner.py` | Test that `READY_TO_SUBMIT` is not emitted unless a review/confirmation signal was observed |
 | 15 | ~~Relax the visibility gate for file inputs~~ **(done: gate exempts file inputs, SeleniumBase reveals before `send_keys`, tests added)**; a true drag-drop event fallback is still open | HIGH | M | `browser/field_detection.py`, `browser/seleniumbase_adapter.py` | Fixture test: an `opacity:0` file input behind a styled dropzone is discovered and receives the file |
-| 16 | ~~Build a real fixture suite: saved HTML from the 6 ATSes~~ **(done: `tests/test_portal_replay_fixtures.py`; the injected JS is also executed for real against a Node DOM stub, `tests/js_bridge.py`)** + a Playwright fixture-page E2E suite **still open** | MEDIUM | L | `tests/` (new `browser_e2e/`), `browser/html_replay.py` (align label chain) | The suite itself — it is what makes fixes 1-15 verifiable and non-regressing |
+| 16 | ~~Build a real fixture suite: saved HTML from the 6 ATSes~~ **(done: `tests/test_portal_replay_fixtures.py`; the injected JS is also executed for real against a Node DOM stub, `tests/js_bridge.py`)** + ~~a fixture-page E2E suite~~ **(done: `tests/test_browser_fixture_parity.py` — real Chrome through the shipping nodriver adapter, asserting the offline twin agrees field for field)** | MEDIUM | L | `tests/` (new `browser_e2e/`), `browser/html_replay.py` (align label chain) | The suite itself — it is what makes fixes 1-15 verifiable and non-regressing |
 | 17 | ~~Rename `live_certification` to a reachability probe; define a real fill-only certification~~ **(done: `tests/test_live_certification.py`)** | MEDIUM | S | `browser/live_certification.py`, `browser/portal_adapters.py` | Test that a 200 OK alone cannot produce a "certified" status |
 | 18 | ~~Prune or implement: drop `workable` quirk (unregistered) or register Workable~~ **(done: registered, test added)** | LOW | XS | `browser/portal_workflows.py`, `browser/portal_registry.py` | Registry consistency test: every key in `ATS_PORTAL_QUIRKS` and `ATS_ENTRY_ACTIONS` is a registered `portal_id` |
 | 19 | ~~Confirm `APPLYO_AUTOFILL_APPROVED_DEFAULTS` cannot bypass the EEO/criminal/prior-employer review gates~~ **(done: `tests/test_runner_autofill_env.py`)** | LOW | XS | `field_resolution.py`, `answers.py` | Parametrized test asserting `requires_review=True` for all three categories with the env var set |
+| 20 | ~~Refuse to write a selector that two fields in one document answer to~~ **(done: `tests/test_ambiguous_selectors.py`)** | HIGH | S | `browser/field_detection.py` | Two raw fields carrying `#email`: both must come back with `selector=None` rather than both resolving to the first match |
 
 ## What I could not verify, and what would prove it
 
@@ -731,6 +873,47 @@ a live run:
 4. **`playwright_adapter.py` `apply_field_value` routing** (`:187-195`) I read as select/checkbox/radio
    → JS, text → `.fill()`. `.fill()` is React-safe, so playwright escapes F8 and the text half of F5.
    I am confident in the nodriver and seleniumbase routings (`:170-171` and `:249-250` read verbatim).
+6. **Shadow DOM is unmeasured, and piercing it is not the small fix it looks like.** Every discovery
+   sweep uses plain `document.querySelectorAll`, which does not cross an open shadow boundary, so a
+   form built from custom elements would read as having no fields. The tempting fix, adding shadow
+   traversal to discovery, is worse than the gap: discovery emits a CSS selector string and the write
+   and verify scripts resolve it with `document.querySelector`, and a selector string cannot cross a
+   shadow boundary either. A field found inside a shadow root would come back as `#email`, and that
+   lookup would either miss it or, since shadow DOM exists precisely so ids may be reused, land on a
+   different element in the light DOM and verify the wrong write as successful. Doing this properly
+   means an ordered path of host selectors carried on the field and resolved by one shared walker in
+   all three scripts. That is worth building only against a portal known to need it, and I could not
+   establish that any registered ATS serves its form this way. *Proof:* on one live posting per ATS,
+   evaluate `document.querySelectorAll('*')` filtered to nodes with a non-null `shadowRoot`, and check
+   whether any of them contains an `input`, `textarea` or `select`. Registered candidates worth
+   probing first are the ones built on component frameworks that own their internals: Oracle
+   Recruiting Cloud and SAP SuccessFactors. Note that a closed shadow root is unreachable from page
+   script at all, so it would remain a hand-off to the human regardless.
+
+7. **Same-origin iframes fall between the two mechanisms, and the read being easy is a trap.**
+   Cross-origin frames are handled: Chrome's site isolation gives each one its own renderer and its
+   own CDP target, `nodriver_adapter._embedded_form_frames` collects them from `page.get_frames()`,
+   and every field carries a `FrameRef` so the write re-enters the frame it came from. A same-origin
+   iframe gets none of that. It shares the parent's renderer, so it is not a separate target and
+   never appears in `get_frames()`, and the discovery script only ever queries `document`
+   (`field_detection.py:256`), which does not descend into `contentDocument`. A form served that way
+   reads as a page with no fields, which is the same silent outcome as the cross-origin case before
+   it was fixed. The trap is that same-origin makes the read look free, since
+   `iframe.contentDocument` is right there: adding that walk to discovery alone would produce fields
+   whose selectors resolve against the wrong document. Discovery emits a CSS selector string, and
+   `document.querySelector` in the verify and apply scripts cannot cross a frame boundary any more
+   than it can cross a shadow boundary, so `#email` would either miss or land on a same-named input
+   in the parent and verify the wrong write as successful. Native typing has the same problem one
+   level down: all three adapters resolve an element handle per frame. This wants exactly what item 6
+   wants, an ordered path carried on the field and resolved by one shared walker, which argues for
+   doing both at once rather than either alone. *Proof:* the pattern that produces it is an employer
+   reverse-proxying the ATS onto its own hostname rather than embedding the vendor's, so probe
+   `careers.*` domains that serve a known ATS's markup from a first-party path, and on each evaluate
+   `Array.from(document.querySelectorAll('iframe')).map(f => { try { return [f.src,
+   f.contentDocument && f.contentDocument.querySelectorAll('input,textarea,select').length]; }
+   catch (e) { return [f.src, 'cross-origin']; } })`. Any row with a number rather than
+   `'cross-origin'` is a form this worker currently cannot see.
+
 5. **Test coverage claims** are based on enumerating `def test_*` across `tests/` and grepping for the
    script builders. I did not run the suite. *Proof:* `pnpm test:python` plus
    `pytest --cov=applyocalypse_automation.browser --cov-report=term-missing`, which would put a number

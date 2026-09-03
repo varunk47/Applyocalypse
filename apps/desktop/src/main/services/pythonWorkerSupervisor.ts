@@ -23,6 +23,8 @@ export type StartWorkerInput = {
   /** Secret values that must be redacted from supervisor stderr but are NOT passed via child env. */
   secretsForRedaction?: Record<string, string>;
   workDir: string;
+  /** Root of the pooled persistent Chrome profiles. Omitted, the worker uses a throwaway profile in workDir. */
+  browserProfileRoot?: string;
 };
 
 type ActiveWorker = {
@@ -69,7 +71,8 @@ export class PythonWorkerSupervisor {
       ...(input.jobMetadataFile ? ["--job-metadata-file", input.jobMetadataFile] : []),
       ...(input.profileJsonFile ? ["--profile-json-file", input.profileJsonFile] : []),
       ...(input.coverLetterSampleFile ? ["--cover-letter-sample-file", input.coverLetterSampleFile] : []),
-      ...(input.outputDir ? ["--output-dir", input.outputDir] : [])
+      ...(input.outputDir ? ["--output-dir", input.outputDir] : []),
+      ...(input.browserProfileRoot ? ["--browser-profile-root", input.browserProfileRoot] : [])
     ];
 
     const providerEnv = input.providerEnv ?? {};

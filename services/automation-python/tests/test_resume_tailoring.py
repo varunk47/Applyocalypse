@@ -88,7 +88,7 @@ _LEGACY_RESPONSE = {
 
 
 def _client_returning(response: dict[str, Any]) -> Any:
-    async def _complete(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _complete(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         return response
     c = AsyncMock()
     c.complete_json = _complete
@@ -183,7 +183,7 @@ def test_to_dict_new_keys_default_empty() -> None:
 def test_font_size_parameter_flows_to_system_prompt() -> None:
     calls: list[str] = []
 
-    async def _capture(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _capture(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         calls.append(system)
         return _FULL_RESPONSE
 
@@ -209,7 +209,7 @@ def test_font_size_parameter_flows_to_system_prompt() -> None:
 def test_tailor_resume_sections_retries_on_missing_keys() -> None:
     call_count = [0]
 
-    async def _flaky(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _flaky(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         call_count[0] += 1
         if call_count[0] == 1:
             return {"summary": "partial"}
@@ -228,7 +228,7 @@ def test_tailor_resume_sections_retries_on_missing_keys() -> None:
 
 
 def test_tailor_resume_sections_returns_none_after_two_failures() -> None:
-    async def _bad(*, system: str, user: str, schema_name: str) -> dict[str, Any]:
+    async def _bad(*, system: str, user: str, schema_name: str, cached_prefix: str = "") -> dict[str, Any]:
         return {"summary": "no keys"}
 
     c = AsyncMock()
