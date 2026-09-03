@@ -261,6 +261,7 @@ class StubHTMLSelectElement extends StubHTMLElement {
   constructor(tag) {
     super(tag);
     this.options = [];
+    this.multiple = false;
     this.nativeValueWrites = 0;
   }
 
@@ -456,6 +457,7 @@ const createElement = (spec, document, root = document) => {
   if (spec.disabled) element.disabled = true;
 
   if (tag === "select") {
+    if (spec.multiple) element.multiple = true;
     for (const optionSpec of spec.options || []) {
       const option = new StubHTMLOptionElement();
       option.ownerDocument = document;

@@ -313,13 +313,20 @@ def test_fill_field_replaces_existing_contents(
 
 
 @pytest.mark.parametrize("adapter_name,builder", ADAPTER_BUILDERS)
-@pytest.mark.parametrize("field_type", ["text", "email", "tel", "textarea", "url", "number", "date"])
+@pytest.mark.parametrize("field_type", ["text", "email", "tel", "textarea", "url"])
 def test_apply_field_value_routes_text_like_types_through_replace(
     adapter_name: str,
     builder: Callable[[str], AdapterHarness],
     field_type: str,
 ) -> None:
-    """Non-{select,checkbox,radio} types go through fill_field, which must replace."""
+    """A field that takes the text a person wrote goes through fill_field, which must replace.
+
+    ``date`` and ``number`` used to be on this list and are deliberately not any
+    more: neither accepts prose through keystrokes, so they moved to the scripted
+    write that coerces first. ``tel`` stays, because a phone field does take free
+    text. The companion test below parametrizes off ``SCRIPTED_WRITE_FIELD_TYPES``,
+    so a type can never be absent from both lists.
+    """
     harness = builder("prefilled-by-portal")
     result = asyncio.run(harness.adapter.apply_field_value(make_field(field_type=field_type), "typed"))
 

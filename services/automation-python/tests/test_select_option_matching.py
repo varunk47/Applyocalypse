@@ -14,13 +14,14 @@ from js_bridge import run_browser_script, state_for
 from applyocalypse_automation.browser.field_detection import build_apply_field_value_script
 
 
-def _select_spec(options: list[dict[str, str]]) -> dict:
+def _select_spec(options: list[dict[str, str]], *, multiple: bool = False) -> dict:
     return {
         "elements": [
             {
                 "tag": "select",
                 "attrs": {"id": "answer", "name": "answer"},
                 "react": True,
+                "multiple": multiple,
                 "options": options,
             }
         ]
@@ -107,3 +108,81 @@ def test_disabled_placeholder_options_are_never_selected() -> None:
 
     assert outcome["result"]["ok"] is True
     assert state_for(outcome["state"], "answer")["selected_labels"] == ["No"]
+
+
+# --------------------------------------------------------------------------- #
+# <select multiple>
+#
+# The single-select path deselects everything that is not the winner, so a
+# question asking for every language you speak kept exactly one of the answers.
+# --------------------------------------------------------------------------- #
+
+
+def _multi(reviewed_value: str, options: list[dict[str, str]]) -> dict:
+    outcome = run_browser_script(
+        build_apply_field_value_script("#answer", reviewed_value), _select_spec(options, multiple=True)
+    )
+    return {"result": outcome["result"], "state": state_for(outcome["state"], "answer")}
+
+
+@pytest.mark.parametrize(
+    ("options", "reviewed_value", "expected_labels"),
+    [
+        (_labels("English", "Spanish", "French"), "English, Spanish", ["English", "Spanish"]),
+        (_labels("English", "Spanish", "French"), "English; French", ["English", "French"]),
+        (_labels("Python", "Go", "Rust"), "Python\nRust", ["Python", "Rust"]),
+        (_labels("Python", "Go", "Rust"), "Python | Go | Rust", ["Python", "Go", "Rust"]),
+        # One answer is still one answer.
+        (_labels("English", "Spanish"), "Spanish", ["Spanish"]),
+        # Selections are reported in DOM order, not in the order they were written.
+        (_labels("English", "Spanish", "French"), "French, English", ["English", "French"]),
+        # Naming the same option twice selects it once.
+        (_labels("English", "Spanish"), "English, English", ["English"]),
+    ],
+)
+def test_every_named_option_is_selected(options, reviewed_value, expected_labels) -> None:
+    written = _multi(reviewed_value, options)
+
+    assert written["result"]["ok"] is True, written["result"]
+    assert written["result"]["action"] == "select_options"
+    assert written["state"]["selected_labels"] == expected_labels
+
+
+def test_an_option_whose_own_label_holds_the_separator_is_matched_whole() -> None:
+    """Splitting "Berkeley, CA" would turn one hit into two misses."""
+    options = _labels("Berkeley, CA", "Berkeley Heights, NJ", "Cambridge, MA")
+
+    written = _multi("Berkeley, CA", options)
+
+    assert written["result"]["ok"] is True, written["result"]
+    assert written["state"]["selected_labels"] == ["Berkeley, CA"]
+
+
+def test_the_native_value_setter_is_never_used_on_a_multi_select() -> None:
+    """`value` on a multi-select is singular: writing it collapses the selection."""
+    written = _multi("English, Spanish", _labels("English", "Spanish", "French"))
+
+    assert written["state"]["native_value_writes"] == 0
+    assert written["state"]["selected_labels"] == ["English", "Spanish"]
+
+
+@pytest.mark.parametrize(
+    ("options", "reviewed_value"),
+    [
+        # One part matches nothing: a half-filled multi-select reads as answered.
+        (_labels("English", "Spanish"), "English, Klingon"),
+        # One part is ambiguous between two options.
+        (_labels("Master of Science", "Master of Arts", "PhD"), "PhD, Master"),
+        # Nothing matches at all.
+        (_labels("English", "Spanish"), "Klingon, Sindarin"),
+        # A single unmatched value is not rescued by splitting.
+        (_labels("English", "Spanish"), "Klingon"),
+    ],
+)
+def test_one_bad_part_refuses_the_whole_write(options, reviewed_value) -> None:
+    written = _multi(reviewed_value, options)
+
+    assert written["result"]["ok"] is False, written["result"]
+    assert written["result"]["action"] == "select_options"
+    assert written["result"]["value_matched"] is False
+    assert written["state"]["selected_labels"] == []

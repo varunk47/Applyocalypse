@@ -339,11 +339,18 @@ const labelSourcesFor = (element) => {
 # stealthier write, but every adapter clears before typing and ``clear()`` on a
 # contenteditable does nothing at all, so the answer would be appended to whatever
 # draft the box already holds -- audit row 1's bug wearing a different element.
+# ``date`` and ``number`` are here because neither takes the text a person wrote.
+# A date input is a segmented control that only accepts yyyy-mm-dd through .value,
+# and a number input discards anything it cannot parse, so typing "June 15, 2019"
+# or "$120,000" leaves both of them empty. The scripted write coerces first and
+# refuses what it cannot coerce, which keeps a guessed date out of a form.
 SCRIPTED_WRITE_FIELD_TYPES: frozenset[str] = frozenset(
     {
         "select",
         "checkbox",
         "radio",
+        "date",
+        "number",
         "aria_combobox",
         "aria_listbox",
         "aria_radiogroup",
@@ -359,14 +366,49 @@ _FIELD_DISCOVERY_BODY_JS = r"""
     const tagName = element.tagName.toLowerCase();
     return tagName === 'input' ? (element.getAttribute('type') || 'text').toLowerCase() : tagName;
   };
-  const optionsFor = (element) => {
-    if (element.tagName.toLowerCase() !== 'select') return [];
-    return Array.from(element.options || []).map((option) => ({
-      value: option.getAttribute('value') || option.value || '',
-      label: (option.textContent || '').trim(),
-      selected: option.selected === true,
-      disabled: option.disabled === true
+  // A radio group is one question, and the write half already treats it as one:
+  // set_radio collects every input sharing the name and ranks their labels. The
+  // discovery half emitted each button as a field carrying no options at all, so
+  // the review layer was asked N times which of N buttons to tick instead of once
+  // which answer the question takes. Reported in a <select>'s shape so nothing
+  // downstream has to learn a second one.
+  const radioGroupOptionsFor = (element, root) => {
+    const name = element.getAttribute('name');
+    if (!name) return [];
+    const peers = Array.from(root.querySelectorAll(`input[type="radio"][name=${attrValue(name)}]`)).map((peer) => {
+      const resolved = resolveLabelFromSources(labelSourcesFor(peer));
+      return {
+        peer,
+        value: peer.getAttribute('value') || '',
+        label: resolved.label_synthetic ? '' : String(resolved.label || '').trim()
+      };
+    });
+    // An option label has one job: to tell this option apart from its siblings. A
+    // button with no label of its own resolves to the group's <legend>, which every
+    // peer shares and which therefore names none of them, so a label is only used
+    // when every peer has one and they are all different. Otherwise the value
+    // attribute is the only thing left that distinguishes them.
+    const labels = peers.map((entry) => entry.label);
+    const distinguishing = labels.every(Boolean) && new Set(labels).size === labels.length;
+    return peers.map((entry) => ({
+      value: entry.value,
+      label: distinguishing ? entry.label : entry.value,
+      selected: entry.peer.checked === true,
+      disabled: entry.peer.disabled === true
     }));
+  };
+  const optionsFor = (element, root) => {
+    const tagName = element.tagName.toLowerCase();
+    if (tagName === 'select') {
+      return Array.from(element.options || []).map((option) => ({
+        value: option.getAttribute('value') || option.value || '',
+        label: (option.textContent || '').trim(),
+        selected: option.selected === true,
+        disabled: option.disabled === true
+      }));
+    }
+    if (tagName !== 'input' || (element.getAttribute('type') || '').toLowerCase() !== 'radio') return [];
+    return radioGroupOptionsFor(element, root);
   };
   const selectorFor = (element, type) => {
     const id = element.getAttribute('id');
@@ -523,7 +565,7 @@ _FIELD_DISCOVERY_BODY_JS = r"""
         file_count: type === 'file' && element.files ? element.files.length : null,
         value: ['checkbox', 'radio'].includes(type) ? element.getAttribute('value') : null,
         checked: ['checkbox', 'radio'].includes(type) ? element.checked === true : null,
-        options: optionsFor(element)
+        options: optionsFor(element, root)
       }
     });
   }
@@ -1199,6 +1241,73 @@ _FIELD_WRITE_HELPERS_JS = r"""
     const selected = Array.from(element.options || []).find((option) => option.selected === true);
     return selected ? String(selected.textContent || '').trim() : '';
   };
+  const selectedOptionLabels = (element) =>
+    Array.from(element.options || [])
+      .filter((option) => option.selected === true)
+      .map((option) => String(option.textContent || '').trim())
+      .join(', ');
+  // <input type="date"> accepts exactly one wire format, yyyy-mm-dd, and quietly
+  // drops anything else: the browser leaves .value empty and the verdict below
+  // reports a write that never landed. Coercing here is what makes the answer land
+  // at all. type="tel" takes free text, so it is deliberately left untouched.
+  const MONTH_NAMES = [
+    'january', 'february', 'march', 'april', 'may', 'june',
+    'july', 'august', 'september', 'october', 'november', 'december'
+  ];
+  const pad2 = (value) => (value < 10 ? '0' : '') + value;
+  const isoDate = (year, month, day) => {
+    if (!(year >= 1000 && year <= 9999)) return null;
+    if (!(month >= 1 && month <= 12) || !(day >= 1 && day <= 31)) return null;
+    // Rejects the 31st of a 30-day month and the 29th of a common February, which
+    // the range checks above happily accept.
+    const candidate = new Date(Date.UTC(year, month - 1, day));
+    if (candidate.getUTCMonth() !== month - 1 || candidate.getUTCDate() !== day) return null;
+    return year + '-' + pad2(month) + '-' + pad2(day);
+  };
+  const asDateValue = (raw) => {
+    const text = String(raw == null ? '' : raw).trim();
+    if (!text) return null;
+    const iso = /^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/.exec(text);
+    if (iso) return isoDate(Number(iso[1]), Number(iso[2]), Number(iso[3]));
+    // A month spelled out is never ambiguous, in either order: "June 15, 2019"
+    // and "15 June 2019" both say the same thing to everyone.
+    const monthIndex = MONTH_NAMES.findIndex(
+      (name) => new RegExp('\\b' + name.slice(0, 3) + '[a-z]*\\b', 'i').test(text)
+    );
+    if (monthIndex !== -1) {
+      const numbers = (text.match(/\d+/g) || []).map(Number);
+      const year = numbers.find((value) => value >= 1000);
+      const day = numbers.find((value) => value >= 1 && value <= 31 && value !== year);
+      if (year === undefined || day === undefined) return null;
+      return isoDate(year, monthIndex + 1, day);
+    }
+    const parts = /^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/.exec(text);
+    if (parts) {
+      const first = Number(parts[1]);
+      const second = Number(parts[2]);
+      // 03/04/2019 is March 4th to a US portal and April 3rd to most of the rest of
+      // the world, and nothing on the page says which one this form means. Guessing
+      // writes a plausible wrong date that no later check can catch, so it refuses
+      // and the run pauses for the person who knows.
+      if (first <= 12 && second <= 12 && first !== second) return null;
+      return first > 12
+        ? isoDate(Number(parts[3]), second, first)
+        : isoDate(Number(parts[3]), first, second);
+    }
+    return null;
+  };
+  // Same silent drop on type="number": strip what a person writes around a number
+  // and a number input will not take, then refuse anything still not a number
+  // rather than guess at it ("120k", "about 5").
+  const asNumberValue = (raw) => {
+    const text = String(raw == null ? '' : raw).trim().replace(/[$\u00a3\u20ac\u00a5\s]/g, '');
+    // Commas are only thousands separators when they sit in thousands positions;
+    // "1,5" is a decimal comma somewhere, and turning it into 15 is off by ten.
+    const grouped = /^[+-]?\d{1,3}(,\d{3})+(\.\d+)?$/.test(text);
+    const stripped = grouped ? text.replace(/,/g, '') : text;
+    if (!/^[+-]?(\d+(\.\d+)?|\.\d+)$/.test(stripped)) return null;
+    return stripped;
+  };
   const optionLabelFor = (element) => {
     const resolved = resolveLabelFromSources(labelSourcesFor(element));
     return resolved.label_synthetic ? '' : resolved.label;
@@ -1242,6 +1351,66 @@ _FIELD_WRITE_BODY_JS = r"""
         label: String(option.textContent || '').trim(),
         value: option.getAttribute('value') || option.value || ''
       }));
+    if (element.multiple === true) {
+      // The single-select path below deselects everything that is not the winner,
+      // so a question asking for every language you speak kept exactly one.
+      const parts = String(reviewedValue).split(/\s*[;,\n|]\s*/).map((part) => part.trim()).filter(Boolean);
+      const whole = rankCandidates(entries, reviewedValue);
+      let chosen = null;
+      let tier = null;
+      // With no separator in it there is no list to read, so this is the ordinary
+      // single-option match: rank the answer and take a unique winner at any tier.
+      // With a separator the whole string is only trusted when it *is* an option,
+      // verbatim -- "Berkeley, CA" is a real option label and splitting its comma
+      // would turn one hit into two misses. Anything looser has to be a list:
+      // "English, Klingon" also ranks unique whole, on a token run against
+      // "English", and taking that would have written half an answer and called
+      // the field done.
+      if (whole.status === 'unique' && (parts.length < 2 || whole.tier === 'exact')) {
+        chosen = [whole.winners[0]];
+        tier = whole.tier;
+      } else {
+        if (parts.length < 2) {
+          return JSON.stringify(
+            refuseChoice('select_options', type, whole, reviewedValue, selectedOptionLabels(element), entries.length)
+          );
+        }
+        const picked = [];
+        for (const part of parts) {
+          const partRanked = rankCandidates(entries, part);
+          // Every part must resolve on its own. A half-filled multi-select is a
+          // wrong answer wearing a right one's clothes -- the form reads as
+          // answered -- so one bad part refuses the whole write and nothing moves.
+          if (partRanked.status !== 'unique') {
+            return JSON.stringify(
+              refuseChoice('select_options', type, partRanked, part, selectedOptionLabels(element), entries.length)
+            );
+          }
+          if (picked.indexOf(partRanked.winners[0]) === -1) picked.push(partRanked.winners[0]);
+          if (tier === null || MATCH_TIERS.indexOf(partRanked.tier) > MATCH_TIERS.indexOf(tier)) tier = partRanked.tier;
+        }
+        chosen = picked;
+      }
+      const wanted = chosen.map((entry) => entry.option);
+      focusSafely(element);
+      for (const option of allOptions) option.selected = wanted.indexOf(option) !== -1;
+      // No setNativeValue here: `value` on a multi-select is singular and writing
+      // it would collapse the selection back down to one.
+      fireInputEvents(element);
+      blurSafely(element);
+      const expectedLabels = allOptions
+        .filter((option) => wanted.indexOf(option) !== -1)
+        .map((option) => String(option.textContent || '').trim())
+        .join(', ');
+      return JSON.stringify(verdict(expectedLabels, selectedOptionLabels(element), {
+        action: 'select_options',
+        field_type: type,
+        match_tier: tier,
+        option_count: entries.length,
+        selected_label: expectedLabels,
+        selected_value_length: chosen.reduce((total, entry) => total + String(entry.value || '').length, 0)
+      }));
+    }
     const ranked = rankCandidates(entries, reviewedValue);
     if (ranked.status !== 'unique') {
       return JSON.stringify(
@@ -1411,6 +1580,23 @@ _FIELD_WRITE_BODY_JS = r"""
       action: inserted ? 'insert_text' : 'set_text',
       field_type: 'richtext'
     }));
+  }
+
+  if (type === 'date' || type === 'number') {
+    const coerced = type === 'date' ? asDateValue(reviewedValue) : asNumberValue(reviewedValue);
+    if (coerced === null) {
+      return JSON.stringify({
+        ok: false, action: 'apply', field_type: type, verified: false, value_matched: false,
+        message: type === 'date'
+          ? 'reviewed value is not a date this field accepts, or does not say which part is the month'
+          : 'reviewed value is not a number this field accepts'
+      });
+    }
+    focusSafely(element);
+    setNativeValue(element, 'value', coerced);
+    fireInputEvents(element);
+    blurSafely(element);
+    return JSON.stringify(verdict(coerced, element.value, { action: 'set_value', field_type: type }));
   }
 
   if ('value' in element) {
