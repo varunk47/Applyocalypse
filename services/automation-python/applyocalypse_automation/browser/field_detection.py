@@ -638,6 +638,55 @@ DOM_FIELD_DISCOVERY_SCRIPT = "\n".join(
 )
 
 
+# Vendors are matched on the origin they serve their own challenge from, never on
+# the element the integrator wrapped it in: Arkose's setup guide hands the caller a
+# trigger element that "can exist anywhere in your page", and serves its client API
+# from a per-customer subdomain, so `<company>-api.arkoselabs.com` is the stable
+# half and the container id is not. Order decides only which name lands in the
+# metadata when two vendors are somehow present; every entry produces the same
+# CAPTCHA blocker.
+CAPTCHA_VENDOR_SELECTORS: tuple[tuple[str, str], ...] = (
+    ("hcaptcha", 'iframe[src*="hcaptcha.com" i], div.h-captcha'),
+    ("cloudflare", 'iframe[src*="challenges.cloudflare.com" i], div.cf-turnstile'),
+    ("datadome", 'iframe[src*="captcha-delivery.com" i]'),
+    ("arkose", 'iframe[src*="arkoselabs.com" i], iframe[src*="funcaptcha.com" i]'),
+    ("perimeterx", '#px-captcha, iframe[src*="px-cloud.net" i], iframe[src*="px-cdn.net" i]'),
+)
+
+
+# What a challenge says while it waits to be solved. Every phrase here is an
+# instruction aimed at the person, which is what keeps this safe to run against
+# raw page text: the passive "this site is protected by reCAPTCHA" footer that
+# sits on most application forms contains none of them. That distinction is the
+# whole reason vendor detection is visibility-gated, and matching the vendor's
+# name in page text is what once paused every run on a form that had nothing to
+# solve, so nothing here may name a vendor.
+CAPTCHA_CHALLENGE_PHRASES: tuple[str, ...] = (
+    "i'm not a robot",
+    "i am not a robot",
+    "verify you are human",
+    "verify you're human",
+    "select all images",
+    "select each image",
+    "complete the captcha",
+    "solve the captcha",
+    "press and hold",
+)
+
+
+# Said by a full-page interstitial rather than by a widget on a form. The live
+# script does not match these against body text, because "just a moment" is an
+# ordinary thing for a page to say while it saves something; it reads the same
+# situation structurally instead, from the document title and Cloudflare's own
+# challenge elements. The offline twin has only text to work with, so it keeps
+# them.
+CAPTCHA_INTERSTITIAL_PHRASES: tuple[str, ...] = (
+    "are you human",
+    "checking your browser before",
+    "just a moment",
+)
+
+
 DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
 (() => {
   const text = (document.body && document.body.innerText ? document.body.innerText : '').toLowerCase();
@@ -663,15 +712,6 @@ DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
     if ((element.getAttribute('data-size') || '').toLowerCase() === 'invisible') { return false; }
     return isChallengeVisible(element);
   });
-  const hcaptchaChallenge = Array.from(
-    document.querySelectorAll('iframe[src*="hcaptcha.com" i], div.h-captcha')
-  ).some(isChallengeVisible);
-  const turnstileChallenge = Array.from(
-    document.querySelectorAll('iframe[src*="challenges.cloudflare.com" i], div.cf-turnstile')
-  ).some(isChallengeVisible);
-  const datadomeChallenge = Array.from(
-    document.querySelectorAll('iframe[src*="captcha-delivery.com" i]')
-  ).some(isChallengeVisible);
   const docTitle = (document.title || '').toLowerCase();
   const cloudflareInterstitial =
     Boolean(document.querySelector('#challenge-running, #cf-challenge-running, #challenge-stage, #challenge-form'))
@@ -679,9 +719,28 @@ DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
     || (docTitle.indexOf('attention required') !== -1 && html.includes('cloudflare'));
   let captchaVendor = null;
   if (recaptchaChallenge) { captchaVendor = 'recaptcha'; }
-  else if (hcaptchaChallenge) { captchaVendor = 'hcaptcha'; }
-  else if (turnstileChallenge || cloudflareInterstitial) { captchaVendor = 'cloudflare'; }
-  else if (datadomeChallenge) { captchaVendor = 'datadome'; }
+  if (!captchaVendor) {
+    for (const entry of __CAPTCHA_VENDOR_SELECTORS__) {
+      if (Array.from(document.querySelectorAll(entry[1])).some(isChallengeVisible)) {
+        captchaVendor = entry[0];
+        break;
+      }
+    }
+  }
+  if (!captchaVendor && cloudflareInterstitial) { captchaVendor = 'cloudflare'; }
+  // A vendor we cannot name is the dangerous case, not a rare one. The table
+  // above lists the vendors we have actually seen; behind any other challenge
+  // the field scan simply comes back empty, so without a backstop the run reads
+  // the page as "nothing to fill here" and carries on instead of handing over to
+  // the person. Matching what the challenge tells them to do catches the vendor
+  // we have never met, and the offline twin matches the same phrases so the two
+  // cannot disagree about the same page.
+  if (!captchaVendor) {
+    const normalizedText = text.replace(/\s+/g, ' ');
+    if (__CAPTCHA_CHALLENGE_PHRASES__.some((phrase) => normalizedText.indexOf(phrase) !== -1)) {
+      captchaVendor = 'unknown';
+    }
+  }
   if (captchaVendor) {
     blockers.push({ blocker_type: 'CAPTCHA', message: 'Interactive CAPTCHA or bot challenge detected', confidence: 0.95, metadata: { vendor: captchaVendor } });
   }
@@ -736,7 +795,11 @@ DOM_BLOCKER_DISCOVERY_SCRIPT = r"""
   }
   return JSON.stringify(blockers);
 })()
-"""
+""".replace(
+    "__CAPTCHA_VENDOR_SELECTORS__", json.dumps([list(entry) for entry in CAPTCHA_VENDOR_SELECTORS])
+).replace(
+    "__CAPTCHA_CHALLENGE_PHRASES__", json.dumps(list(CAPTCHA_CHALLENGE_PHRASES))
+)
 
 
 DOM_METADATA_CAPTURE_SCRIPT = r"""

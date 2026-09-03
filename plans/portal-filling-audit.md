@@ -427,10 +427,15 @@ after upload.
 > `tests/test_hidden_file_input_discovery.py` (real JS against the DOM stub) and
 > `tests/test_seleniumbase_file_upload.py` (fake driver).
 >
+> The re-detect after upload, the other half of this finding, shipped under F11 —
+> see the status block there.
+>
 > **Still open from this finding:** the synthetic `DataTransfer` + `drop` fallback for a
-> dropzone with no `<input type="file">` at all, and the re-detect after upload (tracked
-> under F11). No evidence yet that a major ATS ships a dropzone without a backing input —
-> react-dropzone, which Greenhouse, Lever and Ashby build on, always renders one.
+> dropzone with no `<input type="file">` at all. No evidence yet that a major ATS ships a
+> dropzone without a backing input — react-dropzone, which Greenhouse, Lever and Ashby
+> build on, always renders one. Left unbuilt deliberately: writing a drop-event path
+> against a portal shape nobody has produced would be speculative, and it is the kind of
+> code that rots untested. If a real dropzone without an input turns up, this is the fix.
 
 ### F11. Workday's resume parse overwrites the fields we just filled, and nothing re-checks [HIGH]
 
@@ -453,6 +458,20 @@ It also silently reintroduces content the validator was supposed to gate.
 (`wait_for_page_text` already exists and is well-built — `page_readiness.py:40-59`), then re-detect,
 then apply text values, then verify. This is the one place a targeted per-portal quirk (Workday) is
 genuinely justified.
+
+> **Status: fixed.** `runner.py:2075-2086` splits the discovered fields into uploads and
+> everything else and walks `upload_fields + value_fields`, so nothing is typed until every
+> file has landed. At the boundary it takes a page fingerprint from before the uploads,
+> waits for the form to actually change (`wait_for_portal_page_change`, bounded by
+> `RESUME_PARSE_SETTLE_S`), and breaks out of the pass. `restart_after_uploads` then
+> `continue`s the outer loop (`:2295`), which re-reads the form from scratch at `:2049`
+> because `upload_attempt` was incremented on the way out. So the values written are the
+> ones written *after* Workday's parser has had its say, not before.
+>
+> `uploads_settled` makes this happen once per run rather than once per pass, and
+> `uploaded_document_targets` (`:2025`) keeps a restarted pass from attaching the same file
+> twice, which matters because Workday's attachment list appends rather than replaces.
+> Covered by `tests/test_upload_before_typing.py`.
 
 ### F12. Step progression clicks are unverified [HIGH]
 
@@ -646,14 +665,56 @@ and driving `PlaywrightAdapter` end to end would close the largest gap for modes
 - **`type="date"`/`"number"`/`"tel"` go through the plain typing path** (F8's routing at
   `nodriver_adapter.py:170`) with no format normalization; portal date pickers commonly reject typed
   input.
-- **CAPTCHA vendor coverage** is limited to recaptcha/hcaptcha/cloudflare/datadome
+- ~~**CAPTCHA vendor coverage** is limited to recaptcha/hcaptcha/cloudflare/datadome
   (`field_detection.py:186-215`); Arkose/FunCaptcha, PerimeterX, and Akamai are not detected, so those
-  interstitials read as "no fields found" rather than "blocked".
+  interstitials read as "no fields found" rather than "blocked".~~
+
+  > **Status: fixed**, and the finding understated it. The detector lives at
+  > `field_detection.py:641-745` now, not `:186-215`. Arkose and PerimeterX are detected, but chasing
+  > vendors one at a time was never going to close this: the list can only ever name the vendors we
+  > have already met, and an unrecognised challenge is exactly the case that hurts, because the field
+  > scan behind it comes back empty and the run reads the page as "nothing to fill here".
+  >
+  > So the live script gained the vendor-agnostic backstop its own offline twin already had. The twin
+  > (`html_replay._blockers_from_replay_text`) matched "press and hold" -- PerimeterX's challenge --
+  > while the browser matched nothing, so the two implementations disagreed about the same page,
+  > which defeats the point of the parity suite. Both now read one shared list,
+  > `CAPTCHA_CHALLENGE_PHRASES`, interpolated into the injected JS through the same `.replace()` the
+  > field-discovery script uses. Anything a challenge tells a person to do stops the run and hands
+  > over, whether or not we can name who served it.
+  >
+  > Vendors are matched on the origin they serve from, never on the element the integrator wrapped
+  > them in: Arkose's own setup guide hands the caller a trigger element that "can exist anywhere in
+  > your page" and serves its client API from a per-customer subdomain, so `arkoselabs.com` is the
+  > stable half and the container id is not.
+  >
+  > The phrase list is kept free of vendor names on purpose. Matching the word "recaptcha" in page
+  > text is the bug that once paused every run against a form whose only captcha was a passive footer
+  > badge, so `TestPhrasesCannotNameAVendor` in `tests/test_captcha_detection.py` fails if a vendor
+  > name is ever added to it, and re-checks that exact Greenhouse footer sentence against both the
+  > twin and a real browser.
+  >
+  > **Deliberately not covered:** Akamai Bot Manager, whose block page is usually a plain "Access
+  > Denied / Reference #" rather than a challenge -- that is a hard block, not something a person can
+  > solve, so filing it under CAPTCHA would tell the user the wrong thing. AWS WAF, Imperva and
+  > GeeTest are plausible but their selectors could not be confirmed against vendor documentation
+  > here, and a guessed selector is worse than a known gap: it reads as coverage while detecting
+  > nothing. All four are caught by the phrase backstop when their challenge asks the user to do
+  > something, which is the case that matters.
+  >
+  > Covered by `tests/test_captcha_detection.py` (default gate) and
+  > `tests/test_browser_blocker_detection.py` (real Chrome). The second exists because
+  > `detect_blockers` swallows every exception and returns `[]`, so a syntax error in the injected
+  > script is indistinguishable from a clean page -- the offline twin would keep passing while the
+  > shipped detector reported nothing on every page in the world.
 - **`field_resolution.py:51` reads `APPLYO_AUTOFILL_APPROVED_DEFAULTS`** to auto-approve defaults. I
   did not trace every path this env var opens; worth confirming it cannot bypass the EEO /
   criminal-history / previous-employer `requires_review=True` invariants (`answers.py:254,270-274,
-  277-282`). What would prove it: a parametrized test asserting those three categories stay
-  `requires_review=True` with the env var set to `1`.
+  277-282`). ~~What would prove it: a parametrized test asserting those three categories stay
+  `requires_review=True` with the env var set to `1`.~~
+
+  > **Status: fixed.** That test is `tests/test_runner_autofill_env.py`; the three categories hold
+  > `requires_review=True` with the variable set. This bullet outlived the fix.
 
 ## Prioritized fix plan
 
