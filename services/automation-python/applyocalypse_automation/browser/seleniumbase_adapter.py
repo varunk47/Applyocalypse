@@ -10,9 +10,10 @@ or otherwise defeat a bot challenge; when a Cloudflare interstitial is detected
 the blocker is flagged for human handoff so the runner pauses and the user takes
 over in the visible browser.
 
-Candidate order (from adapter_factory):
-  high-stealth boards : nodriver -> seleniumbase
-  ATS portals         : playwright -> nodriver -> seleniumbase
+Candidate order (from adapter_factory): nodriver -> playwright -> seleniumbase,
+for high-stealth boards and ATS portals alike. This adapter is last on purpose --
+it has no frame traversal at all, so it is what gets tried when the two adapters
+that can reach inside an iframe have both failed to start.
 
 Fail-safe: when seleniumbase is not installed the launch() call returns
 BrowserStepResult(ok=False) exactly like the Playwright adapter does.

@@ -11,6 +11,7 @@ from applyocalypse_automation.browser import (
     playwright_adapter,
     seleniumbase_adapter,
 )
+from applyocalypse_automation.browser.adapter_factory import SUPPORTED_BROWSER_ADAPTERS
 from applyocalypse_automation.browser.driver_check import (
     _DRIVERS,
     DriverStatus,
@@ -20,16 +21,18 @@ from applyocalypse_automation.browser.driver_check import (
 )
 
 
-def test_the_automatic_chain_is_what_is_required() -> None:
-    """nodriver and seleniumbase are the pair the fallback chain actually uses.
+def test_every_adapter_in_the_automatic_chain_is_required() -> None:
+    """All three drivers now ship, so all three are a build defect when absent.
 
-    Playwright is reported so a build can say what it has, but it is deliberately not a
-    dependency, so demanding it would fail every honest build.
+    The playwright entry used to be optional, because Playwright was not a dependency
+    and demanding it would have failed every honest build. Its driver is Patchright
+    now, which is in requirements.in and in the PyInstaller bundle, so an absent one
+    means a build that lost the middle fallback rather than a build without an extra.
     """
     required = {adapter for adapter, (_m, _a, is_required) in _DRIVERS.items() if is_required}
 
-    assert required == {"nodriver", "seleniumbase"}
-    assert _DRIVERS["playwright"][2] is False
+    assert required == set(SUPPORTED_BROWSER_ADAPTERS)
+    assert set(_DRIVERS) == set(SUPPORTED_BROWSER_ADAPTERS)
 
 
 @pytest.mark.parametrize(
@@ -37,7 +40,7 @@ def test_the_automatic_chain_is_what_is_required() -> None:
     [
         ("nodriver", nodriver_adapter, "import nodriver"),
         ("seleniumbase", seleniumbase_adapter, "from seleniumbase import SB"),
-        ("playwright", playwright_adapter, "from playwright.async_api import async_playwright"),
+        ("playwright", playwright_adapter, "from patchright.async_api import async_playwright"),
     ],
 )
 def test_each_entry_imports_what_its_adapter_imports(adapter: str, module: object, statement: str) -> None:
@@ -89,7 +92,7 @@ def test_missing_required_ignores_an_absent_optional_driver() -> None:
     statuses = [
         DriverStatus("nodriver", "nodriver", True, True, None),
         DriverStatus("seleniumbase", "seleniumbase", True, True, None),
-        DriverStatus("playwright", "playwright.async_api", False, False, "ModuleNotFoundError: x"),
+        DriverStatus("playwright", "patchright.async_api", False, False, "ModuleNotFoundError: x"),
     ]
 
     assert missing_required(statuses) == []

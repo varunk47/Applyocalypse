@@ -66,10 +66,11 @@ def test_browser_adapter_factory_keeps_nodriver_default_and_playwright_fallback(
     assert create_browser_adapter("playwright").name == "playwright"
 
 
-# Adapter name -> the third-party module its launch() imports.
+# Adapter name -> the third-party module its launch() imports. The playwright adapter is
+# named for the protocol it speaks; patchright is the driver that speaks it.
 _ADAPTER_DRIVER_MODULES = {
     "nodriver": "nodriver",
-    "playwright": "playwright",
+    "playwright": "patchright",
     "seleniumbase": "seleniumbase",
 }
 
@@ -121,11 +122,12 @@ def test_the_automatic_adapter_chain_never_offers_an_adapter_that_is_not_install
     assert not_installed == [], f"the automatic chain offers uninstalled adapters: {not_installed}"
 
 
-def test_an_explicitly_named_adapter_is_still_honoured() -> None:
-    """Dropping playwright from the automatic chain must not quietly unsupport it."""
+def test_an_explicitly_named_adapter_leads_the_chain() -> None:
+    """Naming an adapter moves it to the front; it never drops the others."""
     workflow = workflow_for_url("https://jobs.lever.co/example/abc")
 
     assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow, "seleniumbase") == ("seleniumbase", "nodriver", "playwright")
 
 
 def test_detect_portal_from_known_url() -> None:
@@ -151,7 +153,7 @@ def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
     assert workflow.portal_id == "lever"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
     assert workflow.default_adapter == "nodriver"
-    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
     assert "Apply for this job" in workflow.entry_action_labels
     assert workflow.requires_manual_review_before_fill is True
     payload = workflow.to_event_payload()
@@ -166,7 +168,10 @@ def test_workflow_for_high_stealth_board_keeps_nodriver_and_login_watch() -> Non
     assert workflow.workflow_kind == "JOB_BOARD_REDIRECT_OR_STEALTH"
     assert workflow.default_adapter == "nodriver"
     assert workflow.requires_high_stealth is True
-    assert adapter_candidates_for_workflow(workflow, "playwright") == ("nodriver", "seleniumbase")
+    # A high-stealth board used to drop a named playwright on the floor, because the
+    # adapter could not launch at all. It can now, so the name is honoured here too.
+    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
     assert workflow.requires_login_watch is True
     payload = workflow.to_event_payload()
     assert "Confirm trusted application surface" in payload["expected_steps"]
@@ -455,7 +460,7 @@ def test_blocker_detection_normalizes_dom_snapshot() -> None:
 
 
 def test_playwright_adapter_fails_safely_when_runtime_is_absent(tmp_path) -> None:
-    if importlib.util.find_spec("playwright") is not None:
+    if importlib.util.find_spec("patchright") is not None:
         return
 
     adapter = create_browser_adapter("playwright")

@@ -85,6 +85,15 @@ const main = async () => {
 
   const hiddenImportArgs = hiddenImports.flatMap((m) => ["--hidden-import", m]);
 
+  // Patchright drives playwright_adapter.py, and hidden imports alone are not enough for
+  // it: the package ships a Node driver (node.exe plus a JS package directory) that the
+  // Python side spawns as a subprocess, and PyInstaller's static analysis sees only
+  // Python. Without the data files the import succeeds, the launch starts a driver that
+  // is not there, and the failure surfaces halfway through an application. --collect-all
+  // takes the submodules and the driver tree together; PyInstaller ships a hook for
+  // "playwright" but knows nothing about the fork's name.
+  const collectAllArgs = ["patchright"].flatMap((pkg) => ["--collect-all", pkg]);
+
   await run(venvPython, [
     "-m",
     "PyInstaller",
@@ -118,6 +127,7 @@ const main = async () => {
     "--specpath",
     join(buildDir, "specs"),
     ...hiddenImportArgs,
+    ...collectAllArgs,
     join(serviceDir, "applyocalypse_worker_entry.py")
   ]);
 

@@ -14,14 +14,16 @@ class PortalDefinition:
 
 
 # Every portal here names "nodriver", and it has to stay an adapter that actually
-# ships. These entries used to say "playwright", which is not a dependency of this
-# project and is not bundled by the PyInstaller build, so on a real install the
-# launch failed and every run fell through to nodriver without saying so. The
-# damage was not the fallback, it was that the Playwright-only work (cross-origin
-# frame enumeration) was never the code a user ran. test_portal_registry.py now
-# asserts that every default_adapter is importable, so this cannot drift back
-# silently. Playwright stays supported for anyone who installs it; it is just no
-# longer the declared default. See plans/portal-filling-audit.md.
+# ships. These entries used to say "playwright", which at the time was not a
+# dependency of this project and was not bundled by the PyInstaller build, so on a
+# real install the launch failed and every run fell through to nodriver without
+# saying so. The damage was not the fallback, it was that the Playwright-only work
+# (cross-origin frame enumeration) was never the code a user ran.
+# test_portal_registry.py asserts that every default_adapter is importable, so this
+# cannot drift back silently. The Playwright adapter now ships too, driven by
+# Patchright, and sits second in the fallback chain; nodriver stays the declared
+# default because it is the one with the hand-built CDP stealth path.
+# See plans/portal-filling-audit.md.
 PORTALS: tuple[PortalDefinition, ...] = (
     PortalDefinition("indeed", "Indeed", ("indeed.com",), "nodriver", True),
     PortalDefinition("glassdoor", "Glassdoor", ("glassdoor.com",), "nodriver", True),

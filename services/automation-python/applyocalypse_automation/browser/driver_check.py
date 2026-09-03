@@ -25,10 +25,13 @@ _DRIVERS: dict[str, tuple[str, str | None, bool]] = {
     "nodriver": ("nodriver", None, True),
     # seleniumbase_adapter.py: ``from seleniumbase import SB``
     "seleniumbase": ("seleniumbase", "SB", True),
-    # playwright_adapter.py: ``from playwright.async_api import async_playwright``.
-    # Reported but not required: it is deliberately not a dependency of this project and
-    # not in the automatic chain, so absent is the expected answer, not a failure.
-    "playwright": ("playwright.async_api", "async_playwright", False),
+    # playwright_adapter.py: ``from patchright.async_api import async_playwright``.
+    # The adapter is named for the protocol it speaks, the module for the driver that
+    # speaks it. This one used to be optional, on the grounds that Playwright was not a
+    # dependency and the bundle carried none of it; Patchright is a dependency and the
+    # bundle carries it, so an absent module here now means a build that lost its middle
+    # fallback, which is exactly the failure this file exists to catch before a user does.
+    "playwright": ("patchright.async_api", "async_playwright", True),
 }
 
 

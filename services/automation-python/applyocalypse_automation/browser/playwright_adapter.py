@@ -45,6 +45,22 @@ PAGE_FINGERPRINT_PROBE_FUNCTION = (
 
 
 class PlaywrightBrowserAdapter(BrowserAdapter):
+    """The Playwright-protocol adapter, driven by Patchright rather than Playwright.
+
+    Patchright is a drop-in fork of Playwright -- same package layout, same API,
+    same two dependencies -- with the tells patched out of the driver rather than
+    papered over from inside the page. It runs its own scripts in isolated
+    execution contexts instead of enabling ``Runtime`` (the leak we hand-built
+    ``isolated_world.py`` to avoid on nodriver), drops the ``--enable-automation``
+    flag family, and reaches into closed shadow roots, which our own F9 traversal
+    cannot. Vanilla Playwright is not kept as a fallback: an adapter that silently
+    downgrades to the leaky driver would report a stealth posture it does not have.
+
+    The adapter keeps the name "playwright" because that is what it speaks and what
+    every persisted run record already says. ``driver_check`` reports the module it
+    actually imports, so the build can still be asked which driver it carries.
+    """
+
     name = "playwright"
 
     def __init__(self) -> None:
@@ -54,21 +70,30 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
 
     async def launch(self, *, run_id: str, user_data_dir: Path) -> BrowserStepResult:
         try:
-            from playwright.async_api import async_playwright  # type: ignore
+            from patchright.async_api import async_playwright  # type: ignore
         except ImportError:
             return BrowserStepResult(
                 False,
                 "playwright is not installed",
-                {"run_id": run_id, "user_data_dir": str(user_data_dir), "install_hint": "pip install playwright && playwright install chromium"},
+                {"run_id": run_id, "user_data_dir": str(user_data_dir), "install_hint": "pip install patchright"},
             )
 
         user_data_dir.mkdir(parents=True, exist_ok=True)
         try:
             self._playwright = await async_playwright().start()
+            # Patchright's documented configuration, and every part of it is load-bearing.
+            # ``channel="chrome"`` drives the real Chrome the user already has, which is
+            # also the browser nodriver drives, so no bundled Chromium has to be shipped
+            # or downloaded and the fingerprint is a genuine one rather than Chromium's.
+            # ``no_viewport`` leaves the window at its natural size instead of the fixed
+            # 1280x720 that Playwright otherwise forces on every page. Nothing else is
+            # passed: custom args, headers and user agents are what give the fork away,
+            # and the defaults already include --no-first-run.
             self._context = await self._playwright.chromium.launch_persistent_context(
                 user_data_dir=str(user_data_dir),
+                channel="chrome",
                 headless=False,
-                args=["--no-first-run"],
+                no_viewport=True,
             )
             self._page = self._context.pages[0] if self._context.pages else await self._context.new_page()
         except Exception as exc:
