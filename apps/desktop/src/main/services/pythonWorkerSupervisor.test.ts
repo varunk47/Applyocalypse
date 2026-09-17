@@ -158,6 +158,42 @@ describe("python worker supervisor lifecycle", () => {
     }
   });
 
+  it("pauses the run when the worker cannot be spawned at all", async () => {
+    // A spawn that fails emits 'error' and never 'exit'. Before this, the run
+    // sat in RUNNING_AUTOMATION holding its lease and the rejection escaped.
+    const { db, dir } = createDb();
+    try {
+      const { runId, queueItemId } = createRun(db);
+      const child = createMockChild();
+      const send = vi.fn();
+      const PythonWorkerSupervisor = await loadSupervisorWithChild(child);
+      const supervisor = new PythonWorkerSupervisor(
+        db,
+        () => [{ isDestroyed: () => false, webContents: { send } }] as never,
+        () => [dir]
+      );
+
+      supervisor.start({ runId, workDir: dir });
+      child.emit("error", new Error("spawn python ENOENT"));
+
+      const run = new RunRepository(db).getApplicationRun(runId);
+      const queueItem = new QueueRepository(db).getById(queueItemId);
+      const event = db
+        .prepare("SELECT message, payload_json FROM run_events WHERE application_run_id = ?")
+        .get(runId) as { message: string; payload_json: string };
+
+      expect(run.status).toBe("PAUSED");
+      expect(run.failureCode).toBe("WORKER_FAILED_TO_START");
+      expect(event.message).toContain("ENOENT");
+      expect(event.payload_json).toContain("WORKER_FAILED_TO_START");
+      expect(queueItem.status).toBe("PAUSED");
+      expect(queueItem.claimedBy).toBeNull();
+      expect(supervisor.isActive(runId)).toBe(false);
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("does not overwrite terminal runs when a worker exits after completion", async () => {
     const { db, dir } = createDb();
     try {

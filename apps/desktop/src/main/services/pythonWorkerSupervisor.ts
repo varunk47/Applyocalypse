@@ -102,6 +102,15 @@ export class PythonWorkerSupervisor {
       this.persistSupervisorError(input.runId, new Error(chunk.toString("utf8")), (message) => redactSensitiveSupervisorText(message, redactionEnv));
     });
 
+    child.on("error", (error: Error) => {
+      const activeWorker = this.active.get(input.runId);
+      clearInterval(activeWorker?.heartbeat ?? heartbeat);
+      this.active.delete(input.runId);
+      if (!activeWorker?.stopping) {
+        this.pauseRunAfterSpawnFailure(input.runId, error);
+      }
+    });
+
     child.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
       const activeWorker = this.active.get(input.runId);
       clearInterval(activeWorker?.heartbeat ?? heartbeat);
@@ -193,16 +202,48 @@ export class PythonWorkerSupervisor {
   }
 
   private pauseRunAfterUnexpectedWorkerExit(runId: string, code: number | null, signal: NodeJS.Signals | null): void {
-    if (!this.db.open) {
-      return;
-    }
-    const timestamp = new Date().toISOString();
     const failureCode = code === 0 && signal === null ? "WORKER_EXITED_WITHOUT_TERMINAL_EVENT" : "WORKER_EXITED_UNEXPECTEDLY";
     const exitDescription = signal ? `signal ${signal}` : `exit code ${code ?? "unknown"}`;
     const message =
       failureCode === "WORKER_EXITED_WITHOUT_TERMINAL_EVENT"
         ? "Automation worker exited before emitting a terminal event. Run paused for inspection."
         : `Automation worker exited unexpectedly with ${exitDescription}. Run paused for inspection.`;
+    this.pauseRun(runId, {
+      failureCode,
+      message,
+      currentStep: "worker_exit",
+      payload: { code, signal, failure_code: failureCode }
+    });
+  }
+
+  /**
+   * The worker never started.
+   *
+   * A failed spawn raises 'error' and then nothing: 'exit' does not fire, so
+   * without this the run holds its lease in PREPARING until the lease expires,
+   * and the unhandled 'error' takes the main process down with it. The usual
+   * cause is a missing interpreter, or a worker binary that did not make it
+   * into the package. Both are fixable, but only by a user who is told.
+   */
+  private pauseRunAfterSpawnFailure(runId: string, error: unknown): void {
+    const detail = error instanceof Error ? error.message : String(error);
+    this.pauseRun(runId, {
+      failureCode: "WORKER_FAILED_TO_START",
+      message: `Automation worker could not be started: ${detail}. Check that the Python worker is installed, then retry the run.`,
+      currentStep: "worker_start",
+      payload: { failure_code: "WORKER_FAILED_TO_START", detail }
+    });
+  }
+
+  private pauseRun(
+    runId: string,
+    descriptor: { failureCode: string; message: string; currentStep: string; payload: Record<string, unknown> }
+  ): void {
+    if (!this.db.open) {
+      return;
+    }
+    const { failureCode, message, currentStep, payload } = descriptor;
+    const timestamp = new Date().toISOString();
 
     const event = this.db.transaction(() => {
       const run = this.db.prepare("SELECT status FROM application_runs WHERE id = ?").get(runId) as { status: string } | undefined;
@@ -241,7 +282,6 @@ export class PythonWorkerSupervisor {
         )
         .run({ runId, timestamp });
 
-      const payload = { code, signal, failure_code: failureCode };
       this.db
         .prepare(
           `
@@ -259,7 +299,7 @@ export class PythonWorkerSupervisor {
           runId,
           message,
           machineStateJson: JSON.stringify({ reason: failureCode }),
-          uiStateJson: JSON.stringify({ requires_user_review: true, current_step: "worker_exit" }),
+          uiStateJson: JSON.stringify({ requires_user_review: true, current_step: currentStep }),
           payloadJson: JSON.stringify(payload),
           timestamp
         });
@@ -287,7 +327,7 @@ export class PythonWorkerSupervisor {
         timestamp,
         severity: "ERROR",
         message,
-        uiState: { requires_user_review: true, current_step: "worker_exit" },
+        uiState: { requires_user_review: true, current_step: currentStep },
         payload
       });
     })();

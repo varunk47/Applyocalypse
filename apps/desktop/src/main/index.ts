@@ -1,4 +1,4 @@
-import { app, BrowserWindow, globalShortcut } from "electron";
+import { app, BrowserWindow, dialog, globalShortcut } from "electron";
 import { join } from "node:path";
 import { QueueRepository, SettingsRepository, closeApplyocalypseDatabase } from "@applyocalypse/db";
 import { createAppDatabase } from "./db/createAppDatabase";
@@ -451,7 +451,27 @@ const buildFullE2ESmokeScript = (input: { phase: string; resumePath: string; det
   `;
 };
 
-void app.whenReady().then(boot);
+/**
+ * A boot that throws used to produce nothing at all: no window, no message, and
+ * an unhandled rejection in a process with no console attached. A failed
+ * migration is the likely cause and is exactly the kind of thing a user can act
+ * on, so it is shown rather than swallowed.
+ */
+void app.whenReady().then(async () => {
+  try {
+    await boot();
+  } catch (error) {
+    const detail = error instanceof Error ? (error.stack ?? error.message) : String(error);
+    dialog.showErrorBox(
+      "Applyocalypse could not start",
+      `${detail}
+
+Your data is untouched. If this persists, the application data folder is:
+${app.getPath("userData")}`
+    );
+    app.exit(1);
+  }
+});
 
 app.on("activate", () => {
   if (BrowserWindow.getAllWindows().length === 0 && database) {
