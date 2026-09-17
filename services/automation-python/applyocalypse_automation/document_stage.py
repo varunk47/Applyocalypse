@@ -32,6 +32,7 @@ from .documents.docx_mutation import extract_docx_text, mutate_docx_bullet_ancho
 from .documents.export_flow import RESUME_DOCX_TAIL, RESUME_TEX_TAIL, run_resume_render_tail
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 from .documents.pdf_export import export_docx_to_pdf
+from .documents.resume_master_gate import emit_missing_master_gate, explain_missing_resume_master
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent
 from .jd_analysis import analyze_with_optional_llm
@@ -769,6 +770,13 @@ def generate_application_documents(
                     ui_state={"requires_user_review": True},
                     payload={"code": "MISSING_TEX_ANCHORS", "source_master_path": str(master_path)},
                 ).emit()
+    else:
+        # Without this the whole format-preserving branch is skipped in silence:
+        # the Markdown artifact above is still rendered, the run still reports
+        # success, and the user's own resume is never touched.
+        missing_master = explain_missing_resume_master(canonical_profile)
+        if missing_master:
+            emit_missing_master_gate(run_id=run_id, finding=missing_master)
 
     if analysis["cover_letter_likely_required"]:
         WorkerEvent(

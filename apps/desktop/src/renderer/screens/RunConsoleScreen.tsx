@@ -5,6 +5,7 @@ import { useRunStore } from '../contexts/RunStore'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { jobLabel, useQueueStore } from '../contexts/QueueStore'
 import { buildPortalWorkflowSummary } from '../features/run-console/portalWorkflowView'
+import { reviewBlockingDetail, reviewCandidatePath } from '../features/run-console/blockingGateView'
 import { REVIEW_INSTRUCTIONS } from '../features/run-console/reviewInstructions'
 
 const artifactUrlForPath = (p: string) => `applyocalypse://artifact?path=${encodeURIComponent(p)}`
@@ -306,6 +307,21 @@ export default function RunConsoleScreen() {
                   "{request.prompt}" <span class="quiet">({request.reviewType.replace(/_/g, ' ').toLowerCase()})</span>
                 </div>
                 <div class="house-rule">HOUSE RULE: SENSITIVE ANSWERS ARE NEVER AUTO-FILLED</div>
+                <Show when={reviewBlockingDetail(request)}>
+                  {(detail) => <div class="gate-blocker">{detail()}</div>}
+                </Show>
+                <Show when={reviewCandidatePath(request)}>
+                  {(path) => (
+                    <button
+                      class="btn-quiet"
+                      type="button"
+                      style={{ margin: '0 0 10px' }}
+                      onClick={() => void openLocalPath(path())}
+                    >
+                      Open the file to confirm
+                    </button>
+                  )}
+                </Show>
                 <Show when={reviewCandidateLabels(request).length > 0}>
                   <div style={{ display: 'flex', 'flex-wrap': 'wrap', gap: '5px', margin: '0 0 8px' }}>
                     <For each={reviewCandidateLabels(request)}>{(l) => <span class="mono-chip">{l}</span>}</For>
@@ -324,7 +340,9 @@ export default function RunConsoleScreen() {
                       ? 'Open this link'
                       : isManualBlocker(request.reviewType)
                         ? 'I handled it myself'
-                        : 'Approve'}
+                        : reviewBlockingDetail(request)
+                          ? 'Continue without tailoring'
+                          : 'Approve'}
                   </button>
                   <button class="btn-quiet" type="button" onClick={() => void rejectReview(request)}>
                     Reject
@@ -333,7 +351,9 @@ export default function RunConsoleScreen() {
                 <div class="provenance-tag" style={{ 'margin-top': '8px' }}>
                   {linkApprovalTarget(request)
                     ? 'The token is hidden. Approving lets the automation browser open this destination.'
-                    : reviewInstruction(request.reviewType)}
+                    : reviewBlockingDetail(request)
+                      ? 'Fix this and start the run again, or continue and send the generic version instead.'
+                      : reviewInstruction(request.reviewType)}
                 </div>
               </div>
             )}

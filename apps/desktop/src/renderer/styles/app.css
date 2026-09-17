@@ -1156,6 +1156,18 @@ h1, h2, h3, p { margin: 0; }
   letter-spacing: 0.04em;
 }
 
+/* A gate that exists because a stage could not do its job, rather than because
+   the user has something to look over. It reads as an obstruction, not a prompt. */
+.gate-blocker {
+  margin: 0 0 10px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--armed);
+  background: var(--armed-wash);
+  border-radius: 0 8px 8px 0;
+  font: 400 12.5px/1.5 var(--sans);
+  color: var(--ink);
+}
+
 .gate-actions {
   display: flex;
   flex-direction: column;
