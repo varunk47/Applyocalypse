@@ -22,6 +22,7 @@ from typing import Any
 
 from ..event_protocol import EventType, Severity, WorkerEvent
 from .artifact_generation import metadata_for_existing_file
+from .parse_back import verify_parse_back
 
 # An exporter takes (source_path, output_dir) and returns an object exposing
 # ``ok``, ``pdf_path``, ``stdout`` and ``stderr`` (PdfExportResult / TexCompileResult).
@@ -85,6 +86,27 @@ def run_resume_render_tail(
         ui_state={"current_step": "document_review"},
         payload=artifact.to_payload(),
     ).emit()
+
+    # Before the PDF stage, because a resume that lost an employer is wrong
+    # whether or not it exported cleanly, and the user should hear it either way.
+    gate = verify_parse_back(master_path=master_path, output_path=output_path)
+    if not gate.passed:
+        WorkerEvent(
+            event_type=EventType.VALIDATION_FAILED,
+            run_id=run_id,
+            step_id=None,
+            severity=Severity.WARN,
+            message="Tailored resume no longer reads back the same as your master",
+            machine_state={"format": spec.source_format, "stage": "parse_back"},
+            ui_state={"current_step": "document_review", "requires_user_review": True},
+            payload={
+                "artifact_kind": "resume",
+                "stage": "parse_back",
+                "source_master_path": str(master_path),
+                "generated_path": str(output_path),
+                **gate.to_payload(),
+            },
+        ).emit()
 
     result = exporter(output_path, output_dir)
     if result.ok and result.pdf_path:

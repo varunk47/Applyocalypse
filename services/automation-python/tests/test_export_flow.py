@@ -155,3 +155,70 @@ def test_tex_failure_payload_uses_source_tex_path_without_format_key(
     assert fail.payload["source_tex_path"] == str(source)
     assert len(fail.payload["stdout"]) == 4000 and len(fail.payload["stderr"]) == 4000
     assert fail.payload["blocking_issues"] == [{"code": "TEX_COMPILE_FAILED"}]
+
+
+def test_parse_back_damage_is_reported_before_the_pdf_stage(
+    tmp_path: Path, captured_events: list[WorkerEvent]
+) -> None:
+    """A resume that lost an employer is wrong whether or not the PDF exported,
+    so the gate fires ahead of the exporter and asks for review on its own."""
+    master = tmp_path / "master.txt"
+    master.write_text(
+        "Jane Doe\nEXPERIENCE\nSenior Engineer | Acme Corp | Jan 2020 - Present\n- Owned billing\n"
+        "Engineer | Globex Inc | Jun 2017 - Dec 2019\n- Improved load time\n",
+        encoding="utf-8",
+    )
+    output = tmp_path / "tailored.txt"
+    output.write_text(
+        "Jane Doe\nEXPERIENCE\nSenior Engineer | Acme Corp | Jan 2020 - Present\n- Owned billing\n",
+        encoding="utf-8",
+    )
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    result = SimpleNamespace(ok=True, pdf_path=pdf, exporter="libreoffice", code=None, stdout="", stderr="")
+
+    run_resume_render_tail(
+        run_id="run-1",
+        output_path=output,
+        output_dir=tmp_path,
+        master_path=master,
+        replaced_placeholders=["{{A}}"],
+        spec=RESUME_DOCX_TAIL,
+        exporter=lambda _src, _out: result,
+    )
+
+    assert [e.event_type for e in captured_events] == [
+        EventType.RESUME_MUTATION_COMPLETED,
+        EventType.RESUME_RENDERED,
+        EventType.VALIDATION_FAILED,
+        EventType.RESUME_RENDERED,
+    ]
+    gate = captured_events[2]
+    assert gate.severity is Severity.WARN
+    assert gate.ui_state["requires_user_review"] is True
+    assert gate.machine_state == {"format": "DOCX", "stage": "parse_back"}
+    assert gate.payload["parse_back_passed"] is False
+    assert [issue["code"] for issue in gate.payload["blocking_issues"]] == ["PARSE_BACK_EXPERIENCE_LOST"]
+
+
+def test_a_clean_mutation_adds_no_gate_event(tmp_path: Path, captured_events: list[WorkerEvent]) -> None:
+    body = "Jane Doe\nEXPERIENCE\nSenior Engineer | Acme Corp | Jan 2020 - Present\n- Owned billing\n"
+    master = tmp_path / "master.txt"
+    master.write_text(body, encoding="utf-8")
+    output = tmp_path / "tailored.txt"
+    output.write_text(body.replace("- Owned billing", "- Owned the billing service end to end"), encoding="utf-8")
+    pdf = tmp_path / "resume.pdf"
+    pdf.write_bytes(b"%PDF-fake")
+    result = SimpleNamespace(ok=True, pdf_path=pdf, exporter="libreoffice", code=None, stdout="", stderr="")
+
+    run_resume_render_tail(
+        run_id="run-1",
+        output_path=output,
+        output_dir=tmp_path,
+        master_path=master,
+        replaced_placeholders=["{{A}}"],
+        spec=RESUME_DOCX_TAIL,
+        exporter=lambda _src, _out: result,
+    )
+
+    assert EventType.VALIDATION_FAILED not in [e.event_type for e in captured_events]
