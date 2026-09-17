@@ -1,4 +1,8 @@
 import { For, Show, createSignal, onMount } from 'solid-js'
+import {
+  DEFAULT_MAX_CONCURRENT_APPLICATIONS,
+  HARD_MAX_CONCURRENT_APPLICATIONS,
+} from '@applyocalypse/config'
 import { createStore } from 'solid-js/store'
 import { ShieldCheck, Mail, Wrench } from 'lucide-solid'
 import { useSettingsStore } from '../contexts/SettingsStore'
@@ -12,7 +16,12 @@ type ProviderValue = ProviderOptionValue
 // Hoisted so <For> sees a stable array identity and does not rebuild the
 // segmented controls on every render pass.
 const THEME_PREFERENCES: ThemePreference[] = ['dark', 'light', 'system']
-const CONCURRENCY_CHOICES = [1, 2, 3]
+// The only paces the scheduler will honour, so the control cannot offer one
+// the machine then quietly clamps.
+const CONCURRENCY_CHOICES = Array.from(
+  { length: HARD_MAX_CONCURRENT_APPLICATIONS },
+  (_, index) => index + 1
+)
 const TOGGLE_CHOICES = [false, true]
 const CONVERTER_KEYS = ['libreoffice', 'word', 'tectonic'] as const
 const CONVERTER_LABELS: Record<(typeof CONVERTER_KEYS)[number], string> = {
@@ -63,7 +72,9 @@ export default function SettingsScreen() {
     setForm('providerApiKey', '')
   }
 
-  const maxConcurrent = () => Number(state.settings['automation.maxConcurrentApplications'] ?? 2)
+  const maxConcurrent = () => Number(
+    state.settings['automation.maxConcurrentApplications'] ?? DEFAULT_MAX_CONCURRENT_APPLICATIONS
+  )
   const autofillDefaults = () => state.settings['automation.autofillApprovedDefaults'] === true
   const outputDir = () => (state.settings['files.outputDir'] as string | undefined) ?? ''
 

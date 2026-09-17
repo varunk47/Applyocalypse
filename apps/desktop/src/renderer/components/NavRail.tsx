@@ -1,4 +1,5 @@
 import { createMemo, For, Show } from 'solid-js'
+import { DEFAULT_MAX_CONCURRENT_APPLICATIONS } from '@applyocalypse/config'
 import { useLocation, useNavigate } from '@solidjs/router'
 import { useQueueStore } from '../contexts/QueueStore'
 import { useSettingsStore } from '../contexts/SettingsStore'
@@ -47,7 +48,8 @@ export const NavRail = () => {
 
   const concurrencyNote = createMemo(() => {
     const raw = settingsState.settings['automation.maxConcurrentApplications']
-    const cap = typeof raw === 'number' && Number.isInteger(raw) ? raw : 2
+    const cap =
+      typeof raw === 'number' && Number.isInteger(raw) ? raw : DEFAULT_MAX_CONCURRENT_APPLICATIONS
     return `${cap} at a time, on-device`
   })
 

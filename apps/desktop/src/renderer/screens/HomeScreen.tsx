@@ -1,4 +1,5 @@
 import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
+import { DEFAULT_MAX_CONCURRENT_APPLICATIONS } from '@applyocalypse/config'
 import { useNavigate } from '@solidjs/router'
 import type { ApplicationRun, JobTarget } from '@applyocalypse/shared-types'
 import { useProfileStore } from '../contexts/ProfileStore'
@@ -144,7 +145,7 @@ export default function HomeScreen() {
    */
   const concurrencyCap = createMemo(() => {
     const raw = settingsState.settings['automation.maxConcurrentApplications']
-    return typeof raw === 'number' && Number.isInteger(raw) ? raw : 2
+    return typeof raw === 'number' && Number.isInteger(raw) ? raw : DEFAULT_MAX_CONCURRENT_APPLICATIONS
   })
 
   const handleSubmit = async () => {
