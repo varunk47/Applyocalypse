@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from .style_profile import DEFAULT_STYLE_PROFILE, StyleProfile
 
 
 def _string_list(value: Any) -> list[str]:
@@ -115,20 +118,31 @@ def build_resume_docx(
     output_path: Path,
     *,
     font_size: int = 10,
+    style: StyleProfile | None = None,
 ) -> None:
-    """Build a plain-text resume DOCX from canonical profile and tailoring plan.
+    """Build a resume DOCX from canonical profile, tailoring plan and style.
 
-    Used as the anchor-free fallback when the DOCX master has no mutation anchors.
-    Format: Calibri {font_size}pt, 0.75-inch margins, name/contact header, then
-    Skills, Experience (bullets), Projects, and Education sections.
+    With a ``style`` read off the user's master this reproduces their look:
+    their typeface, margins, heading treatment and section wording. Without
+    one it falls back to the look this builder always had, so passing nothing
+    changes nothing.
     """
     try:
         from docx import Document  # type: ignore
         from docx.enum.text import WD_ALIGN_PARAGRAPH  # type: ignore
         from docx.oxml.ns import qn  # type: ignore
-        from docx.shared import Inches, Pt, RGBColor  # type: ignore  # noqa: F401
+        from docx.shared import Inches, Pt
     except ImportError as exc:
         raise RuntimeError("python-docx is required for resume DOCX generation") from exc
+
+    # `font_size` predates style profiles and still sets the tier when no
+    # profile is supplied, so old callers keep their exact previous output.
+    look = style or replace(
+        DEFAULT_STYLE_PROFILE,
+        body_size_pt=float(font_size),
+        heading_size_pt=float(font_size),
+        name_size_pt=float(font_size + 4),
+    )
 
     profile = canonical_profile.get("profile") if isinstance(canonical_profile.get("profile"), dict) else {}
     legal_name = str(profile.get("legalName") or profile.get("displayName") or "").strip()
@@ -148,21 +162,23 @@ def build_resume_docx(
 
     doc = Document()
     for section in doc.sections:
-        section.top_margin = Inches(0.75)
-        section.bottom_margin = Inches(0.75)
-        section.left_margin = Inches(0.75)
-        section.right_margin = Inches(0.75)
+        section.top_margin = Inches(look.margins.top_in)
+        section.bottom_margin = Inches(look.margins.bottom_in)
+        section.left_margin = Inches(look.margins.left_in)
+        section.right_margin = Inches(look.margins.right_in)
 
-    pt = Pt(font_size)
+    body_pt = Pt(look.body_size_pt)
 
-    def _set_run(run: Any, bold: bool = False, size: Any = None) -> None:
-        run.font.name = "Calibri"
-        run.font.size = size or pt
+    def _set_run(run: Any, bold: bool = False, size: Any = None, font: str | None = None) -> None:
+        family = font or look.body_font
+        run.font.name = family
+        run.font.size = size or body_pt
         run.bold = bold
+        # Force theme font override so Word renders the requested family.
         run._r.get_or_add_rPr()
         rFonts = run._r.rPr.get_or_add_rFonts()
-        rFonts.set(qn("w:ascii"), "Calibri")
-        rFonts.set(qn("w:hAnsi"), "Calibri")
+        rFonts.set(qn("w:ascii"), family)
+        rFonts.set(qn("w:hAnsi"), family)
 
     def _add_plain(text_content: str, bold: bool = False, center: bool = False, size: Any = None) -> Any:
         p = doc.add_paragraph()
@@ -174,12 +190,15 @@ def build_resume_docx(
         _set_run(run, bold=bold, size=size)
         return p
 
-    def _add_section_heading(text_content: str) -> None:
+    def _add_section_heading(kind: str, default_label: str) -> None:
+        label = look.label_for(kind, default_label)
         p = doc.add_paragraph()
         p.paragraph_format.space_before = Pt(4)
         p.paragraph_format.space_after = Pt(0)
-        run = p.add_run(text_content.upper())
-        _set_run(run, bold=True)
+        run = p.add_run(label.upper() if look.heading_all_caps else label)
+        _set_run(run, bold=look.heading_bold, size=Pt(look.heading_size_pt), font=look.heading_font)
+        if not look.heading_rule:
+            return
         # Horizontal rule below heading via bottom border
         from docx.oxml import OxmlElement  # type: ignore
         pPr = p._p.get_or_add_pPr()
@@ -193,7 +212,17 @@ def build_resume_docx(
         pPr.append(pBdr)
 
     def _add_bullet(text_content: str) -> None:
-        p = doc.add_paragraph(style="List Bullet")
+        # A master may name a bullet style this blank document has never heard
+        # of, which python-docx reports as a KeyError. A resume with unmarked
+        # bullets still beats no resume at all.
+        try:
+            p = doc.add_paragraph(style=look.bullet_style)
+        except KeyError:
+            try:
+                p = doc.add_paragraph(style=DEFAULT_STYLE_PROFILE.bullet_style)
+            except KeyError:
+                p = doc.add_paragraph()
+                text_content = "• " + text_content
         p.paragraph_format.space_before = Pt(0)
         p.paragraph_format.space_after = Pt(0)
         run = p.add_run(text_content)
@@ -201,9 +230,9 @@ def build_resume_docx(
 
     # Name header
     if legal_name:
-        _add_plain(legal_name, bold=True, center=True, size=Pt(font_size + 4))
+        _add_plain(legal_name, bold=look.name_bold, center=look.name_centered, size=Pt(look.name_size_pt))
     if contact_parts:
-        _add_plain("  |  ".join(contact_parts), center=True)
+        _add_plain(look.contact_separator.join(contact_parts), center=look.name_centered)
 
     # Skills
     skill_groups = canonical_profile.get("skillGroups") if isinstance(canonical_profile.get("skillGroups"), list) else []
@@ -217,13 +246,13 @@ def build_resume_docx(
     ]
     ordered_skills.extend([s for s in all_skills if s not in ordered_skills])
     if ordered_skills:
-        _add_section_heading("Skills")
+        _add_section_heading("SKILLS", "Skills")
         _add_plain(", ".join(ordered_skills[:36]))
 
     # Experience
     experience = canonical_profile.get("experience") if isinstance(canonical_profile.get("experience"), list) else []
     if experience:
-        _add_section_heading("Experience")
+        _add_section_heading("EXPERIENCE", "Experience")
         for entry in experience[:experience_limit]:
             if not isinstance(entry, dict):
                 continue
@@ -239,7 +268,7 @@ def build_resume_docx(
     # Projects
     projects = canonical_profile.get("projects") if isinstance(canonical_profile.get("projects"), list) else []
     if projects:
-        _add_section_heading("Projects")
+        _add_section_heading("PROJECTS", "Projects")
         for project in projects[:project_limit]:
             if not isinstance(project, dict):
                 continue
@@ -255,7 +284,7 @@ def build_resume_docx(
     # Education
     education = canonical_profile.get("education") if isinstance(canonical_profile.get("education"), list) else []
     if education:
-        _add_section_heading("Education")
+        _add_section_heading("EDUCATION", "Education")
         for entry in education[:3]:
             if not isinstance(entry, dict):
                 continue

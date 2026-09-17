@@ -15,6 +15,7 @@ from applyocalypse_automation.documents.file_generation import (
     GeneratedNameInput,
     build_generated_filename,
 )
+from applyocalypse_automation.documents.style_profile import Margins, StyleProfile
 
 _PROFILE = {
     "profile": {
@@ -428,3 +429,80 @@ def test_build_resume_docx_leaves_no_dangling_separator_without_dates() -> None:
 )
 def test_date_range(entry: dict, expected: str) -> None:
     assert _date_range(entry) == expected
+
+
+# ---------------------------------------------------------------------------
+# build_resume_docx honouring a style profile
+#
+# A rebuilt resume is only an improvement on mutating the user's file if it
+# still looks like their resume. These assert the parts a user would notice
+# immediately: the typeface, the page margins, and their own section wording.
+# ---------------------------------------------------------------------------
+
+_USER_STYLE = StyleProfile(
+    body_font="Garamond",
+    body_size_pt=11.5,
+    heading_font="Garamond",
+    heading_size_pt=12.0,
+    heading_bold=True,
+    heading_all_caps=False,
+    heading_rule=False,
+    name_size_pt=18.0,
+    name_bold=True,
+    name_centered=False,
+    margins=Margins(top_in=0.5, bottom_in=0.5, left_in=0.5, right_in=0.5),
+    bullet_style="List Bullet",
+    contact_separator=" • ",
+    section_labels=("Professional Experience", "Academic Background"),
+    detected=True,
+)
+
+
+def _render(style: StyleProfile | None):
+    from docx import Document as _Document
+
+    tmp = tempfile.mkdtemp()
+    out = Path(tmp) / "resume.docx"
+    build_resume_docx(_RESUME_PROFILE, _RESUME_PLAN, out, style=style)
+    return _Document(str(out))
+
+
+def test_rendered_resume_uses_the_masters_typeface() -> None:
+    pytest.importorskip("docx")
+    doc = _render(_USER_STYLE)
+    fonts = {run.font.name for para in doc.paragraphs for run in para.runs if run.text.strip()}
+    assert fonts == {"Garamond"}, "a rebuilt resume in the wrong typeface is not the user's resume"
+
+
+def test_rendered_resume_uses_the_masters_margins() -> None:
+    pytest.importorskip("docx")
+    doc = _render(_USER_STYLE)
+    assert doc.sections[0].left_margin.inches == pytest.approx(0.5)
+    assert doc.sections[0].top_margin.inches == pytest.approx(0.5)
+
+
+def test_rendered_resume_keeps_the_users_own_section_wording() -> None:
+    pytest.importorskip("docx")
+    text = "\n".join(p.text for p in _render(_USER_STYLE).paragraphs)
+    assert "Professional Experience" in text
+    assert "Academic Background" in text
+    # The builder's generic wording must not appear alongside the user's own.
+    assert "EXPERIENCE" not in text
+    assert "EDUCATION" not in text
+
+
+def test_rendered_resume_uses_the_masters_contact_separator() -> None:
+    pytest.importorskip("docx")
+    text = "\n".join(p.text for p in _render(_USER_STYLE).paragraphs)
+    assert "ada@example.com • 555-0200" in text
+
+
+def test_rendering_without_a_profile_keeps_the_previous_look() -> None:
+    # No profile is the pre-existing behaviour, and must stay byte-for-byte
+    # the same so adding profiles changes nothing on its own.
+    pytest.importorskip("docx")
+    doc = _render(None)
+    fonts = {run.font.name for para in doc.paragraphs for run in para.runs if run.text.strip()}
+    assert fonts == {"Calibri"}
+    assert doc.sections[0].left_margin.inches == pytest.approx(0.75)
+    assert "EXPERIENCE" in "\n".join(p.text for p in doc.paragraphs)
