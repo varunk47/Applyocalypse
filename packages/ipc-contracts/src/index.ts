@@ -202,9 +202,10 @@ export const IpcContracts = {
       applicationPassword: ApplicationPasswordSchema,
       gmailOtpEnabled: z.boolean().default(false),
       workAuthorization: z.object({
-        summary: z.string(),
-        sponsorshipRequired: z.boolean(),
-        status: z.string().optional()
+        status: z.string(),
+        authorizedInUs: z.boolean(),
+        sponsorshipNeed: z.enum(["NEVER", "NOW", "FUTURE"]),
+        summary: z.string()
       }).optional()
     }).strict(),
     ProfileSchema

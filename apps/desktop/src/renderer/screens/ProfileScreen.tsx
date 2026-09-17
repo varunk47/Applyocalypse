@@ -1,8 +1,24 @@
 import { For, Show, createEffect, createSignal } from 'solid-js'
 import { createStore, produce } from 'solid-js/store'
 import { KeyRound, Minus, Plus, Save, Settings, ShieldCheck, X } from 'lucide-solid'
-import type { CanonicalProfile } from '@applyocalypse/shared-types'
+import {
+  deriveWorkAuthorization,
+  readWorkAuthorization,
+  type CanonicalProfile,
+  type SponsorshipNeed,
+  type WorkAuthorizationStatus,
+} from '@applyocalypse/shared-types'
+import { WorkAuthorizationFields } from '../features/profile/WorkAuthorizationFields'
 import { useProfileStore } from '../contexts/ProfileStore'
+
+/** Rehydrate the editor from whatever the profile holds; the old free-text blob reads back as unanswered. */
+const readStoredWorkAuth = (stored: Record<string, unknown>) => {
+  const answer = readWorkAuthorization(stored)
+  return {
+    workAuthStatus: (answer?.status ?? '') as WorkAuthorizationStatus | '',
+    workAuthSponsorship: (answer?.sponsorshipNeed ?? '') as SponsorshipNeed | '',
+  }
+}
 
 const applicationPasswordIsValid = (v: string) =>
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(v)
@@ -42,7 +58,8 @@ export default function ProfileScreen() {
   const [form, setForm] = createStore({
     legalName: '', email: '', location: '', applicationEmail: '', applicationPassword: '', gmailOtpEnabled: false,
     profileLegalName: '', profileDisplayName: '', profileEmail: '', profilePhone: '',
-    profileLocation: '', profileWorkAuthorization: '',
+    profileLocation: '',
+    workAuthStatus: '' as WorkAuthorizationStatus | '', workAuthSponsorship: '' as SponsorshipNeed | '',
     profileApplicationEmail: '', profileApplicationPassword: '', profileGmailOtpEnabled: false,
   })
 
@@ -60,7 +77,7 @@ export default function ProfileScreen() {
       profileEmail: profile.email ?? '',
       profilePhone: profile.phone ?? '',
       profileLocation: profile.location ?? '',
-      profileWorkAuthorization: String(profile.workAuthorization['summary'] ?? ''),
+      ...readStoredWorkAuth(profile.workAuthorization),
       profileApplicationEmail: profile.applicationEmail ?? profile.email ?? '',
       profileApplicationPassword: '',
       profileGmailOtpEnabled: profile.otpHandlingEnabled,
@@ -83,6 +100,15 @@ export default function ProfileScreen() {
     setForm('applicationPassword', '')
   }
 
+  // Keep whatever is stored unless the editor holds a complete answer, so a
+  // half-made edit cannot blank out an answer that was already good.
+  const workAuthorizationValue = () => {
+    const answer = form.workAuthStatus
+      ? deriveWorkAuthorization(form.workAuthStatus, form.workAuthSponsorship || null)
+      : null
+    return answer ? { ...answer } : (state.profile?.workAuthorization ?? {})
+  }
+
   const submitProfileEdits = () => {
     if (!state.profile) return
     void saveProfile({
@@ -92,10 +118,7 @@ export default function ProfileScreen() {
       email: form.profileEmail || null,
       phone: form.profilePhone || null,
       location: form.profileLocation || null,
-      workAuthorization: {
-        ...state.profile.workAuthorization,
-        ...(form.profileWorkAuthorization ? { summary: form.profileWorkAuthorization } : {}),
-      },
+      workAuthorization: workAuthorizationValue(),
     })
   }
 
@@ -142,7 +165,11 @@ export default function ProfileScreen() {
             <label><span>Email</span><input value={form.profileEmail} onInput={(e) => setForm('profileEmail', e.currentTarget.value)} /></label>
             <label><span>Phone</span><input value={form.profilePhone} onInput={(e) => setForm('profilePhone', e.currentTarget.value)} /></label>
             <label><span>Location</span><input value={form.profileLocation} onInput={(e) => setForm('profileLocation', e.currentTarget.value)} /></label>
-            <label><span>Work authorization</span><input value={form.profileWorkAuthorization} onInput={(e) => setForm('profileWorkAuthorization', e.currentTarget.value)} /></label>
+            <WorkAuthorizationFields
+              fields={{ workAuthStatus: form.workAuthStatus, workAuthSponsorship: form.workAuthSponsorship }}
+              setStatus={(value) => setForm('workAuthStatus', value)}
+              setSponsorship={(value) => setForm('workAuthSponsorship', value)}
+            />
             <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>{state.isLoading ? 'Saving...' : 'Save identity'}</span></button>
           </div>
         </details>

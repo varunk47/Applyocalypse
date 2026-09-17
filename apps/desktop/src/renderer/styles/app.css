@@ -573,6 +573,41 @@ h1, h2, h3, p { margin: 0; }
 
 /* Sits above the paste box, not below it, because it is the reason the box is
    not going to do anything yet. Each row is the route to the place it is fixed. */
+/* The two answers a portal will be given, shown before any form is opened. */
+.workauth-preview {
+  margin: 4px 0 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  background: var(--wax-wash);
+}
+
+.workauth-preview-head {
+  font: 600 11px/1 var(--mono);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  margin-bottom: 8px;
+}
+
+.workauth-preview dl {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 16px;
+  margin: 0;
+}
+
+.workauth-preview dt {
+  font-size: 13px;
+  color: var(--ink-2);
+}
+
+.workauth-preview dd {
+  margin: 0;
+  font: 600 13px/1.3 var(--mono);
+  color: var(--ink);
+}
+
 .setup-gaps {
   margin: 0 0 14px;
   padding-bottom: 12px;

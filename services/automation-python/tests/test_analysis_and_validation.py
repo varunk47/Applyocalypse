@@ -113,7 +113,12 @@ def test_detected_field_answer_uses_verified_profile_and_flags_sensitive_fields(
         "profile": {
             "legalName": "Ada Lovelace",
             "email": "ada@example.com",
-            "workAuthorization": {"summary": "Requires explicit user confirmation"},
+            "workAuthorization": {
+                "status": "US_CITIZEN",
+                "authorizedInUs": True,
+                "sponsorshipNeed": "NEVER",
+                "summary": "US citizen. I do not require sponsorship now or in the future.",
+            },
         }
     }
 
@@ -130,6 +135,7 @@ def test_detected_field_answer_uses_verified_profile_and_flags_sensitive_fields(
 
     assert email_answer.proposed_value == "ada@example.com"
     assert email_answer.requires_review is False
+    assert work_auth_answer.proposed_value == "Yes"
     assert work_auth_answer.requires_review is True
     assert work_auth_answer.source == "PROFILE"
 

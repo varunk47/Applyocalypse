@@ -35,7 +35,7 @@ type ProfileStoreValue = {
     applicationEmail: string
     applicationPassword: string
     gmailOtpEnabled?: boolean
-    workAuthorization?: { summary: string; sponsorshipRequired: boolean; status?: string }
+    workAuthorization?: { status: string; authorizedInUs: boolean; sponsorshipNeed: 'NEVER' | 'NOW' | 'FUTURE'; summary: string }
   }) => Promise<void>
   configureApplicationCredentials: (input: {
     profileId: string
@@ -134,7 +134,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
     applicationEmail: string
     applicationPassword: string
     gmailOtpEnabled?: boolean
-    workAuthorization?: { summary: string; sponsorshipRequired: boolean; status?: string }
+    workAuthorization?: { status: string; authorizedInUs: boolean; sponsorshipNeed: 'NEVER' | 'NOW' | 'FUTURE'; summary: string }
   }): Promise<void> => {
     setState('isLoading', true)
     try {

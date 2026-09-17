@@ -12,7 +12,7 @@ const READY = {
     legalName: 'Grace Hopper',
     email: 'grace@example.com',
     phone: '+1-415-555-0132',
-    workAuthorization: { summary: 'US citizen', sponsorshipRequired: false },
+    workAuthorization: { status: 'US_CITIZEN', authorizedInUs: true, sponsorshipNeed: 'NEVER' },
   },
   experience: [{ company: 'Acme', title: 'Engineer' }],
   education: [],
@@ -60,9 +60,14 @@ describe('profileReadiness', () => {
       'WORK_AUTHORIZATION',
     ],
     [
-      'an empty work authorization summary',
+      // What older profiles stored. It reads like an answer and cannot fill a
+      // Yes/No radio, so it does not count as one.
+      'only the old free-text work authorization blob',
       without((d) => {
-        (d['profile'] as Record<string, unknown>)['workAuthorization'] = { summary: '  ', sponsorshipRequired: false }
+        (d['profile'] as Record<string, unknown>)['workAuthorization'] = {
+          summary: 'Authorized to work in the US',
+          sponsorshipRequired: false,
+        }
       }),
       'WORK_AUTHORIZATION',
     ],

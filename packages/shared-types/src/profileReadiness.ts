@@ -1,5 +1,6 @@
 import type { z } from "zod";
 import type { CanonicalProfileSchema } from "@applyocalypse/shared-schemas";
+import { readWorkAuthorization } from "./workAuthorization";
 
 type CanonicalProfile = z.infer<typeof CanonicalProfileSchema>;
 
@@ -60,10 +61,9 @@ export const READINESS_CHECKS: readonly ReadinessCheck[] = [
     label: 'Your work authorization',
     fix: 'Say how you are authorized to work and whether you need sponsorship. Portals ask on almost every form.',
     route: '/profile',
-    isMet: (p) => {
-      const summary = p.profile.workAuthorization['summary']
-      return typeof summary === 'string' && summary.trim().length > 0
-    },
+    // A typed sentence cannot answer a Yes/No radio, and the portals ask two of
+    // them, so only the structured answer counts as having said.
+    isMet: (p) => readWorkAuthorization(p.profile.workAuthorization) !== null,
   },
   {
     id: 'HISTORY',

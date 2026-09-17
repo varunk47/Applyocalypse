@@ -16,7 +16,15 @@ import {
 } from '../features/onboarding/ConfirmLedger'
 import { FinalDetails, type CredentialFields, type ProviderFields } from '../features/onboarding/FinalDetails'
 import { deriveLegalName } from '../features/onboarding/onboardingUtils'
-import { formatDateMMDDYYYY, parseDateMMDDYYYY, deriveFirstName, deriveLastName } from '@applyocalypse/shared-types'
+import {
+  formatDateMMDDYYYY,
+  parseDateMMDDYYYY,
+  deriveFirstName,
+  deriveLastName,
+  deriveWorkAuthorization,
+  type SponsorshipNeed,
+  type WorkAuthorizationStatus,
+} from '@applyocalypse/shared-types'
 
 /**
  * Onboarding is four moments, not thirteen steps: hand over a resume, confirm
@@ -106,8 +114,8 @@ function OnboardingScreen() {
     eeoHispanicOrLatino: null as string | null,
     eeoSexualOrientation: null as string[] | null,
 
-    workAuthSummary: '',
-    sponsorshipRequired: false,
+    workAuthStatus: '' as WorkAuthorizationStatus | '',
+    workAuthSponsorship: '' as SponsorshipNeed | '',
 
     applicationEmail: '',
     applicationPassword: '',
@@ -136,6 +144,16 @@ function OnboardingScreen() {
   const parsed = () => profileState.parsedDocuments[0] ?? null
   const canonical = createMemo(() => parsed()?.canonical ?? null)
   const isReading = () => Boolean(resumeFile()) && !parsed()
+
+  // Stored as the two answers a portal asks for, not as the prose. Omitted
+  // entirely until the user has said enough for both to be answered honestly,
+  // rather than written down half-formed.
+  const workAuthorizationPatch = () => {
+    const answer = form.workAuthStatus
+      ? deriveWorkAuthorization(form.workAuthStatus, form.workAuthSponsorship || null)
+      : null
+    return answer ? { workAuthorization: { ...answer } } : {}
+  }
 
   const go = (next: Moment) => setMomentIndex(MOMENTS.indexOf(next))
 
@@ -233,7 +251,7 @@ function OnboardingScreen() {
         applicationEmail: form.applicationEmail,
         applicationPassword: form.applicationPassword,
         gmailOtpEnabled: form.gmailOtpEnabled,
-        workAuthorization: { summary: form.workAuthSummary, sponsorshipRequired: form.sponsorshipRequired },
+        ...workAuthorizationPatch(),
       })
       if (profileState.error) return
 
@@ -447,10 +465,9 @@ function OnboardingScreen() {
 
           <Show when={moment() === 'details'}>
             <FinalDetails
-              workAuthSummary={form.workAuthSummary}
-              setWorkAuthSummary={(value) => setForm('workAuthSummary', value)}
-              sponsorshipRequired={form.sponsorshipRequired}
-              setSponsorshipRequired={(value) => setForm('sponsorshipRequired', value)}
+              workAuth={{ workAuthStatus: form.workAuthStatus, workAuthSponsorship: form.workAuthSponsorship }}
+              setWorkAuthStatus={(value) => setForm('workAuthStatus', value)}
+              setWorkAuthSponsorship={(value) => setForm('workAuthSponsorship', value)}
               eeo={{
                 eeoAuthorizedToWorkUS: form.eeoAuthorizedToWorkUS,
                 eeoRequiresSponsorship: form.eeoRequiresSponsorship,

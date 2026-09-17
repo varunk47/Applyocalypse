@@ -169,6 +169,61 @@ def _work_authorization(profile: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+# The two questions, told apart by what they ask about rather than by where
+# they sit on the form.
+_AUTHORIZATION_PHRASES: tuple[str, ...] = (
+    "legally authorized",
+    "legally authorised",
+    "authorized to work",
+    "authorised to work",
+    "eligible to work",
+    "work authorization",
+    "work authorisation",
+    "legally eligible",
+)
+
+_SPONSORSHIP_PHRASES: tuple[str, ...] = (
+    "sponsorship",
+    "sponsor",
+    "require sponsorship",
+    "visa sponsorship",
+)
+
+
+def _work_authorization_choice(
+    *, tokens: tuple[str, ...], field_type: str, profile: dict[str, Any]
+) -> str | None:
+    """Answer a yes/no work-authorization question, or None if this is not one.
+
+    Returns None rather than guessing whenever the profile has not been asked
+    the question in structured form: the older free-text blob reads like an
+    answer but cannot fill a radio, and inventing one would put a claim about
+    someone's immigration status on an application they never made.
+    """
+    if field_type not in _CHOICE_FIELD_TYPES and not _matches_any(tokens, _INTERROGATIVE_OPENERS):
+        return None
+
+    work_authorization = _work_authorization(profile)
+    authorized = work_authorization.get("authorizedInUs")
+    sponsorship_need = work_authorization.get("sponsorshipNeed")
+    if not isinstance(authorized, bool) or sponsorship_need not in ("NEVER", "NOW", "FUTURE"):
+        return None
+
+    asks_sponsorship = _matches_any(tokens, _SPONSORSHIP_PHRASES)
+    asks_authorization = _matches_any(tokens, _AUTHORIZATION_PHRASES)
+    needs_sponsorship = sponsorship_need != "NEVER"
+
+    # "Authorized to work without sponsorship" is one question wearing two
+    # hats, and it is Yes only when both halves are.
+    if asks_sponsorship and asks_authorization:
+        return "Yes" if authorized and not needs_sponsorship else "No"
+    if asks_sponsorship:
+        return "Yes" if needs_sponsorship else "No"
+    if asks_authorization:
+        return "Yes" if authorized else "No"
+    return None
+
+
 def _eeo(profile: dict[str, Any]) -> dict[str, Any]:
     value = profile.get("equalEmploymentDefaults")
     return value if isinstance(value, dict) else {}
@@ -504,6 +559,22 @@ def _propose_answer(
             requires_review=not autofill_approved_defaults or not bool(value),
         )
 
+    # ── Work-auth: the two yes/no questions ────────────────────────────────────
+    # Ahead of the EEO and address rules on purpose. "Are you authorized to work
+    # in the United States?" ends in the token "state", which the address rules
+    # read as a home-state field and answer with the applicant's own state.
+    work_auth_choice = _work_authorization_choice(
+        tokens=tokens, field_type=field_type, profile=profile
+    )
+    if work_auth_choice is not None:
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type,
+            proposed_value=work_auth_choice, confidence=0.92, source="PROFILE",
+            # A wrong answer here is a misrepresentation to an employer, so it is
+            # shown to the user whatever the autofill setting says.
+            requires_review=True,
+        )
+
     # ── EEO fields — always requires_review (legal sensitivity) ──────────────────
     eeo = _eeo(profile)
     for aliases, eeo_key in _EEO_RULES:
@@ -521,9 +592,13 @@ def _propose_answer(
             )
 
     # ── Address fields ────────────────────────────────────────────────────────────
+    # "...in the United States?" ends in the token "state". Left alone, the state
+    # rule answers a work-authorization question with the applicant's own home
+    # state, which is both wrong and a claim they never made.
+    asks_work_authorization = _matches_any(tokens, _AUTHORIZATION_PHRASES + _SPONSORSHIP_PHRASES)
     address = _address(profile)
     for aliases, addr_key in _ADDRESS_RULES:
-        if not foreign_subject and _matches_any(tokens, aliases):
+        if not foreign_subject and not asks_work_authorization and _matches_any(tokens, aliases):
             value = address.get(addr_key)
             return ProposedApplicationAnswer(
                 field_label=field_label, field_type=field_type,
@@ -626,8 +701,12 @@ def _propose_answer(
             requires_review=not (autofill_approved_defaults and bool(selected_url)),
         )
 
-    # ── Work-auth: free-text sponsorship detail ────────────────────────────────
-    if _matches_any(tokens, ("authorization", "authorisation", "sponsorship", "visa", "legally authorized")):
+    # ── Work-auth: prose fields ("Describe your work authorization") ───────────
+    # Prose only. A radio's options are Yes and No, so a sentence cannot fill
+    # one; the structured branch above is the only thing allowed to answer those.
+    if field_type not in _CHOICE_FIELD_TYPES and _matches_any(
+        tokens, ("authorization", "authorisation", "sponsorship", "visa", "legally authorized")
+    ):
         eeo = _eeo(profile)
         detail_text = (
             eeo.get("sponsorshipDetailText")

@@ -34,6 +34,7 @@ import type {
 
 export * from "./dateUtils";
 export * from "./profileReadiness";
+export * from "./workAuthorization";
 
 export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
 export type ActiveTheme = z.infer<typeof ActiveThemeSchema>;

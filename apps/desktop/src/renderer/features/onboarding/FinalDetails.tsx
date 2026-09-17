@@ -2,6 +2,8 @@ import { For, Show } from 'solid-js'
 import { KeyRound, ShieldCheck, Sparkles } from 'lucide-solid'
 import { PROVIDER_OPTIONS } from '../../utils/providerOptions'
 import { EqualEmploymentStep, type EeoFields } from './EqualEmploymentStep'
+import { deriveWorkAuthorization } from '@applyocalypse/shared-types'
+import { WorkAuthorizationFields, type WorkAuthFields } from '../profile/WorkAuthorizationFields'
 
 export type CredentialFields = {
   applicationEmail: string
@@ -17,10 +19,9 @@ export type ProviderFields = {
 }
 
 type Props = {
-  workAuthSummary: string
-  setWorkAuthSummary: (value: string) => void
-  sponsorshipRequired: boolean
-  setSponsorshipRequired: (value: boolean) => void
+  workAuth: WorkAuthFields
+  setWorkAuthStatus: (value: WorkAuthFields['workAuthStatus']) => void
+  setWorkAuthSponsorship: (value: WorkAuthFields['workAuthSponsorship']) => void
   eeo: EeoFields
   setEeoField: <K extends keyof EeoFields>(key: K, value: EeoFields[K]) => void
   credentials: CredentialFields
@@ -38,8 +39,19 @@ type Props = {
  * rather than three steps, because none of them depends on the others.
  */
 export function FinalDetails(props: Props) {
+  // Work authorization is part of finishing, not a nicety: a profile without it
+  // is refused at the queue, so letting onboarding end without it just moves the
+  // dead end somewhere less obvious.
+  const workAuthAnswered = () =>
+    props.workAuth.workAuthStatus
+      ? deriveWorkAuthorization(props.workAuth.workAuthStatus, props.workAuth.workAuthSponsorship || null) !== null
+      : false
+
   const canFinish = () =>
-    props.credentials.applicationEmail.trim().length > 0 && props.passwordIsValid && !props.isSaving
+    props.credentials.applicationEmail.trim().length > 0 &&
+    props.passwordIsValid &&
+    workAuthAnswered() &&
+    !props.isSaving
 
   return (
     <div class="ob-tail">
@@ -54,22 +66,11 @@ export function FinalDetails(props: Props) {
           <ShieldCheck size={14} aria-hidden="true" />
           <span>Work authorization</span>
         </h3>
-        <label class="form-field">
-          <span>Summary used to fill portal fields</span>
-          <input
-            value={props.workAuthSummary}
-            placeholder="Authorized to work in the US without sponsorship"
-            onInput={(event) => props.setWorkAuthSummary(event.currentTarget.value)}
-          />
-        </label>
-        <label class="toggle-row">
-          <input
-            type="checkbox"
-            checked={props.sponsorshipRequired}
-            onChange={(event) => props.setSponsorshipRequired(event.currentTarget.checked)}
-          />
-          <span>I require visa sponsorship</span>
-        </label>
+        <WorkAuthorizationFields
+          fields={props.workAuth}
+          setStatus={props.setWorkAuthStatus}
+          setSponsorship={props.setWorkAuthSponsorship}
+        />
 
         <details class="ob-disclosure">
           <summary>Equal employment defaults</summary>
