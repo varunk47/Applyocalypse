@@ -2,10 +2,11 @@ import { ipcMain } from "electron";
 import { IpcChannels, IpcContracts } from "@applyocalypse/ipc-contracts";
 import { GmailOAuthService } from "../../services/gmailOAuthService";
 import { checkConverters } from "../../services/converterDiagnostics";
+import { checkStartupHealth } from "../../services/startupHealth";
 import { handleContract, type IpcHandlerContext } from "./context";
 
 export const registerSystemHandlers = (ctx: IpcHandlerContext): void => {
-  const { themeController, settingsRepository, getMainWindow } = ctx;
+  const { themeController, settingsRepository, getMainWindow, db } = ctx;
 
   ipcMain.on(IpcChannels.themeGetInitialState, (event) => {
     event.returnValue = themeController.getState();
@@ -27,6 +28,8 @@ export const registerSystemHandlers = (ctx: IpcHandlerContext): void => {
   handleContract(IpcContracts.systemCheckConverters, () => ({
     converters: checkConverters()
   }));
+
+  handleContract(IpcContracts.systemCheckHealth, () => ({ findings: checkStartupHealth(db) }));
 
   handleContract(IpcContracts.systemWindowControl, ({ action }) => {
     const mainWindow = getMainWindow();

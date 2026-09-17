@@ -118,6 +118,7 @@ export const IpcChannels = {
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
   documentsListGenerated: "documents:list-generated",
   systemCheckConverters: "system:check-converters",
+  systemCheckHealth: "system:check-health",
   systemWindowControl: "system:window-control"
 } as const;
 
@@ -401,6 +402,23 @@ export const IpcContracts = {
         word: z.object({ available: z.boolean(), version: z.string().nullable(), path: z.string().nullable(), installUrl: z.string() }),
         tectonic: z.object({ available: z.boolean(), version: z.string().nullable(), path: z.string().nullable(), installUrl: z.string() })
       })
+    })
+  ),
+  systemCheckHealth: contract(
+    IpcChannels.systemCheckHealth,
+    EmptyRequestSchema,
+    z.object({
+      findings: z.array(
+        z.object({
+          id: z.string(),
+          severity: z.enum(["BLOCKING", "DEGRADED"]),
+          title: z.string(),
+          consequence: z.string(),
+          fix: z.string(),
+          route: z.string().nullable(),
+          link: z.string().nullable()
+        })
+      )
     })
   ),
   systemWindowControl: contract(

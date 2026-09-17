@@ -1,43 +1,70 @@
 import { Show, createSignal, onMount } from 'solid-js'
+import { useNavigate } from '@solidjs/router'
 import { AlertTriangle } from 'lucide-solid'
 
+type Finding = {
+  id: string
+  severity: 'BLOCKING' | 'DEGRADED'
+  title: string
+  consequence: string
+  fix: string
+  route: string | null
+  link: string | null
+}
+
 /**
- * App-wide warning for missing external tooling.
+ * App-wide warning for anything the machine is missing.
  *
- * The DOCX to PDF step shells out to LibreOffice, and falls back to docx2pdf
- * (which needs Microsoft Word). With neither installed, tailoring still runs and
- * still writes a DOCX, so the failure only shows up as a missing PDF at the end
- * of a run. Settings has the full diagnostic, but nobody opens Settings before
- * their first application, so the warning has to find them.
+ * Every external dependency but the database used to be discovered inside a run
+ * the user had already committed to: no model key produced documents built from
+ * templates, no converter produced a DOCX where a PDF was expected. Settings
+ * holds the detail, but nobody opens Settings before their first application,
+ * so the warning has to find them.
+ *
+ * One at a time, worst first. This sits in a fixed grid row, and a stack of
+ * banners would push the app out of it.
  */
 export const SystemHealthBanner = () => {
-  const [installUrl, setInstallUrl] = createSignal<string | null>(null)
+  const navigate = useNavigate()
+  const [finding, setFinding] = createSignal<Finding | null>(null)
 
   onMount(async () => {
     try {
-      const { converters } = await window.applyocalypse.system.checkConverters()
-      if (converters.libreoffice.available || converters.word.available) return
-      setInstallUrl(converters.libreoffice.installUrl)
+      const { findings } = await window.applyocalypse.system.checkHealth()
+      setFinding(findings[0] ?? null)
     } catch {
-      // Best effort only. Settings holds the authoritative diagnostic, and a
-      // failed probe must not take the shell down with it.
+      // Best effort only. A failed probe must not take the shell down with it.
     }
   })
 
-  // The slot is always rendered so .app-shell keeps a stable three-row grid.
   return (
+    // The slot is always rendered so .app-shell keeps a stable three-row grid.
     <div class="system-health-slot">
-      <Show when={installUrl()}>
-        {(url) => (
-          <div class="system-health-banner" role="alert">
+      <Show when={finding()}>
+        {(current) => (
+          <div
+            class="system-health-banner"
+            classList={{ 'is-blocking': current().severity === 'BLOCKING' }}
+            role="alert"
+          >
             <AlertTriangle size={15} aria-hidden="true" />
             <span>
-              No PDF converter found. Tailored resumes will be written as DOCX only until you
-              install LibreOffice or Microsoft Word.
+              <strong>{current().title}.</strong> {current().consequence} {current().fix}
             </span>
-            <a href={url()} target="_blank" rel="noopener noreferrer">
-              Install LibreOffice
-            </a>
+            <Show when={current().route}>
+              {(route) => (
+                <button type="button" onClick={() => navigate(route())}>
+                  Fix this
+                </button>
+              )}
+            </Show>
+            <Show when={current().link}>
+              {(url) => (
+                <a href={url()} target="_blank" rel="noopener noreferrer">
+                  Download
+                </a>
+              )}
+            </Show>
           </div>
         )}
       </Show>

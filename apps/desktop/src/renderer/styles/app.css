@@ -333,11 +333,33 @@ h1, h2, h3, p { margin: 0; }
   flex: 1;
 }
 
-.system-health-banner a {
+.system-health-banner a,
+.system-health-banner button {
   color: var(--warning);
   font-weight: 500;
   white-space: nowrap;
   text-underline-offset: 2px;
+}
+
+.system-health-banner button {
+  background: none;
+  border: none;
+  padding: 0;
+  font: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+/* Nothing will run at all, so it does not get to look like a footnote. */
+.system-health-banner.is-blocking {
+  background: var(--wax-wash);
+}
+
+.system-health-banner.is-blocking > svg,
+.system-health-banner.is-blocking a,
+.system-health-banner.is-blocking button {
+  color: var(--wax);
 }
 
 .titlebar {

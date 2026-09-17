@@ -233,6 +233,21 @@ const api = {
           };
         }
       >(IpcContracts.systemCheckConverters.channel, {}),
+    checkHealth: () =>
+      invoke<
+        Record<string, never>,
+        {
+          findings: Array<{
+            id: string;
+            severity: "BLOCKING" | "DEGRADED";
+            title: string;
+            consequence: string;
+            fix: string;
+            route: string | null;
+            link: string | null;
+          }>;
+        }
+      >(IpcContracts.systemCheckHealth.channel, {}),
     windowControl: (action: "minimize" | "toggle-maximize" | "close") =>
       invoke<{ action: "minimize" | "toggle-maximize" | "close" }, { ok: true; isMaximized: boolean }>(
         IpcContracts.systemWindowControl.channel,
