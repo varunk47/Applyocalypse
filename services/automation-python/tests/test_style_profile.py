@@ -143,3 +143,67 @@ def test_unreadable_master_falls_back_and_says_so(tmp_path: Path) -> None:
 
 def test_a_read_profile_reports_itself_as_detected(tmp_path: Path) -> None:
     assert extract_docx_style_profile(_write_master(tmp_path / "master.docx")).detected is True
+
+
+# ---------------------------------------------------------------------------
+# _master_style_profile is the seam the pipeline uses to find the user's look.
+# It returns None rather than a default profile when it cannot read a master,
+# so that callers keep their own look instead of being handed defaults dressed
+# up as the user's.
+# ---------------------------------------------------------------------------
+
+
+def _canonical_with_master(path: Path, *, source_format: str = "DOCX") -> dict:
+    return {
+        "uploadedFiles": [
+            {
+                "fileKind": "RESUME",
+                "status": "VERIFIED_EDITABLE_MASTER",
+                "sourceFormat": source_format,
+                "localPath": str(path),
+            }
+        ]
+    }
+
+
+def test_master_style_profile_reads_a_verified_docx_master(tmp_path: Path) -> None:
+    from applyocalypse_automation.document_stage import _master_style_profile
+
+    master = _write_master(tmp_path / "master.docx")
+    style = _master_style_profile(_canonical_with_master(master))
+
+    assert style is not None
+    assert style.body_font == "Garamond"
+
+
+def test_master_style_profile_is_none_without_a_master() -> None:
+    from applyocalypse_automation.document_stage import _master_style_profile
+
+    assert _master_style_profile({"uploadedFiles": []}) is None
+
+
+def test_master_style_profile_is_none_for_a_tex_master(tmp_path: Path) -> None:
+    # A TEX master styles itself; there is no DOCX look to read off it.
+    from applyocalypse_automation.document_stage import _master_style_profile
+
+    master = tmp_path / "master.tex"
+    master.write_text(r"\documentclass{article}", encoding="utf-8")
+
+    assert _master_style_profile(_canonical_with_master(master, source_format="TEX")) is None
+
+
+def test_master_style_profile_is_none_when_the_file_is_gone(tmp_path: Path) -> None:
+    from applyocalypse_automation.document_stage import _master_style_profile
+
+    assert _master_style_profile(_canonical_with_master(tmp_path / "vanished.docx")) is None
+
+
+def test_master_style_profile_is_none_when_the_master_is_unreadable(tmp_path: Path) -> None:
+    # extract_docx_style_profile degrades to defaults and reports detected=False;
+    # the seam must not pass those defaults off as the user's style.
+    from applyocalypse_automation.document_stage import _master_style_profile
+
+    broken = tmp_path / "broken.docx"
+    broken.write_text("not a docx", encoding="utf-8")
+
+    assert _master_style_profile(_canonical_with_master(broken)) is None

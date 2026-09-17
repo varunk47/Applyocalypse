@@ -506,3 +506,51 @@ def test_rendering_without_a_profile_keeps_the_previous_look() -> None:
     assert fonts == {"Calibri"}
     assert doc.sections[0].left_margin.inches == pytest.approx(0.75)
     assert "EXPERIENCE" in "\n".join(p.text for p in doc.paragraphs)
+
+
+# ---------------------------------------------------------------------------
+# A cover letter that does not match the resume reads as a different person's
+# document, so the letter takes the master's typeface and contact separator
+# too. It keeps its own one inch margins on purpose: a resume is often squeezed
+# to half an inch to make one page, and a letter set that tight looks wrong.
+# ---------------------------------------------------------------------------
+
+
+def _render_letter(style: StyleProfile | None):
+    from docx import Document as _Document
+
+    out = Path(tempfile.mkdtemp()) / "cover_letter.docx"
+    build_cover_letter_docx(_BODY, _PROFILE, out, style=style)
+    return _Document(str(out))
+
+
+def test_cover_letter_uses_the_masters_typeface() -> None:
+    pytest.importorskip("docx")
+    doc = _render_letter(_USER_STYLE)
+    fonts = {run.font.name for para in doc.paragraphs for run in para.runs if run.text.strip()}
+    sizes = {run.font.size.pt for para in doc.paragraphs for run in para.runs if run.text.strip()}
+    assert fonts == {"Garamond"}
+    assert sizes == {11.5}
+
+
+def test_cover_letter_uses_the_masters_contact_separator() -> None:
+    pytest.importorskip("docx")
+    text = "\n".join(p.text for p in _render_letter(_USER_STYLE).paragraphs)
+    assert "margaret@mit.edu • 555-0100" in text
+
+
+def test_cover_letter_keeps_letter_margins_not_the_resumes() -> None:
+    # The master is half an inch. A letter set that tight looks cramped, so
+    # the letter keeps the inch it has always used.
+    pytest.importorskip("docx")
+    assert _render_letter(_USER_STYLE).sections[0].left_margin.inches == pytest.approx(1)
+
+
+def test_cover_letter_without_a_profile_keeps_the_previous_look() -> None:
+    pytest.importorskip("docx")
+    doc = _render_letter(None)
+    fonts = {run.font.name for para in doc.paragraphs for run in para.runs if run.text.strip()}
+    sizes = {run.font.size.pt for para in doc.paragraphs for run in para.runs if run.text.strip()}
+    assert fonts == {"Calibri"}
+    assert sizes == {11.0}
+    assert "margaret@mit.edu  |  555-0100" in "\n".join(p.text for p in doc.paragraphs)

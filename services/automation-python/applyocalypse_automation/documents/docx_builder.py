@@ -36,11 +36,20 @@ def build_cover_letter_docx(
     text: str,
     canonical_profile: dict[str, Any],
     output_path: Path,
+    *,
+    style: StyleProfile | None = None,
 ) -> None:
     """Write a plain-text cover letter as a DOCX using python-docx.
 
-    Format: Calibri 11, 1-inch normal margins, name + contact header,
-    today's date, then body paragraphs (split on double newline).
+    Format: name + contact header, today's date, then body paragraphs (split
+    on double newline).
+
+    With a ``style`` read off the user's master the letter takes their
+    typeface and contact separator, so it reads as the same person's document
+    as the resume it is sent with. It keeps its own one inch margins either
+    way: a resume is often squeezed to half an inch to make one page, and a
+    letter set that tight looks wrong. Without a style it is Calibri 11, the
+    look this builder always had.
     """
     try:
         from docx import Document  # type: ignore
@@ -48,6 +57,9 @@ def build_cover_letter_docx(
         from docx.shared import Inches, Pt
     except ImportError as exc:
         raise RuntimeError("python-docx is required for cover letter DOCX generation") from exc
+
+    # The letter's own long-standing look, used whenever no master was read.
+    look = style or replace(DEFAULT_STYLE_PROFILE, body_font="Calibri", body_size_pt=11.0)
 
     profile = canonical_profile.get("profile") if isinstance(canonical_profile.get("profile"), dict) else {}
     legal_name = str(profile.get("legalName") or profile.get("displayName") or "").strip()
@@ -58,7 +70,8 @@ def build_cover_letter_docx(
 
     doc = Document()
 
-    # Margins: 1 inch on all sides
+    # Margins: 1 inch on all sides. Deliberately not the master's, which is
+    # sized to fit a resume on one page rather than to set a letter.
     for section in doc.sections:
         section.top_margin = Inches(1)
         section.bottom_margin = Inches(1)
@@ -66,14 +79,14 @@ def build_cover_letter_docx(
         section.right_margin = Inches(1)
 
     def _set_run_font(run: Any, bold: bool = False) -> None:
-        run.font.name = "Calibri"
-        run.font.size = Pt(11)
+        run.font.name = look.body_font
+        run.font.size = Pt(look.body_size_pt)
         run.bold = bold
-        # Force theme font override so Word renders Calibri
+        # Force theme font override so Word renders the requested family.
         run._r.get_or_add_rPr()
         rFonts = run._r.rPr.get_or_add_rFonts()
-        rFonts.set(qn("w:ascii"), "Calibri")
-        rFonts.set(qn("w:hAnsi"), "Calibri")
+        rFonts.set(qn("w:ascii"), look.body_font)
+        rFonts.set(qn("w:hAnsi"), look.body_font)
 
     def _add_para(text_content: str, bold: bool = False) -> Any:
         p = doc.add_paragraph()
@@ -87,7 +100,7 @@ def build_cover_letter_docx(
     if legal_name:
         _add_para(legal_name, bold=True)
     if contact_parts:
-        _add_para("  |  ".join(contact_parts))
+        _add_para(look.contact_separator.join(contact_parts))
 
     # Blank line between header and date
     _add_para("")

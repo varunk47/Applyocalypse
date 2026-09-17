@@ -33,6 +33,7 @@ from .documents.export_flow import RESUME_DOCX_TAIL, RESUME_TEX_TAIL, run_resume
 from .documents.file_generation import GeneratedNameInput, build_generated_filename, choose_collision_safe_path
 from .documents.pdf_export import export_docx_to_pdf
 from .documents.resume_master_gate import emit_missing_master_gate, explain_missing_resume_master
+from .documents.style_profile import StyleProfile, extract_docx_style_profile
 from .documents.tex_mutation import compile_tex_with_tectonic, mutate_tex_placeholders
 from .event_protocol import EventType, Severity, WorkerEvent
 from .jd_analysis import analyze_with_optional_llm
@@ -128,6 +129,27 @@ def _build_overflow_jd(job_text: str, pages: int) -> str:
         + str(pages)
         + " pages. Cut the weakest bullets and tighten wording so the resume fits ONE page."
     )
+
+
+def _master_style_profile(canonical_profile: dict) -> StyleProfile | None:
+    """The look of the user's resume, for documents built to match it.
+
+    Returns None rather than a default profile whenever the master cannot be
+    read, so a caller passing this straight through keeps whatever look it had
+    instead of being handed a set of defaults dressed up as the user's.
+    """
+    editable_master = find_verified_resume_master(canonical_profile)
+    if not editable_master:
+        return None
+    # A TEX master is a different format with its own styling; only DOCX is
+    # readable here.
+    if str(editable_master.get("sourceFormat") or "").upper() != "DOCX":
+        return None
+    master_path = Path(str(editable_master["localPath"]))
+    if not master_path.is_file():
+        return None
+    style = extract_docx_style_profile(master_path)
+    return style if style.detected else None
 
 
 def _remutate_and_export(master_path, output_path, replacements, bullet_map, output_dir):
@@ -255,7 +277,9 @@ async def _lazy_generate_cover_letter_for_portal(
         extension="docx",
     )
     cl_docx_path = choose_collision_safe_path(output_dir, build_generated_filename(cl_filename_input))
-    build_cover_letter_docx(cover_letter_content, canonical_profile, cl_docx_path)
+    build_cover_letter_docx(
+        cover_letter_content, canonical_profile, cl_docx_path, style=_master_style_profile(canonical_profile)
+    )
 
     cl_artifact = metadata_for_existing_file(
         path=cl_docx_path,
@@ -833,7 +857,12 @@ def generate_application_documents(
                 )
                 cl_filename = build_generated_filename(cl_filename_input)
                 cl_docx_path = choose_collision_safe_path(output_dir, cl_filename)
-                build_cover_letter_docx(cover_letter_content, canonical_profile, cl_docx_path)
+                build_cover_letter_docx(
+                    cover_letter_content,
+                    canonical_profile,
+                    cl_docx_path,
+                    style=_master_style_profile(canonical_profile),
+                )
                 cover_letter_artifact = metadata_for_existing_file(
                     path=cl_docx_path,
                     file_kind="COVER_LETTER",
