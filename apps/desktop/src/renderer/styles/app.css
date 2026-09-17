@@ -307,9 +307,37 @@ h1, h2, h3, p { margin: 0; }
 .app-shell {
   height: 100vh;
   display: grid;
-  grid-template-rows: 44px 1fr;
+  grid-template-rows: 44px auto 1fr;
   background: var(--paper);
   overflow: hidden;
+}
+
+/* Collapses to nothing when there is nothing wrong. */
+.system-health-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--hairline);
+  background: var(--edited-wash);
+  color: var(--text);
+  font-size: 12.5px;
+}
+
+.system-health-banner > svg {
+  color: var(--warning);
+  flex-shrink: 0;
+}
+
+.system-health-banner span {
+  flex: 1;
+}
+
+.system-health-banner a {
+  color: var(--warning);
+  font-weight: 500;
+  white-space: nowrap;
+  text-underline-offset: 2px;
 }
 
 .titlebar {
@@ -580,6 +608,28 @@ h1, h2, h3, p { margin: 0; }
 .intake-foot .return-hint {
   font: 400 10px var(--mono);
   opacity: 0.8;
+}
+
+/* Only appears when the paste outruns the cap, so it reads as news, not noise. */
+.intake-pace {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0 0;
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+
+.intake-pace button {
+  border: 0;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: var(--wax);
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }
 
 .automation-option {
@@ -1961,6 +2011,23 @@ h1, h2, h3, p { margin: 0; }
 .ob-target-sub { font: 400 9.5px var(--mono); letter-spacing: 0.11em; color: var(--ink-3); text-transform: uppercase; }
 
 .ob-picked { margin: 0; }
+
+/* Filename, then the two ways out of the editable-master gate. */
+.ob-master {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ob-master-file {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 4px;
+}
+
+.ob-master-file svg { color: var(--live); flex: none; }
 
 .ob-privacy {
   display: flex;

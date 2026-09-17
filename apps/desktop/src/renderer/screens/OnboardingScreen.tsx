@@ -6,6 +6,7 @@ import { useProfileStore } from '../contexts/ProfileStore'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import { prefersReducedMotion } from '../animations/motion'
 import { enterStepFromRight } from '../animations/screenTransition'
+import { EditableMasterGate } from '../features/onboarding/EditableMasterGate'
 import { ResumeDrop } from '../features/onboarding/ResumeDrop'
 import {
   ConfirmLedger,
@@ -16,7 +17,6 @@ import {
 import { FinalDetails, type CredentialFields, type ProviderFields } from '../features/onboarding/FinalDetails'
 import { deriveLegalName } from '../features/onboarding/onboardingUtils'
 import { formatDateMMDDYYYY, parseDateMMDDYYYY, deriveFirstName, deriveLastName } from '@applyocalypse/shared-types'
-import { EQUAL_EMPLOYMENT_SEED_DEFAULTS } from '@applyocalypse/shared-schemas'
 
 /**
  * Onboarding is four moments, not thirteen steps: hand over a resume, confirm
@@ -55,8 +55,15 @@ const emptyEducation = (): EducationRow => ({
 
 function OnboardingScreen() {
   const navigate = useNavigate()
-  const { state: profileState, createStarterProfile, saveStructuredSections, saveProfile, pickAndRegisterResume } =
-    useProfileStore()
+  const {
+    state: profileState,
+    createStarterProfile,
+    saveStructuredSections,
+    saveProfile,
+    pickAndRegisterResume,
+    confirmEditableMaster,
+    openLocalPath,
+  } = useProfileStore()
   const { state: settingsState, saveProviderApiKey } = useSettingsStore()
 
   const [momentIndex, setMomentIndex] = createSignal(0)
@@ -86,17 +93,18 @@ function OnboardingScreen() {
     education: [] as EducationRow[],
     experience: [] as ExperienceRow[],
 
-    // Equal employment defaults (seeded, always held for review before submission)
-    eeoAuthorizedToWorkUS: EQUAL_EMPLOYMENT_SEED_DEFAULTS.authorizedToWorkUS as string | null,
-    eeoRequiresSponsorship: EQUAL_EMPLOYMENT_SEED_DEFAULTS.requiresSponsorship as string | null,
-    eeoSponsorshipDetailText: EQUAL_EMPLOYMENT_SEED_DEFAULTS.sponsorshipDetailText ?? '',
-    eeoDisability: EQUAL_EMPLOYMENT_SEED_DEFAULTS.disability as string | null,
-    eeoGender: EQUAL_EMPLOYMENT_SEED_DEFAULTS.gender ?? '',
-    eeoLgbtq: EQUAL_EMPLOYMENT_SEED_DEFAULTS.lgbtq as string | null,
-    eeoVeteran: EQUAL_EMPLOYMENT_SEED_DEFAULTS.veteran as string | null,
-    eeoRace: EQUAL_EMPLOYMENT_SEED_DEFAULTS.race ?? '',
-    eeoHispanicOrLatino: EQUAL_EMPLOYMENT_SEED_DEFAULTS.hispanicOrLatino as string | null,
-    eeoSexualOrientation: EQUAL_EMPLOYMENT_SEED_DEFAULTS.sexualOrientation as string[] | null,
+    // Equal employment answers. Never pre-filled: these are the user's own
+    // demographics, and they are always held for review before submission.
+    eeoAuthorizedToWorkUS: null as string | null,
+    eeoRequiresSponsorship: null as string | null,
+    eeoSponsorshipDetailText: '',
+    eeoDisability: null as string | null,
+    eeoGender: '',
+    eeoLgbtq: null as string | null,
+    eeoVeteran: null as string | null,
+    eeoRace: '',
+    eeoHispanicOrLatino: null as string | null,
+    eeoSexualOrientation: null as string[] | null,
 
     workAuthSummary: '',
     sponsorshipRequired: false,
@@ -115,6 +123,16 @@ function OnboardingScreen() {
   const progressPct = () => `${(momentIndex() / (MOMENTS.length - 1)) * 100}%`
 
   const resumeFile = () => profileState.uploadedFiles.find((file) => file.fileKind === 'RESUME')
+
+  /**
+   * A PDF upload leaves behind a converted DOCX awaiting the user's blessing.
+   * Until it has one, tailoring cannot write into the user's own layout, so the
+   * resume moment refuses to advance past it.
+   */
+  const pendingMaster = () =>
+    profileState.uploadedFiles.find(
+      (file) => file.fileKind === 'RESUME' && file.status === 'UNVERIFIED_EDITABLE_MASTER',
+    ) ?? null
   const parsed = () => profileState.parsedDocuments[0] ?? null
   const canonical = createMemo(() => parsed()?.canonical ?? null)
   const isReading = () => Boolean(resumeFile()) && !parsed()
@@ -189,7 +207,16 @@ function OnboardingScreen() {
     } finally {
       setIsPicking(false)
     }
+    // A converted PDF stays on this moment: the gate below takes over the stage
+    // and moves on once the user has confirmed the editable copy.
+    if (pendingMaster()) return
     if (profileState.uploadedFiles.some((file) => file.fileKind === 'RESUME')) go('review')
+  }
+
+  const handleConfirmMaster = async (uploadedFileId: string) => {
+    await confirmEditableMaster(uploadedFileId)
+    // confirmEditableMaster surfaces its own failure; only advance on success.
+    if (!pendingMaster()) go('review')
   }
 
   /**
@@ -372,13 +399,27 @@ function OnboardingScreen() {
 
         <div ref={stageRef} class="ob-stage">
           <Show when={moment() === 'resume'}>
-            <ResumeDrop
-              fileName={resumeFile()?.originalName ?? null}
-              isBusy={isPicking()}
-              onChoose={() => void handleChooseResume()}
-              onContinue={() => go('review')}
-              onManual={startManualEntry}
-            />
+            <Show
+              when={pendingMaster()}
+              fallback={
+                <ResumeDrop
+                  fileName={resumeFile()?.originalName ?? null}
+                  isBusy={isPicking()}
+                  onChoose={() => void handleChooseResume()}
+                  onContinue={() => go('review')}
+                  onManual={startManualEntry}
+                />
+              }
+            >
+              {(candidate) => (
+                <EditableMasterGate
+                  candidateName={candidate().originalName}
+                  isBusy={profileState.isLoading}
+                  onOpen={() => void openLocalPath(candidate().localPath)}
+                  onConfirm={() => void handleConfirmMaster(candidate().id)}
+                />
+              )}
+            </Show>
           </Show>
 
           <Show when={moment() === 'review'}>

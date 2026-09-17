@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -23,8 +25,35 @@ def _collision_safe_pdf_path(docx_path: Path, output_dir: Path) -> Path:
     return choose_collision_safe_path(output_dir, f"{docx_path.stem}.pdf")
 
 
+def _find_soffice() -> str | None:
+    """Locate the LibreOffice binary.
+
+    PATH is checked first. On Windows the installer does not put soffice.exe on
+    PATH, so the standard install locations are checked too. Keep these in sync
+    with findLibreOffice() in apps/desktop/src/main/services/converterDiagnostics.ts:
+    if the diagnostic finds an install that this function misses, Settings reports
+    the converter as present while every export silently falls through it.
+    """
+    on_path = shutil.which("soffice") or shutil.which("libreoffice")
+    if on_path:
+        return on_path
+
+    if sys.platform != "win32":
+        return None
+
+    bases = [
+        os.environ.get("PROGRAMFILES", r"C:\Program Files"),
+        os.environ.get("ProgramFiles(x86)", r"C:\Program Files (x86)"),
+    ]
+    for base in bases:
+        candidate = Path(base) / "LibreOffice" / "program" / "soffice.exe"
+        if candidate.exists():
+            return str(candidate)
+    return None
+
+
 def _export_with_libreoffice(docx_path: Path, output_dir: Path, *, timeout_seconds: int) -> PdfExportResult | None:
-    soffice = shutil.which("soffice") or shutil.which("libreoffice")
+    soffice = _find_soffice()
     if not soffice:
         return None
 

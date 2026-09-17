@@ -25,6 +25,9 @@ Applyocalypse UI Design-handoff/
 # Design exports (local downloads, not source)
 *Applyocalypse UI Design*.zip
 
+# Captured portal payloads dumped during debugging (never source)
+wd.json
+
 # Local tooling state (Claude Code, tokensave, native rebuild temp)
 .claude/
 .tokensave/

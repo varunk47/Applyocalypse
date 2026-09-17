@@ -65,21 +65,6 @@ export const EqualEmploymentDefaultsSchema = z.object({
   criminalRecordDefault: z.literal("No").default("No")
 });
 
-export const EQUAL_EMPLOYMENT_SEED_DEFAULTS: z.infer<typeof EqualEmploymentDefaultsSchema> = {
-  authorizedToWorkUS: "Yes",
-  requiresSponsorship: "Yes",
-  sponsorshipDetailText: "I'm authorized to work full-time for 36 months on F-1 OPT, no sponsorship required immediately.",
-  disability: "No",
-  gender: "Male",
-  lgbtq: "No",
-  veteran: "No",
-  race: "Asian",
-  hispanicOrLatino: "No",
-  sexualOrientation: ["Heterosexual"],
-  previouslyEmployedDefault: "No",
-  criminalRecordDefault: "No"
-};
-
 export const ProfileSchema = z.object({
   id: IdSchema,
   displayName: z.string().min(1),

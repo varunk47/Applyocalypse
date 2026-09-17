@@ -5,6 +5,7 @@ import { AppProviders } from './contexts/AppProviders'
 import { useProfileStore } from './contexts/ProfileStore'
 import { AppRouter } from './router'
 import { NavRail } from './components/NavRail'
+import { SystemHealthBanner } from './components/SystemHealthBanner'
 import { Titlebar } from './components/Titlebar'
 
 // GSAP-powered screen transition used by the router outlet
@@ -33,6 +34,7 @@ export const AppShell = (props: ParentProps) => {
   return (
     <div class="app-shell">
       <Titlebar />
+      <SystemHealthBanner />
       <div class="workspace">
         <NavRail />
         <main>{props.children}</main>

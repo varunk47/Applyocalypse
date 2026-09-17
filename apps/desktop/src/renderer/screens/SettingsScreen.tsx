@@ -82,6 +82,9 @@ export default function SettingsScreen() {
     }
   }
 
+  // Run unprompted: a missing converter is silent everywhere else.
+  onMount(() => void checkConverters())
+
   const [gmailStatus, setGmailStatus] = createSignal<{ connected: boolean; email: string | null }>({ connected: false, email: null })
   const [gmailStatusLoading, setGmailStatusLoading] = createSignal(true)
   const [gmailOAuthForm, setGmailOAuthForm] = createStore({ clientId: '', clientSecret: '' })

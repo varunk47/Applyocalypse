@@ -18,7 +18,7 @@ import {
   runMigrations,
   type ApplyocalypseDatabase
 } from "../index";
-import { EqualEmploymentDefaultsSchema, EQUAL_EMPLOYMENT_SEED_DEFAULTS } from "@applyocalypse/shared-schemas";
+import { EqualEmploymentDefaultsSchema } from "@applyocalypse/shared-schemas";
 
 const tempDirs: string[] = [];
 
@@ -612,14 +612,24 @@ describe("db repositories", () => {
     }
   });
 
-  it("EqualEmploymentDefaultsSchema parses seed defaults and rejects invalid values", () => {
-    const parsed = EqualEmploymentDefaultsSchema.parse(EQUAL_EMPLOYMENT_SEED_DEFAULTS);
-    expect(parsed.authorizedToWorkUS).toBe("Yes");
-    expect(parsed.requiresSponsorship).toBe("Yes");
-    expect(parsed.disability).toBe("No");
-    expect(parsed.gender).toBe("Male");
-    expect(parsed.race).toBe("Asian");
-    expect(parsed.sexualOrientation).toEqual(["Heterosexual"]);
+  it("EqualEmploymentDefaultsSchema pre-fills no demographics and rejects invalid values", () => {
+    const parsed = EqualEmploymentDefaultsSchema.parse({});
+
+    // Every demographic answer belongs to the user and must start empty. A shipped
+    // default here would put one person's answers on every other user's application.
+    expect(parsed.authorizedToWorkUS).toBeNull();
+    expect(parsed.requiresSponsorship).toBeNull();
+    expect(parsed.sponsorshipDetailText).toBeNull();
+    expect(parsed.disability).toBeNull();
+    expect(parsed.gender).toBeNull();
+    expect(parsed.lgbtq).toBeNull();
+    expect(parsed.veteran).toBeNull();
+    expect(parsed.race).toBeNull();
+    expect(parsed.hispanicOrLatino).toBeNull();
+    expect(parsed.sexualOrientation).toBeNull();
+
+    // The two non-demographic literals stay pinned; they are answers about the
+    // application, not about the applicant.
     expect(parsed.previouslyEmployedDefault).toBe("No");
     expect(parsed.criminalRecordDefault).toBe("No");
 
@@ -627,18 +637,28 @@ describe("db repositories", () => {
   });
 
   it("persists equalEmploymentDefaults through profileRepository.upsert round-trip", () => {
+    const answers = EqualEmploymentDefaultsSchema.parse({
+      authorizedToWorkUS: "Yes",
+      requiresSponsorship: "No",
+      sponsorshipDetailText: "Round-trip fixture",
+      disability: "Prefer not to say",
+      gender: "Fixture gender",
+      race: "Fixture race",
+      sexualOrientation: ["Fixture orientation"]
+    });
+
     const { db } = createDb();
     try {
       const profileRepository = new ProfileRepository(db);
       const profile = profileRepository.createStarterProfile({ legalName: "EEO Test" });
-      const updated = profileRepository.upsert({ ...profile, equalEmploymentDefaults: EQUAL_EMPLOYMENT_SEED_DEFAULTS });
+      const updated = profileRepository.upsert({ ...profile, equalEmploymentDefaults: answers });
       const canonical = profileRepository.getCanonicalProfile(updated.id);
 
-      const eeo = canonical!.profile.equalEmploymentDefaults as typeof EQUAL_EMPLOYMENT_SEED_DEFAULTS;
+      const eeo = canonical!.profile.equalEmploymentDefaults as typeof answers;
       expect(eeo.authorizedToWorkUS).toBe("Yes");
-      expect(eeo.disability).toBe("No");
-      expect(eeo.sponsorshipDetailText).toContain("F-1 OPT");
-      expect(eeo.sexualOrientation).toEqual(["Heterosexual"]);
+      expect(eeo.disability).toBe("Prefer not to say");
+      expect(eeo.sponsorshipDetailText).toBe("Round-trip fixture");
+      expect(eeo.sexualOrientation).toEqual(["Fixture orientation"]);
     } finally {
       closeApplyocalypseDatabase(db);
     }

@@ -4,6 +4,7 @@ import type { ApplicationRun, JobTarget } from '@applyocalypse/shared-types'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { jobLabel, useQueueStore } from '../contexts/QueueStore'
 import { useRunStore } from '../contexts/RunStore'
+import { useSettingsStore } from '../contexts/SettingsStore'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
 
 const WORKING_STATUSES = new Set([
@@ -80,6 +81,7 @@ export default function HomeScreen() {
   const { state: profileState } = useProfileStore()
   const { state: queueState, enqueueJobText, cancelPausedRuns } = useQueueStore()
   const { loadRunDetail } = useRunStore()
+  const { state: settingsState } = useSettingsStore()
   const navigate = useNavigate()
 
   const [jobInput, setJobInput] = createSignal('')
@@ -124,7 +126,18 @@ export default function HomeScreen() {
     return { lead: 'Paste a link. We do ', em: 'the drudgery.' }
   })
 
-  const hasIntake = createMemo(() => parseJobIntake(jobInput()).length > 0)
+  const intakeCount = createMemo(() => parseJobIntake(jobInput()).length)
+  const hasIntake = createMemo(() => intakeCount() > 0)
+
+  /**
+   * The scheduler runs at most this many applications at once, and everything
+   * else waits. Pasting twenty links looks like twenty parallel runs until the
+   * dashboard fills with queued rows, so say it at the point of paste.
+   */
+  const concurrencyCap = createMemo(() => {
+    const raw = settingsState.settings['automation.maxConcurrentApplications']
+    return typeof raw === 'number' && Number.isInteger(raw) ? raw : 2
+  })
 
   const handleSubmit = async () => {
     const profileId = profileState.profile?.id
@@ -193,6 +206,14 @@ export default function HomeScreen() {
                 Prepare applications <span class="return-hint">↵</span>
               </button>
             </div>
+            <Show when={intakeCount() > concurrencyCap()}>
+              <p class="intake-pace" role="status">
+                {intakeCount()} links. {concurrencyCap()} run at a time; the rest wait their turn.
+                <button type="button" onClick={() => navigate('/settings')}>
+                  Change the pace
+                </button>
+              </p>
+            </Show>
             <label class="automation-option">
               <input type="checkbox" checked={autoSubmit()} onChange={(e) => setAutoSubmit(e.currentTarget.checked)} />
               <span>

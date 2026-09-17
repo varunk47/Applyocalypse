@@ -19,6 +19,19 @@ const FIELD_DETECTION = resolve(
   "field_detection.py"
 );
 
+/**
+ * Reads a flat Python tuple-of-strings (or tuple-of-string-pairs) literal.
+ * Both tuples this test needs hold plain literals with no escapes.
+ */
+const readPyTupleStrings = (py: string, name: string): string[] => {
+  const declaration = py.indexOf(`\n${name}: tuple`);
+  if (declaration === -1) throw new Error(`${name} not found`);
+  const open = py.indexOf("(", py.indexOf("=", declaration));
+  const close = py.indexOf("\n)", open);
+  const block = py.slice(open + 1, close);
+  return Array.from(block.matchAll(/"([^"]*)"|'([^']*)'/g)).map((m) => m[1] ?? m[2]);
+};
+
 const extractBlockerScript = (): string => {
   const py = readFileSync(FIELD_DETECTION, "utf8");
   const marker = 'DOM_BLOCKER_DISCOVERY_SCRIPT = r"""';
@@ -26,7 +39,19 @@ const extractBlockerScript = (): string => {
   if (start === -1) throw new Error("DOM_BLOCKER_DISCOVERY_SCRIPT not found");
   const bodyStart = start + marker.length;
   const end = py.indexOf('"""', bodyStart);
-  return py.slice(bodyStart, end).trim();
+  const template = py.slice(bodyStart, end).trim();
+
+  // field_detection.py substitutes both placeholders at import time. Evaluating
+  // the raw template instead leaves them as undefined identifiers, so the
+  // substitution has to be mirrored here or every case throws before it asserts.
+  const vendors = readPyTupleStrings(py, "CAPTCHA_VENDOR_SELECTORS");
+  const vendorPairs: string[][] = [];
+  for (let i = 0; i < vendors.length; i += 2) vendorPairs.push([vendors[i], vendors[i + 1]]);
+  const phrases = readPyTupleStrings(py, "CAPTCHA_CHALLENGE_PHRASES");
+
+  return template
+    .replace("__CAPTCHA_VENDOR_SELECTORS__", JSON.stringify(vendorPairs))
+    .replace("__CAPTCHA_CHALLENGE_PHRASES__", JSON.stringify(phrases));
 };
 
 type Rect = { width: number; height: number };
