@@ -138,16 +138,15 @@ def extract_tex_text_fallback(source: str) -> str:
 
 def extract_pdf_text(path: Path) -> ArtifactTextExtraction:
     try:
-        import fitz  # type: ignore
+        from pypdf import PdfReader  # type: ignore
     except ImportError as exc:
-        raise RuntimeError("PyMuPDF is required for rendered PDF validation") from exc
+        raise RuntimeError("pypdf is required for rendered PDF validation") from exc
 
     lines: list[str] = []
-    with fitz.open(path) as document:
-        for page in document:
-            text = page.get_text("text").strip()
-            if text:
-                lines.append(text)
+    for page in PdfReader(str(path)).pages:
+        text = page.extract_text().strip()
+        if text:
+            lines.append(text)
 
     return ArtifactTextExtraction(text="\n".join(lines), source_format="PDF", warnings=[])
 

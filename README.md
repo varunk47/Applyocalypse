@@ -81,7 +81,7 @@ pnpm release:preflight
 - Workday, Greenhouse, Lever, Ashby, iCIMS, and Taleo now have explicit multi-step adapter plans with portal-specific progression labels, material hints, review gates, step caps, and final-submit labels.
 - Portal workflow events include expected runner steps and mandatory review checkpoints so the Run Console can show what the browser worker is allowed to do before it does it.
 - Provider settings now capture model, API base, Azure API version, and AWS Bedrock region/access-key metadata while keeping the secret value encrypted in Electron Main; Python receives only runtime environment variables.
-- PDF ingestion converts with `pdf2docx` into an unverified DOCX candidate that requires explicit user confirmation.
+- PDF ingestion reads the PDF back with `pypdf` and rebuilds it as an unverified DOCX candidate that requires explicit user confirmation.
 - Source parsing detects common resume sections before any LLM is involved, persists confidence, warnings, style maps, and anchors in `parsed_documents`, and conservatively merges high-confidence identity, education, experience, project, certification, and skill facts without overwriting existing structured profile entries.
 - Picked source files are copied into Applyocalypse-managed local custody before registration, so later parsing, PDF conversion, and automation do not depend on the user's original picked path remaining in place.
 - DOCX and TEX mutation utilities use explicit Applyocalypse anchors/placeholders and preserve source structure as much as parser confidence allows.
