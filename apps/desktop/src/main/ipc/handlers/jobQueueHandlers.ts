@@ -1,5 +1,6 @@
 import { IpcContracts } from "@applyocalypse/ipc-contracts";
 import { RunEventSchema } from "@applyocalypse/shared-schemas";
+import { profileReadiness } from "@applyocalypse/shared-types";
 import { handleContract, lookupJobTargets, type IpcHandlerContext } from "./context";
 
 const parseJson = <T>(value: string, fallback: T): T => {
@@ -11,9 +12,18 @@ const parseJson = <T>(value: string, fallback: T): T => {
 };
 
 export const registerJobQueueHandlers = (ctx: IpcHandlerContext): void => {
-  const { db, jobRepository, queueRepository } = ctx;
+  const { db, jobRepository, profileRepository, queueRepository } = ctx;
 
-  handleContract(IpcContracts.jobsEnqueue, ({ profileId, items }) => jobRepository.enqueueTargets({ profileId, items }));
+  handleContract(IpcContracts.jobsEnqueue, ({ profileId, items }) => {
+    // The renderer greys out the paste box for the same reason, but the queue is
+    // the actual door: a run enqueued against a profile that cannot carry it gets
+    // as far as the browser before anyone finds out.
+    const readiness = profileReadiness(profileRepository.getCanonicalProfile(profileId));
+    if (!readiness.isReady) {
+      throw new Error(`This profile is not ready to apply yet. Still needed: ${readiness.gaps.map((gap) => gap.label).join(", ")}.`);
+    }
+    return jobRepository.enqueueTargets({ profileId, items });
+  });
 
   handleContract(IpcContracts.jobsList, ({ limit, offset }) => {
     const items = queueRepository.list(limit, offset);

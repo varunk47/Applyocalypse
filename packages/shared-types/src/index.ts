@@ -33,6 +33,7 @@ import type {
 } from "@applyocalypse/shared-schemas";
 
 export * from "./dateUtils";
+export * from "./profileReadiness";
 
 export type ThemePreference = z.infer<typeof ThemePreferenceSchema>;
 export type ActiveTheme = z.infer<typeof ActiveThemeSchema>;

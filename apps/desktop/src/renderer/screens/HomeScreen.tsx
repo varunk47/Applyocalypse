@@ -6,6 +6,7 @@ import { jobLabel, useQueueStore } from '../contexts/QueueStore'
 import { useRunStore } from '../contexts/RunStore'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
+import { profileReadiness } from '@applyocalypse/shared-types'
 
 const WORKING_STATUSES = new Set([
   'CLAIMED',
@@ -130,6 +131,13 @@ export default function HomeScreen() {
   const hasIntake = createMemo(() => intakeCount() > 0)
 
   /**
+   * Queueing a job the profile cannot carry produces a run that stops partway or
+   * fills blanks, and the user only finds out once it is running. The gaps are
+   * knowable here, before anything is queued, so this is where they are said.
+   */
+  const readiness = createMemo(() => profileReadiness(profileState.canonicalProfile))
+
+  /**
    * The scheduler runs at most this many applications at once, and everything
    * else waits. Pasting twenty links looks like twenty parallel runs until the
    * dashboard fills with queued rows, so say it at the point of paste.
@@ -143,6 +151,10 @@ export default function HomeScreen() {
     const profileId = profileState.profile?.id
     if (!profileId) {
       setError('Create a profile before adding job targets.')
+      return
+    }
+    if (!readiness().isReady) {
+      setError('Finish setting up before queueing jobs. The list above says what is left.')
       return
     }
     if (isSubmitting()) return
@@ -186,6 +198,19 @@ export default function HomeScreen() {
           </p>
 
           <div class="paper-card intake-card">
+            <Show when={!readiness().isReady}>
+              <div class="setup-gaps" role="status">
+                <div class="setup-gaps-head">Before this can apply for you</div>
+                <For each={readiness().gaps}>
+                  {(gap) => (
+                    <button class="setup-gap" type="button" onClick={() => navigate(gap.route)}>
+                      <strong>{gap.label}</strong>
+                      <span>{gap.fix}</span>
+                    </button>
+                  )}
+                </For>
+              </div>
+            </Show>
             <textarea
               rows={2}
               spellcheck={false}
@@ -194,7 +219,7 @@ export default function HomeScreen() {
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault()
-                  if (hasIntake() && !isSubmitting()) void handleSubmit()
+                  if (hasIntake() && readiness().isReady && !isSubmitting()) void handleSubmit()
                 }
               }}
               placeholder="Paste job links, one or five at a time…"
@@ -202,7 +227,12 @@ export default function HomeScreen() {
             />
             <div class="intake-foot">
               <span class="intake-portals">greenhouse · lever · ashby · workday · icims · taleo</span>
-              <button class="btn-wax" type="button" disabled={!hasIntake() || isSubmitting()} onClick={() => void handleSubmit()}>
+              <button
+                class="btn-wax"
+                type="button"
+                disabled={!hasIntake() || !readiness().isReady || isSubmitting()}
+                onClick={() => void handleSubmit()}
+              >
                 Prepare applications <span class="return-hint">↵</span>
               </button>
             </div>
