@@ -29,5 +29,7 @@ httplib2>=0.32.0  # via google-api-python-client. PYSEC-2026-3444
 pyasn1>=0.6.4  # via google-auth. PYSEC-2026-3455, PYSEC-2026-3456, PYSEC-2026-3457
 aiohttp>=3.14.3  # via litellm. PYSEC-2026-3545, PYSEC-2026-3546, PYSEC-2026-3547
 cryptography>=50.0.0  # via google-auth. PYSEC-2026-3552
+anyio>=4.14.2  # via httpx, openai. CVE-2026-63374, CVE-2026-64847, CVE-2026-63349
+soupsieve>=2.9.0  # via beautifulsoup4, seleniumbase. CVE-2026-85999, CVE-2026-86000
 
 # tectonic>=0.15.0 is a binary tool, not a PyPI package — bundled via PyInstaller build script
