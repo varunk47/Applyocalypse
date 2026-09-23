@@ -1,11 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import { packagedExecutable } from "../test/packaged-paths.mjs";
 
 const rootDir = resolve(import.meta.dirname, "../..");
 const desktopDir = join(rootDir, "apps", "desktop");
-const releaseDir = join(desktopDir, "release");
-const packagedExe = process.platform === "win32" ? join(releaseDir, "win-unpacked", "Applyocalypse.exe") : join(releaseDir, "Applyocalypse");
+const packagedExe = packagedExecutable(rootDir);
 const requireReady = process.env.APPLYO_REQUIRE_RELEASE_READY === "1";
 
 const checkGit = () => {

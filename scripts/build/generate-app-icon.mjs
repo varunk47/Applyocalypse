@@ -1,12 +1,12 @@
 /**
- * Builds the Windows application icon from the brand mark.
+ * Builds the Windows and macOS application icons from the brand mark.
  *
  * electron-builder reported "default Electron icon is used" for every package,
  * so the installer, the desktop shortcut, the taskbar button and the uninstall
  * entry all wore Electron's logo instead of the product's. The mark already
  * exists as `landing/assets/favicon.svg`; this turns it into the multi
- * resolution `.ico` Windows wants and commits the result, so packaging stays
- * deterministic and needs no converter at build time.
+ * resolution `.ico` Windows wants and the `.icns` a Mac wants, and commits
+ * both, so packaging stays deterministic and needs no converter at build time.
  *
  * Like scripts/landing/rasterize-icons.mjs this borrows Electron's renderer
  * rather than adding sharp/resvg, and draws into a `<canvas>` at explicit pixel
@@ -22,11 +22,27 @@ import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 const SOURCE = resolve(ROOT, "landing", "assets", "favicon.svg");
-const OUT = resolve(ROOT, "apps", "desktop", "electron-builder", "icon.ico");
+const ICO_OUT = resolve(ROOT, "apps", "desktop", "electron-builder", "icon.ico");
+const ICNS_OUT = resolve(ROOT, "apps", "desktop", "electron-builder", "icon.icns");
 
 // Windows asks for the icon at every one of these. 256 is the one
 // electron-builder validates; 16 is the one the taskbar actually shows most.
 const SIZES = [16, 24, 32, 48, 64, 128, 256];
+
+// The ICNS slots that take PNG data, with the pixel side each one holds. The
+// @2x slots repeat a size under a second name, which is how Finder and the Dock
+// pick sharp art on a Retina screen. 16 is left out: its PNG slot is not read
+// by every macOS release, and the Finder scales the 32 down cleanly.
+const ICNS_SLOTS = [
+  ["ic11", 32],
+  ["ic12", 64],
+  ["ic07", 128],
+  ["ic08", 256],
+  ["ic13", 256],
+  ["ic09", 512],
+  ["ic14", 512],
+  ["ic10", 1024]
+];
 
 // Below this the dashed orbit ring collapses into a grey smear and the disc
 // underneath loses the letter, so small sizes get the mark without the ring.
@@ -102,6 +118,24 @@ const packIco = (frames) => {
   return Buffer.concat([header, ...entries, ...frames.map(({ png }) => png)]);
 };
 
+/**
+ * Packs PNG frames into an ICNS: a big-endian `icns` header carrying the file
+ * length, then one type code and length (header included) per entry.
+ */
+const packIcns = (framesBySize) => {
+  const entries = ICNS_SLOTS.map(([type, size]) => {
+    const png = framesBySize.get(size);
+    const header = Buffer.alloc(8);
+    header.write(type, 0, "ascii");
+    header.writeUInt32BE(png.length + 8, 4);
+    return Buffer.concat([header, png]);
+  });
+  const header = Buffer.alloc(8);
+  header.write("icns", 0, "ascii");
+  header.writeUInt32BE(8 + entries.reduce((total, entry) => total + entry.length, 0), 4);
+  return Buffer.concat([header, ...entries]);
+};
+
 const rasterize = async (win, svg, size) => {
   const svgBase64 = Buffer.from(svg, "utf8").toString("base64");
   const dataUrl = await win.webContents.executeJavaScript(DRAW(svgBase64, size));
@@ -129,9 +163,20 @@ app.whenReady().then(async () => {
     }
 
     const ico = packIco(frames);
-    writeFileSync(OUT, ico);
+    writeFileSync(ICO_OUT, ico);
     process.stdout.write(
       `icon.ico  ${SIZES.join("/")}  ${(ico.length / 1024).toFixed(1)} KB\n`
+    );
+
+    const macSizes = [...new Set(ICNS_SLOTS.map(([, size]) => size))];
+    const macFrames = new Map();
+    for (const size of macSizes) {
+      macFrames.set(size, (await rasterize(win, full, size)).png);
+    }
+    const icns = packIcns(macFrames);
+    writeFileSync(ICNS_OUT, icns);
+    process.stdout.write(
+      `icon.icns  ${macSizes.join("/")}  ${(icns.length / 1024).toFixed(1)} KB\n`
     );
   } catch (error) {
     process.stderr.write(`${error instanceof Error ? error.message : error}\n`);

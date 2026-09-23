@@ -14,7 +14,12 @@ permissions:
 
 jobs:
   verify:
-    runs-on: windows-latest
+    strategy:
+      # A Mac failure should not hide whether Windows passed, or the reverse.
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4

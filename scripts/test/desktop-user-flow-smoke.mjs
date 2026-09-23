@@ -2,13 +2,11 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
+import { packagedExecutable } from "./packaged-paths.mjs";
 import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const rootDir = resolve(import.meta.dirname, "../..");
-const defaultExe =
-  process.platform === "win32"
-    ? join(rootDir, "apps", "desktop", "release", "win-unpacked", "Applyocalypse.exe")
-    : join(rootDir, "apps", "desktop", "release", "Applyocalypse");
+const defaultExe = packagedExecutable(rootDir);
 const executable = process.env.APPLYO_DESKTOP_EXE || defaultExe;
 
 if (!existsSync(executable)) {

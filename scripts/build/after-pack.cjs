@@ -4,7 +4,9 @@ const { brandWindowsExecutable } = require("./brand-windows-executable.cjs");
 const { signWorkerTree } = require("./sign-worker-binary.cjs");
 
 exports.default = async function afterPack(context) {
-  const resourcesDir = join(context.appOutDir, "resources", "automation-python");
+  // resources/ beside the exe on Windows, Applyocalypse.app/Contents/Resources on a Mac.
+  const packagedResources = context.packager.getResourcesDir(context.appOutDir);
+  const resourcesDir = join(packagedResources, "automation-python");
   const workerName = process.platform === "win32" ? "applyocalypse-worker.exe" : "applyocalypse-worker";
   const workerPath = join(resourcesDir, workerName);
   const manifestPath = join(resourcesDir, "worker-manifest.json");
@@ -17,7 +19,7 @@ exports.default = async function afterPack(context) {
     throw new Error(`Applyocalypse worker manifest is missing from packaged resources: ${manifestPath}`);
   }
 
-  const migrationsDir = join(context.appOutDir, "resources", "migrations");
+  const migrationsDir = join(packagedResources, "migrations");
   const initialMigrationPath = join(migrationsDir, "0001_initial.sql");
   if (!existsSync(initialMigrationPath)) {
     throw new Error(`Applyocalypse SQLite migrations are missing from packaged resources: ${migrationsDir}`);

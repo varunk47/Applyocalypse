@@ -80,4 +80,22 @@ nsis:
   shortcutName: Applyocalypse
   installerIcon: icon.ico
   uninstallerIcon: icon.ico
+mac:
+  # Built by scripts/build/generate-app-icon.mjs next to icon.ico.
+  icon: icon.icns
+  category: public.app-category.productivity
+  # No arch is listed on purpose: electron-builder then builds for the host,
+  # which is the only arch the PyInstaller worker in extraResources can match.
+  # CI runs one Apple Silicon and one Intel runner to get both.
+  target:
+    - dmg
+    - zip
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+  # There is no Apple Developer ID yet. Without one electron-builder ad-hoc signs
+  # an arm64 build, which Apple Silicon needs before it will run anything, and
+  # leaves an Intel build unsigned. Hardened runtime exists for notarization and
+  # notarization needs a real identity, so both stay off until a certificate
+  # exists. Either way Gatekeeper warns on first open of a downloaded build.
+  hardenedRuntime: false
+  notarize: false
 afterPack: ../../scripts/build/after-pack.cjs

@@ -9,10 +9,10 @@ env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
 
 jobs:
-  release:
+  windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -68,13 +68,85 @@ jobs:
             apps/desktop/release/*.blockmap
           if-no-files-found: error
 
+  mac:
+    # PyInstaller only builds the worker for the machine it runs on, so each
+    # arch needs its own runner: Apple Silicon on macos-latest, Intel on the
+    # Intel image.
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-latest
+            arch: arm64
+          - runner: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # pnpm must be on PATH before setup-node so its `cache: pnpm` can locate the store.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.33.0
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "pnpm"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: services/automation-python/requirements.txt
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Rebuild native modules
+        run: pnpm native:rebuild
+
+      # No Apple Developer ID is configured, so the app is ad-hoc signed on
+      # arm64 and unsigned on Intel, and nothing is notarized. See the mac
+      # section of apps/desktop/electron-builder/electron-builder.yml.
+      - name: Package and run packaged smoke suites
+        run: pnpm verify:packaged
+
+      - name: Release preflight report
+        run: pnpm release:preflight
+
+      - name: Upload Mac artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: applyocalypse-mac-${{ matrix.arch }}
+          path: |
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+          if-no-files-found: error
+
+  draft-release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, mac]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
       - name: Create draft GitHub release
-        if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
-        shell: pwsh
         run: |
-          # @() forces array context: a single match would otherwise bind as [string] and splat char-by-char.
-          $files = @(Get-ChildItem apps/desktop/release -Filter *.exe | ForEach-Object { $_.FullName })
-          gh release create "$env:RELEASE_TAG" @files --draft --title "Applyocalypse $env:RELEASE_TAG" --generate-notes
+          shopt -s nullglob
+          files=(artifacts/*/*.exe artifacts/*/*.dmg artifacts/*/*.zip)
+          gh release create "$RELEASE_TAG" "${files[@]}" --repo "$GITHUB_REPOSITORY" --draft --title "Applyocalypse $RELEASE_TAG" --generate-notes

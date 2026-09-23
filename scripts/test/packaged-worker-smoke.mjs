@@ -4,12 +4,13 @@ import { dirname, join, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { packagedResourcesDir } from "./packaged-paths.mjs";
 import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "../..");
 const workerName = process.platform === "win32" ? "applyocalypse-worker.exe" : "applyocalypse-worker";
-const defaultWorker = join(rootDir, "apps", "desktop", "release", "win-unpacked", "resources", "automation-python", workerName);
+const defaultWorker = join(packagedResourcesDir(rootDir), "automation-python", workerName);
 const executable = process.env.APPLYO_WORKER_EXE || defaultWorker;
 
 if (!existsSync(executable)) {

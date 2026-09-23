@@ -3,14 +3,12 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
+import { packagedExecutable } from "./packaged-paths.mjs";
 import { smokeBudgetMs, timeoutMessage } from "./smoke-budget.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, "../..");
-const defaultExe =
-  process.platform === "win32"
-    ? join(rootDir, "apps", "desktop", "release", "win-unpacked", "Applyocalypse.exe")
-    : join(rootDir, "apps", "desktop", "release", "Applyocalypse");
+const defaultExe = packagedExecutable(rootDir);
 const executable = process.env.APPLYO_DESKTOP_EXE || defaultExe;
 
 if (!existsSync(executable)) {
