@@ -213,13 +213,20 @@ const boot = async (): Promise<void> => {
                 applicationPassword: "Smoke#Pass123!"
               });
               const canonicalProfile = await api.profile.getCanonical(profile.id);
-              const enqueue = await api.jobs.enqueue(profile.id, [
-                {
-                  sourceKind: "TEXT",
-                  sourceValue: "Required: TypeScript, SQLite, browser automation, and user-reviewed job application controls.",
-                  autoSubmitEnabled: false
-                }
-              ]);
+              // A starter profile has no resume, phone, work authorization or
+              // history yet, so the queue must refuse it rather than start a run.
+              let enqueueRefusal = null;
+              try {
+                await api.jobs.enqueue(profile.id, [
+                  {
+                    sourceKind: "TEXT",
+                    sourceValue: "Required: TypeScript, SQLite, browser automation, and user-reviewed job application controls.",
+                    autoSubmitEnabled: false
+                  }
+                ]);
+              } catch (error) {
+                enqueueRefusal = error instanceof Error ? error.message : String(error);
+              }
               const concurrencySettings = await api.settings.update({ "automation.maxConcurrentApplications": 99 });
               const queue = await api.jobs.list(10, 0);
               const settings = await api.settings.get();
@@ -236,10 +243,8 @@ const boot = async (): Promise<void> => {
                 canonicalProfileId: canonicalProfile?.profile?.id ?? null,
                 canonicalExperienceCount: canonicalProfile?.experience?.length ?? null,
                 profileEmail: profile.email,
-                queueItemsCreated: enqueue.queueItems.length,
+                enqueueRefusal,
                 queueTotal: queue.total,
-                firstQueueStatus: queue.items[0]?.status ?? null,
-                firstQueueAutoSubmit: queue.items[0]?.autoSubmitEnabled ?? null,
                 settingsThemePreference: settings["theme.preference"] ?? null,
                 settingsConcurrency: settings["automation.maxConcurrentApplications"] ?? null,
                 concurrencyClampResult: concurrencySettings["automation.maxConcurrentApplications"] ?? null,
@@ -260,10 +265,8 @@ const boot = async (): Promise<void> => {
             canonicalProfileId?: string | null;
             canonicalExperienceCount?: number | null;
             profileEmail?: string | null;
-            queueItemsCreated?: number;
+            enqueueRefusal?: string | null;
             queueTotal?: number;
-            firstQueueStatus?: string | null;
-            firstQueueAutoSubmit?: boolean | null;
             settingsThemePreference?: unknown;
             settingsConcurrency?: unknown;
             concurrencyClampResult?: unknown;
@@ -279,10 +282,8 @@ const boot = async (): Promise<void> => {
             smoke.canonicalProfileId === smoke.profileId &&
             smoke.canonicalExperienceCount === 0 &&
             smoke.profileEmail === "grace.hopper@example.com" &&
-            smoke.queueItemsCreated === 1 &&
-            (smoke.queueTotal ?? 0) >= 1 &&
-            smoke.firstQueueStatus === "PENDING" &&
-            smoke.firstQueueAutoSubmit === false &&
+            (smoke.enqueueRefusal ?? "").includes("not ready to apply") &&
+            smoke.queueTotal === 0 &&
             smoke.settingsThemePreference === "dark" &&
             smoke.settingsConcurrency === 3 &&
             smoke.concurrencyClampResult === 3 &&
@@ -398,6 +399,39 @@ const buildFullE2ESmokeScript = (input: { phase: string; resumePath: string; det
           localPath: ${detailsPath},
           fileKind: "SUPPORTING_DETAILS"
         });
+        // The TEX resume is already an editable master. Its Experience section
+        // names no employer, so the history is added the way the Profile screen
+        // adds it, and the queue also needs a phone and a stated work
+        // authorization before it will take a job.
+        const parsedProfile = await api.profile.getCanonical(profile.id);
+        await api.profile.updateStructured({
+          profileId: profile.id,
+          education: parsedProfile?.education ?? [],
+          experience: [
+            ...(parsedProfile?.experience ?? []),
+            {
+              company: "Analytical Engine Works",
+              title: "Platform Engineer",
+              startDate: "2021-01",
+              endDate: null,
+              bullets: ["Built local-first tooling with human review controls."]
+            }
+          ],
+          projects: parsedProfile?.projects ?? [],
+          skillGroups: parsedProfile?.skillGroups ?? []
+        });
+        const current = await api.profile.get();
+        await api.profile.update({
+          ...current,
+          phone: "+1 312 555 0100",
+          workAuthorization: {
+            status: "US_CITIZEN",
+            authorizedInUs: true,
+            sponsorshipNeed: "NEVER",
+            summary: "US citizen. I do not require sponsorship now or in the future."
+          }
+        });
+        const canonical = await api.profile.getCanonical(profile.id);
         const enqueue = await api.jobs.enqueue(profile.id, [
           {
             sourceKind: "TEXT",
@@ -419,6 +453,7 @@ const buildFullE2ESmokeScript = (input: { phase: string; resumePath: string; det
           profileId: profile.id,
           uploadCount: uploads.items.length,
           parsedCount: parsed.items.length,
+          experienceCount: canonical?.experience?.length ?? null,
           queueTotal: enqueue.queueItems.length,
           rendererHasRequire: typeof globalThis.require === "function",
           rendererHasProcess: typeof globalThis.process === "object"
