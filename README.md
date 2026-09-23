@@ -76,8 +76,8 @@ pnpm release:preflight
 - Shared TypeScript domain schemas with Zod validation and a narrow preload IPC surface.
 - Canonical profile facts are exposed to the renderer through typed `profile.getCanonical` IPC only; SQLite remains owned by Electron Main.
 - The local parser extracts high-confidence structured profile facts from common sections and now reads DOCX table-cell paragraphs so column/table resumes are visible to section detection.
-- Python worker event protocol, BYOK `litellm` adapter, Nodriver/Playwright browser abstraction, portal registry, document ingestion, validation, and tailoring pipeline primitives.
-- Portal workflows use deterministic browser adapter candidates: high-stealth boards remain Nodriver-only, while ATS and government portals can fall back from Playwright to Nodriver when Playwright is not installed.
+- Python worker event protocol, BYOK `litellm` adapter, Playwright (Patchright) and SeleniumBase browser abstraction, portal registry, document ingestion, validation, and tailoring pipeline primitives.
+- Portal workflows use deterministic browser adapter candidates: every portal leads with the Patchright-driven Playwright adapter and falls back to SeleniumBase.
 - Workday, Greenhouse, Lever, Ashby, iCIMS, and Taleo now have explicit multi-step adapter plans with portal-specific progression labels, material hints, review gates, step caps, and final-submit labels.
 - Portal workflow events include expected runner steps and mandatory review checkpoints so the Run Console can show what the browser worker is allowed to do before it does it.
 - Provider settings now capture model, API base, Azure API version, and AWS Bedrock region/access-key metadata while keeping the secret value encrypted in Electron Main; Python receives only runtime environment variables.

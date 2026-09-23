@@ -29,7 +29,7 @@ hit-tests the point before reporting it, and jitter is confined to a box whose
 extremes were hit-tested too.
 
 The seams here mirror ``human_typing``: injected ``rng`` and ``sleep`` so the
-timing is testable, and a deferred ``nodriver.cdp`` import so the document
+timing is testable, and a deferred ``cdp_input`` import so the document
 pipeline can import this module in an environment with no browser stack.
 """
 
@@ -118,17 +118,15 @@ class MouseEvent:
 
 
 def _cdp_input_module(override: Any = None) -> Any:
-    """The ``nodriver.cdp.input_`` module, imported only when a browser is live.
+    """The CDP ``Input`` domain, as ``(method, params)`` commands for a Patchright session.
 
-    Deferred for the same reason ``human_typing`` defers it: the document
-    pipeline runs where no browser stack exists, and a top-level import would
-    make importing this module fail there.
+    ``override`` is the test seam: a recording stand-in with the same call shapes.
     """
     if override is not None:
         return override
-    from nodriver import cdp  # type: ignore[import-not-found]
+    from .cdp_input import INPUT_DOMAIN
 
-    return cdp.input_
+    return INPUT_DOMAIN
 
 
 def _finite_float(value: Any) -> float | None:
@@ -266,9 +264,7 @@ async def dispatch_trusted_click(
 
     ``tab`` is the top-level page: mouse input is routed by the browser process
     through hit-testing on the root widget, so an embedded frame's own target is
-    the wrong place to send it even when the control lives there. Keyboard input
-    is the opposite case, which is why ``human_typing`` sends to the element's
-    own tab and this does not.
+    the wrong place to send it even when the control lives there.
     """
     input_domain = _cdp_input_module(cdp_input)
     generator = rng if rng is not None else random.Random()

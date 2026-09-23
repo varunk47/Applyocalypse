@@ -26,7 +26,7 @@ from pathlib import Path
 import pytest
 
 from applyocalypse_automation.browser.chrome_discovery import discover_chrome_executable
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
+from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 
 pytestmark = pytest.mark.browser
 
@@ -105,7 +105,7 @@ def _serve() -> Iterator[str]:
 
 
 async def _drive(origin: str, user_data_dir: Path) -> dict[str, list[dict[str, object]]]:
-    adapter = NodriverBrowserAdapter()
+    adapter = PlaywrightBrowserAdapter()
     launched = await adapter.launch(run_id="blocker-detection", user_data_dir=user_data_dir)
     if not launched.ok:
         pytest.skip(f"no browser available: {launched.message}")
@@ -134,7 +134,7 @@ def blockers() -> Iterator[dict[str, list[dict[str, object]]]]:
         pytest.skip("no Chrome installation was found")
     with _serve() as origin, tempfile.TemporaryDirectory(prefix="applyo-blockers-") as profile_dir:
         loop = asyncio.new_event_loop()
-        # nodriver reaches for the current event loop rather than the running one.
+        # Installed the way asyncio.run installs it, so the driver sees a current loop.
         asyncio.set_event_loop(loop)
         try:
             yield loop.run_until_complete(_drive(origin, Path(profile_dir)))

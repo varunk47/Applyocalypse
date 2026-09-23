@@ -1588,7 +1588,7 @@ async def run_url_observation_flow(
     job_url: str,
     work_dir: Path,
     canonical_profile: dict[str, object],
-    adapter_name: str = "nodriver",
+    adapter_name: str = "playwright",
     user_data_dir: Path | None = None,
 ) -> UrlObservationResult:
     workflow = workflow_for_url(job_url)

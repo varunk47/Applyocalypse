@@ -1,6 +1,6 @@
 """Registering an ATS must route it to the direct-form flow without loosening a gate.
 
-An unregistered host falls through to ``GENERIC_REVIEW_FIRST``: Nodriver, high
+An unregistered host falls through to ``GENERIC_REVIEW_FIRST``: high
 stealth, and no field detection at all until a human confirms the page. That is
 the right default for a host we know nothing about and the wrong one for an
 ordinary ATS form, where it costs the user a manual confirmation on every run.
@@ -52,9 +52,9 @@ def test_registered_ats_urls_route_to_the_direct_form_flow(portal_id: str, url: 
 
     assert workflow.portal_id == portal_id, f"{url} resolved to {workflow.portal_id}"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
-    # nodriver, not playwright: an ATS default has to be an adapter that ships with
-    # the packaged worker. See test_portal_registry.py for the guard that enforces it.
-    assert workflow.default_adapter == "nodriver"
+    # An ATS default has to be an adapter that ships with the packaged worker.
+    # See test_portal_registry.py for the guard that enforces it.
+    assert workflow.default_adapter == "playwright"
     assert workflow.requires_high_stealth is False
     assert workflow.entry_action_labels, "an ATS with no apply label cannot be entered"
 

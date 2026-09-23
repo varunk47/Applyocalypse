@@ -9,9 +9,9 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from applyocalypse_automation.browser import nodriver_adapter
+from applyocalypse_automation.browser import playwright_adapter
 
-_BROWSER_SOURCES = sorted(Path(nodriver_adapter.__file__).parent.glob("*.py"))
+_BROWSER_SOURCES = sorted(Path(playwright_adapter.__file__).parent.glob("*.py"))
 
 # Every way a style gets written, from Python or from injected JS.
 _STYLE_WRITE = re.compile(r"""\.style\.(?P<attr>[A-Za-z-]+)\s*=(?!=)|setProperty\(\s*['"](?P<prop>[A-Za-z-]+)['"]""")

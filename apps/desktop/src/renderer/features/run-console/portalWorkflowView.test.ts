@@ -95,7 +95,7 @@ describe("portal workflow run-console view model", () => {
             portal_id: "linkedin",
             display_name: "LinkedIn",
             workflow_kind: "JOB_BOARD_REDIRECT_OR_STEALTH",
-            default_adapter: "nodriver",
+            default_adapter: "playwright",
             requires_high_stealth: true,
             requires_login_watch: true,
             requires_external_redirect_watch: true,
@@ -111,7 +111,7 @@ describe("portal workflow run-console view model", () => {
 
     expect(buildPortalWorkflowSummary(events)).toMatchObject({
       portalId: "linkedin",
-      adapter: "nodriver",
+      adapter: "playwright",
       requiresHighStealth: true,
       expectedSteps: ["Open job-board listing", "Click known apply action when safe", "Confirm trusted application surface", "Gate final submit"],
       reviewCheckpoints: ["Login/MFA/CAPTCHA", "Redirect trust", "Sensitive questions", "Final submit"],

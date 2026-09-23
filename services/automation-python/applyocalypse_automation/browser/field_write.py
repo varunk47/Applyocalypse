@@ -1,9 +1,9 @@
 """Typing a value into a text field, then proving it stayed there.
 
-Every adapter fills text fields natively: Playwright's `fill`, nodriver's
-`send_keys`, SeleniumBase's `clear` plus `send_keys`. That is the right
+Every adapter fills text fields natively: trusted keystrokes over CDP in the
+Playwright adapter, SeleniumBase's `clear` plus `send_keys`. That is the right
 mechanism, because it fires the key events autocomplete widgets listen for. It
-is also unverified. All three then return a hardcoded success, so a React input
+is also unverified. Both then return a hardcoded success, so a React input
 that quietly discarded the keystrokes was reported to the user as filled, and
 the run walked to the submit gate with an empty required field.
 

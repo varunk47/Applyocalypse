@@ -16,10 +16,8 @@ from collections.abc import Callable
 
 import pytest
 
-from applyocalypse_automation.browser import nodriver_adapter as nodriver_adapter_module
 from applyocalypse_automation.browser import playwright_adapter as playwright_adapter_module
 from applyocalypse_automation.browser import seleniumbase_adapter as seleniumbase_adapter_module
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
 from applyocalypse_automation.browser.page_readiness import (
     POST_CLICK_POLL_INTERVAL_S,
     POST_CLICK_TIMEOUT_S,
@@ -171,11 +169,6 @@ class ScriptedSurface:
         return self.fingerprints[index]
 
 
-class ScriptedNodriverPage(ScriptedSurface):
-    async def evaluate(self, script: str) -> str:
-        return self._result_for(script)
-
-
 class ScriptedPlaywrightPage(ScriptedSurface):
     """The click path evaluates through frames now, so the page exposes its own.
 
@@ -193,7 +186,7 @@ class ScriptedPlaywrightPage(ScriptedSurface):
     def frames(self) -> list[ScriptedPlaywrightPage]:
         return [self]
 
-    async def evaluate(self, script: str) -> str:
+    async def evaluate(self, script: str, arg: object = None, isolated_context: bool = True) -> str:
         return self._result_for(script)
 
     async def wait_for_timeout(self, milliseconds: float) -> None:
@@ -211,13 +204,6 @@ class ScriptedSeleniumDriver(ScriptedSurface):
 AdapterBuilder = Callable[[str, list[str]], tuple[object, ScriptedSurface]]
 
 
-def build_nodriver(click_result: str, fingerprints: list[str]) -> tuple[object, ScriptedSurface]:
-    page = ScriptedNodriverPage(click_result, fingerprints)
-    adapter = NodriverBrowserAdapter()
-    adapter._page = page
-    return adapter, page
-
-
 def build_playwright(click_result: str, fingerprints: list[str]) -> tuple[object, ScriptedSurface]:
     page = ScriptedPlaywrightPage(click_result, fingerprints)
     adapter = PlaywrightBrowserAdapter()
@@ -233,7 +219,6 @@ def build_seleniumbase(click_result: str, fingerprints: list[str]) -> tuple[obje
 
 
 ADAPTER_BUILDERS: tuple[tuple[str, AdapterBuilder, object], ...] = (
-    ("nodriver", build_nodriver, nodriver_adapter_module),
     ("playwright", build_playwright, playwright_adapter_module),
     ("seleniumbase", build_seleniumbase, seleniumbase_adapter_module),
 )

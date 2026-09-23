@@ -7,7 +7,6 @@ import inspect
 import pytest
 
 from applyocalypse_automation.browser import (
-    nodriver_adapter,
     playwright_adapter,
     seleniumbase_adapter,
 )
@@ -22,12 +21,12 @@ from applyocalypse_automation.browser.driver_check import (
 
 
 def test_every_adapter_in_the_automatic_chain_is_required() -> None:
-    """All three drivers now ship, so all three are a build defect when absent.
+    """Both drivers ship, so both are a build defect when absent.
 
     The playwright entry used to be optional, because Playwright was not a dependency
     and demanding it would have failed every honest build. Its driver is Patchright
     now, which is in requirements.in and in the PyInstaller bundle, so an absent one
-    means a build that lost the middle fallback rather than a build without an extra.
+    means a build that lost the default driver rather than a build without an extra.
     """
     required = {adapter for adapter, (_m, _a, is_required) in _DRIVERS.items() if is_required}
 
@@ -38,7 +37,6 @@ def test_every_adapter_in_the_automatic_chain_is_required() -> None:
 @pytest.mark.parametrize(
     ("adapter", "module", "statement"),
     [
-        ("nodriver", nodriver_adapter, "import nodriver"),
         ("seleniumbase", seleniumbase_adapter, "from seleniumbase import SB"),
         ("playwright", playwright_adapter, "from patchright.async_api import async_playwright"),
     ],
@@ -58,9 +56,9 @@ def test_each_entry_imports_what_its_adapter_imports(adapter: str, module: objec
 
 
 def test_a_present_driver_reports_available(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setitem(_DRIVERS, "nodriver", ("json", "loads", True))
+    monkeypatch.setitem(_DRIVERS, "seleniumbase", ("json", "loads", True))
 
-    status = check_driver("nodriver")
+    status = check_driver("seleniumbase")
 
     assert status.available is True
     assert status.error is None
@@ -79,9 +77,9 @@ def test_a_present_driver_reports_available(monkeypatch: pytest.MonkeyPatch) -> 
 def test_a_broken_driver_reports_why(
     entry: tuple[str, str | None, bool], expected: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setitem(_DRIVERS, "nodriver", entry)
+    monkeypatch.setitem(_DRIVERS, "seleniumbase", entry)
 
-    status = check_driver("nodriver")
+    status = check_driver("seleniumbase")
 
     assert status.available is False
     assert status.error is not None
@@ -111,7 +109,6 @@ def test_a_driver_whose_files_are_gone_reports_broken_even_though_it_imports() -
 
 def test_missing_required_ignores_an_absent_optional_driver() -> None:
     statuses = [
-        DriverStatus("nodriver", "nodriver", True, True, None),
         DriverStatus("seleniumbase", "seleniumbase", True, True, None),
         DriverStatus("playwright", "patchright.async_api", False, False, "ModuleNotFoundError: x"),
     ]
@@ -120,7 +117,7 @@ def test_missing_required_ignores_an_absent_optional_driver() -> None:
 
 
 def test_missing_required_names_the_absent_one() -> None:
-    broken = DriverStatus("nodriver", "nodriver", True, False, "ModuleNotFoundError: x")
+    broken = DriverStatus("playwright", "patchright.async_api", True, False, "ModuleNotFoundError: x")
     statuses = [broken, DriverStatus("seleniumbase", "seleniumbase", True, True, None)]
 
     assert missing_required(statuses) == [broken]

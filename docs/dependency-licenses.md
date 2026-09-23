@@ -44,18 +44,12 @@ from the rule not being enforced.
 The authoritative copies live in `EXCEPTIONS` in the checker, each with a reason
 and, where relevant, what has to be settled before release. Summarised:
 
-- **nodriver (AGPL-3.0) — OPEN.** The first browser engine tried by
-  `adapter_factory`, bundled into the PyInstaller binary. Distributing that binary
-  as things stand would put the whole application under AGPL-3.0. Personal,
-  undistributed use triggers no obligation, so this blocks release, not
-  development. Resolving it means dropping nodriver for patchright (Apache-2.0) or
-  seleniumbase (MIT), or releasing Applyocalypse itself under AGPL-3.0.
 - **pyinstaller (GPLv2-or-later).** Carries the author's explicit exception
   permitting the building and distribution of non-free programs. A build tool:
   never imported at runtime.
 - **pyinstaller-hooks-contrib.** Dual Apache-2.0 or GPL-2.0, taken under the
   Apache half. Build tooling.
-- **pynose (LGPL).** Reached only through seleniumbase, the third-choice engine.
+- **pynose (LGPL).** Reached only through seleniumbase, the fallback engine.
   LGPL permits distribution alongside a proprietary work; it is recorded so the
   dependency is not mistaken for permissive.
 - **gsap.** Not an OSI licence. GSAP's standard no-charge licence covers animation
@@ -64,5 +58,10 @@ and, where relevant, what has to be settled before release. Summarised:
 
 ## Before release
 
-Both `verifyBeforeRelease` notes above are release blockers, not suggestions:
-settle nodriver, and re-read the GSAP terms if the app is ever sold.
+The `verifyBeforeRelease` note above is a release blocker, not a suggestion:
+re-read the GSAP terms if the app is ever sold.
+
+nodriver (AGPL-3.0) used to be listed here as the one open blocker: it was the
+first browser engine tried and was bundled into the worker, so distributing the
+binary would have put the whole application under AGPL-3.0. It has been removed.
+The Playwright adapter, driven by patchright (Apache-2.0), is now the default.

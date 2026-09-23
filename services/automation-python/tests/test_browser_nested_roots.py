@@ -13,15 +13,13 @@ form and renders a real web component, drives a real Chrome through the real
 adapter, and reads every answer back off the page rather than through the adapter
 that wrote it.
 
-Every case runs against both adapters that can reach a nested root, because they
-reach it by different routes and the routes fail differently. Nodriver sees only
-out-of-process frames, so a same-origin embed is the DOM walk's alone; Playwright
-lists frames regardless of origin, so the same embed arrives from both directions
-and every question in it is offered twice unless the adapter knows where the walk
-already went. That duplication shipped once and no test here saw it, because this
-module drove one adapter. SeleniumBase is deliberately absent: it evaluates only
-in the top document, so it never reaches an embed at all, and asserting otherwise
-would be asserting a feature it does not claim.
+Every case runs against each adapter that can reach a nested root. Playwright
+lists frames regardless of origin, so a same-origin embed arrives both from the
+DOM walk and from frame enumeration, and every question in it is offered twice
+unless the adapter knows where the walk already went. That duplication shipped
+once and no test here saw it. SeleniumBase is deliberately absent: it evaluates
+only in the top document, so it never reaches an embed at all, and asserting
+otherwise would be asserting a feature it does not claim.
 
 The same-origin case cannot be folded into ``test_browser_fixture_parity.py``:
 that suite asserts the pure-Python twin predicts what Chrome finds, and the twin
@@ -55,9 +53,9 @@ from applyocalypse_automation.browser.field_detection import dom_path_for
 
 pytestmark = pytest.mark.browser
 
-# Both adapters that can reach into a nested root. See the module docstring for why
+# Every adapter that can reach into a nested root. See the module docstring for why
 # SeleniumBase is not one of them.
-NESTED_ROOT_ADAPTERS = ("nodriver", "playwright")
+NESTED_ROOT_ADAPTERS = ("playwright",)
 
 
 EMPLOYER_PATH = "/careers/northstar/apply"
@@ -268,8 +266,8 @@ def browser_run(request: pytest.FixtureRequest) -> Iterator[_BrowserRun]:
         pytest.skip(f"{adapter_name} driver is unavailable: {driver.error}")
     with _serve() as url, tempfile.TemporaryDirectory(prefix="applyo-nested-") as profile_dir:
         loop = asyncio.new_event_loop()
-        # nodriver reaches for the current event loop rather than the running one,
-        # so this has to be installed the way asyncio.run installs it.
+        # Installed the way asyncio.run installs it, so the driver sees a current
+        # loop.
         asyncio.set_event_loop(loop)
         try:
             yield loop.run_until_complete(_drive(adapter_name, url, Path(profile_dir)))

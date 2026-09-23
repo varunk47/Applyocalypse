@@ -10,10 +10,10 @@ or otherwise defeat a bot challenge; when a Cloudflare interstitial is detected
 the blocker is flagged for human handoff so the runner pauses and the user takes
 over in the visible browser.
 
-Candidate order (from adapter_factory): nodriver -> playwright -> seleniumbase,
-for high-stealth boards and ATS portals alike. This adapter is last on purpose --
-it has no frame traversal at all, so it is what gets tried when the two adapters
-that can reach inside an iframe have both failed to start.
+Candidate order (from adapter_factory): playwright -> seleniumbase, for
+high-stealth boards and ATS portals alike. This adapter is last on purpose --
+it has no frame traversal at all, so it is what gets tried when the adapter
+that can reach inside an iframe has failed to start.
 
 Fail-safe: when seleniumbase is not installed the launch() call returns
 BrowserStepResult(ok=False) exactly like the Playwright adapter does.
@@ -214,7 +214,7 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
             await asyncio.to_thread(self._driver.get, url)
         except Exception as exc:
             return BrowserStepResult(False, "page navigation failed", {"url": url, "error": str(exc)})
-        # Same readiness poll as the nodriver/playwright adapters; without it this
+        # Same readiness poll as the playwright adapter; without it this
         # fallback engine scraped SPA shells before real content had rendered.
         readiness = await wait_for_page_text(
             self._probe_visible_text_length,
@@ -429,8 +429,8 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
 
         Every styled dropzone (Greenhouse, Lever, Workable, Ashby, and anything on
         react-dropzone) keeps its real <input type="file"> off screen behind the drop
-        target. Playwright and nodriver set files through a driver API that does not
-        care whether the element is visible; Selenium's send_keys raises "element not
+        target. Playwright sets files through a driver API that does not care
+        whether the element is visible; Selenium's send_keys raises "element not
         interactable", and the resume silently never attaches (audit row 15).
 
         So try the ordinary write first and only neutralise the hiding styles if it

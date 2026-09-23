@@ -64,15 +64,14 @@ def test_portal_registry_covers_requested_targets() -> None:
     }.issubset(portal_ids)
 
 
-def test_browser_adapter_factory_keeps_nodriver_default_and_playwright_fallback() -> None:
-    assert create_browser_adapter(None).name == "nodriver"
+def test_browser_adapter_factory_defaults_to_playwright() -> None:
+    assert create_browser_adapter(None).name == "playwright"
     assert create_browser_adapter("playwright").name == "playwright"
 
 
 # Adapter name -> the third-party module its launch() imports. The playwright adapter is
 # named for the protocol it speaks; patchright is the driver that speaks it.
 _ADAPTER_DRIVER_MODULES = {
-    "nodriver": "nodriver",
     "playwright": "patchright",
     "seleniumbase": "seleniumbase",
 }
@@ -84,7 +83,7 @@ def test_every_portal_defaults_to_an_adapter_that_is_actually_installed() -> Non
     Every ATS here used to declare "playwright", which is absent from
     requirements.in, from the lock file and from the PyInstaller hidden imports.
     On a real install the launch returned "playwright is not installed" and the
-    run fell through to nodriver without ever saying so. Nothing looked broken,
+    run fell through to another driver without ever saying so. Nothing looked broken,
     which is why it survived: the Playwright-only cross-origin frame support was
     simply never the code any user ran.
 
@@ -110,8 +109,8 @@ def test_adapter_driver_module_map_covers_every_supported_adapter() -> None:
 def test_the_automatic_adapter_chain_never_offers_an_adapter_that_is_not_installed() -> None:
     """The declared default was only half of it; the fallback chain was the other half.
 
-    Every ATS used to fall back nodriver -> playwright -> seleniumbase. With no
-    playwright in the build, a nodriver failure spent a launch on an adapter that
+    Every ATS used to fall back through a playwright the build did not have. With no
+    playwright in the build, a failure of the default spent a launch on an adapter that
     could not start and wrote that dead attempt into the record the UI shows, ahead
     of the seleniumbase fallback that could actually have worked.
     """
@@ -129,8 +128,8 @@ def test_an_explicitly_named_adapter_leads_the_chain() -> None:
     """Naming an adapter moves it to the front; it never drops the others."""
     workflow = workflow_for_url("https://jobs.lever.co/example/abc")
 
-    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
-    assert adapter_candidates_for_workflow(workflow, "seleniumbase") == ("seleniumbase", "nodriver", "playwright")
+    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "seleniumbase")
+    assert adapter_candidates_for_workflow(workflow, "seleniumbase") == ("seleniumbase", "playwright")
 
 
 def test_detect_portal_from_known_url() -> None:
@@ -138,7 +137,7 @@ def test_detect_portal_from_known_url() -> None:
 
     assert portal is not None
     assert portal.portal_id == "greenhouse"
-    assert portal.default_adapter == "nodriver"
+    assert portal.default_adapter == "playwright"
 
 
 def test_detect_portal_for_ashby_url() -> None:
@@ -146,7 +145,7 @@ def test_detect_portal_for_ashby_url() -> None:
 
     assert portal is not None
     assert portal.portal_id == "ashby"
-    assert portal.default_adapter == "nodriver"
+    assert portal.default_adapter == "playwright"
     assert portal.requires_high_stealth is False
 
 
@@ -155,8 +154,8 @@ def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
 
     assert workflow.portal_id == "lever"
     assert workflow.workflow_kind == "ATS_DIRECT_FORM"
-    assert workflow.default_adapter == "nodriver"
-    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
+    assert workflow.default_adapter == "playwright"
+    assert adapter_candidates_for_workflow(workflow) == ("playwright", "seleniumbase")
     assert "Apply for this job" in workflow.entry_action_labels
     assert workflow.requires_manual_review_before_fill is True
     payload = workflow.to_event_payload()
@@ -164,17 +163,16 @@ def test_workflow_for_common_ats_selects_safe_entry_actions() -> None:
     assert "Final submit" in payload["review_checkpoints"]
 
 
-def test_workflow_for_high_stealth_board_keeps_nodriver_and_login_watch() -> None:
+def test_workflow_for_high_stealth_board_keeps_playwright_and_login_watch() -> None:
     workflow = workflow_for_url("https://www.linkedin.com/jobs/view/123")
 
     assert workflow.portal_id == "linkedin"
     assert workflow.workflow_kind == "JOB_BOARD_REDIRECT_OR_STEALTH"
-    assert workflow.default_adapter == "nodriver"
+    assert workflow.default_adapter == "playwright"
     assert workflow.requires_high_stealth is True
-    # A high-stealth board used to drop a named playwright on the floor, because the
-    # adapter could not launch at all. It can now, so the name is honoured here too.
-    assert adapter_candidates_for_workflow(workflow, "playwright") == ("playwright", "nodriver", "seleniumbase")
-    assert adapter_candidates_for_workflow(workflow) == ("nodriver", "playwright", "seleniumbase")
+    # A named seleniumbase leads the chain; the default follows rather than vanishing.
+    assert adapter_candidates_for_workflow(workflow, "seleniumbase") == ("seleniumbase", "playwright")
+    assert adapter_candidates_for_workflow(workflow) == ("playwright", "seleniumbase")
     assert workflow.requires_login_watch is True
     payload = workflow.to_event_payload()
     assert "Confirm trusted application surface" in payload["expected_steps"]

@@ -71,8 +71,6 @@ cryptography==50.0.1
     #   google-auth
 cssselect==1.4.0
     # via seleniumbase
-deprecated==1.3.1
-    # via nodriver
 distro==1.9.0
     # via openai
 exceptiongroup==1.3.1
@@ -175,16 +173,12 @@ mdurl==0.1.2
     # via
     #   markdown-it-py
     #   seleniumbase
-mss==10.2.0
-    # via nodriver
 multidict==6.7.1
     # via
     #   aiohttp
     #   yarl
 mycdp==1.4.0
     # via seleniumbase
-nodriver==0.50.3
-    # via -r requirements.in
 oauthlib==3.3.1
     # via requests-oauthlib
 openai==2.41.1
@@ -425,15 +419,11 @@ websocket-client==1.9.0
     #   selenium
     #   seleniumbase
 websockets==16.0
-    # via
-    #   nodriver
-    #   seleniumbase
+    # via seleniumbase
 wheel==0.47.0
     # via
     #   pip-tools
     #   seleniumbase
-wrapt==2.2.1
-    # via deprecated
 wsproto==1.3.2
     # via
     #   seleniumbase

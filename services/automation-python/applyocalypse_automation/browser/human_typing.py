@@ -1,7 +1,7 @@
 """Keystrokes that produce the events portal widgets actually listen for.
 
-nodriver's ``Element.send_keys`` dispatches one CDP ``char`` event per character
-with no delay between them (nodriver 0.50.3, ``core/element.py:708``). Chrome
+A plain character stream, the kind nodriver's ``Element.send_keys`` produced,
+is one CDP ``char`` event per character with no delay between them. Chrome
 turns a ``char`` event into the text insertion and the ``input`` event that
 follows it, but it never synthesises ``keydown`` or ``keyup``. That gap is the
 difference between a value appearing in a plain text box and a typeahead
@@ -199,17 +199,15 @@ CLEAR_FIELD_EVENTS: tuple[KeyEvent, ...] = (
 
 
 def _cdp_input_module(override: Any = None) -> Any:
-    """The ``nodriver.cdp.input_`` module, imported only when a browser is live.
+    """The CDP ``Input`` domain, as ``(method, params)`` commands for a Patchright session.
 
-    Deferred for the same reason the adapter defers ``import nodriver``: the
-    document pipeline runs in environments with no browser stack, and a
-    top-level import would make importing this module fail there.
+    ``override`` is the test seam: a recording stand-in with the same call shapes.
     """
     if override is not None:
         return override
-    from nodriver import cdp  # type: ignore[import-not-found]
+    from .cdp_input import INPUT_DOMAIN
 
-    return cdp.input_
+    return INPUT_DOMAIN
 
 
 async def clear_element(
@@ -236,9 +234,9 @@ async def type_into_element(
 ) -> str:
     """Type a value into a control. Returns which strategy was used.
 
-    The element's own tab is the send target rather than the top document, so a
-    field inside a cross-origin apply frame receives the keystrokes in the frame
-    that owns it.
+    ``element.tab`` is the page's CDP target. Chrome delivers key events to the
+    frame that holds focus, so once ``element.focus()`` has run, a field inside a
+    cross-origin apply frame receives the keystrokes in the frame that owns it.
     """
     input_domain = _cdp_input_module(cdp_input)
     await element.focus()

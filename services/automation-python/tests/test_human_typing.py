@@ -22,7 +22,7 @@ from applyocalypse_automation.browser.human_typing import (
 
 
 class _RecordingInputDomain:
-    """Stands in for ``nodriver.cdp.input_``, recording the calls it is handed."""
+    """Stands in for ``cdp_input.INPUT_DOMAIN``, recording the calls it is handed."""
 
     def __init__(self) -> None:
         self.calls: list[tuple[str, dict[str, Any]]] = []

@@ -75,17 +75,15 @@ class ScrollAnchor:
 
 
 def _cdp_input_module(override: Any = None) -> Any:
-    """The ``nodriver.cdp.input_`` module, imported only when a browser is live.
+    """The CDP ``Input`` domain, as ``(method, params)`` commands for a Patchright session.
 
-    Deferred for the same reason ``trusted_click`` defers it: the document
-    pipeline runs where no browser stack exists, and a top-level import would
-    make importing this module fail there.
+    ``override`` is the test seam: a recording stand-in with the same call shapes.
     """
     if override is not None:
         return override
-    from nodriver import cdp  # type: ignore[import-not-found]
+    from .cdp_input import INPUT_DOMAIN
 
-    return cdp.input_
+    return INPUT_DOMAIN
 
 
 def _number(value: Any) -> float | None:

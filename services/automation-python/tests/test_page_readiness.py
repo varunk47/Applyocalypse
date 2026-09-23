@@ -1,4 +1,4 @@
-"""Tests for page_readiness.wait_for_page_text and its nodriver adapter wiring.
+"""Tests for page_readiness.wait_for_page_text and its Playwright adapter wiring.
 
 Client-rendered ATS pages (Workday, Greenhouse embeds, Ashby) paint their text
 seconds after navigation. The adapter must poll until visible text is non-empty
@@ -10,9 +10,9 @@ import asyncio
 
 import pytest
 
-from applyocalypse_automation.browser import nodriver_adapter as nodriver_adapter_module
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
+from applyocalypse_automation.browser import playwright_adapter as playwright_adapter_module
 from applyocalypse_automation.browser.page_readiness import wait_for_page_text
+from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 
 
 class FakeTimeline:
@@ -116,11 +116,15 @@ def test_wait_for_page_text_respects_min_text_length() -> None:
 
 
 class FakePage:
-    """Fake nodriver page whose visible-text length grows across evaluates."""
+    """Fake Playwright page whose visible-text length grows across evaluates."""
 
     def __init__(self, lengths: list[int]) -> None:
         self.lengths = list(lengths)
         self.evaluations = 0
+        self.requested_urls: list[str] = []
+
+    async def goto(self, url: str, **_options: object) -> None:
+        self.requested_urls.append(url)
 
     async def evaluate(self, script: str) -> str:
         index = min(self.evaluations, len(self.lengths) - 1)
@@ -128,29 +132,19 @@ class FakePage:
         return str(self.lengths[index])
 
 
-class FakeBrowser:
-    def __init__(self, page: FakePage) -> None:
-        self.page = page
-        self.requested_urls: list[str] = []
-
-    async def get(self, url: str) -> FakePage:
-        self.requested_urls.append(url)
-        return self.page
-
-
 def instant_warm_up(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep the front-door visit that precedes a navigation from taking real seconds."""
-    monkeypatch.setattr(nodriver_adapter_module, "WARM_UP_TIMEOUT_S", 0.0)
-    monkeypatch.setattr(nodriver_adapter_module, "dwell_seconds", lambda: 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "WARM_UP_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "dwell_seconds", lambda: 0.0)
 
 
 def test_open_url_waits_for_rendered_text(monkeypatch: pytest.MonkeyPatch) -> None:
     """open_url must poll the page until text renders, not return immediately."""
-    monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
     instant_warm_up(monkeypatch)
     page = FakePage([0, 0, 9239, 9239])
-    adapter = NodriverBrowserAdapter()
-    adapter._browser = FakeBrowser(page)  # noqa: SLF001 - unit wiring test
+    adapter = PlaywrightBrowserAdapter()
+    adapter._page = page  # noqa: SLF001 - unit wiring test
 
     result = asyncio.run(adapter.open_url("https://example.wd1.myworkdayjobs.com/job/1"))
 
@@ -163,12 +157,12 @@ def test_open_url_waits_for_rendered_text(monkeypatch: pytest.MonkeyPatch) -> No
 
 def test_open_url_reports_not_ready_after_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
     """A page that never renders still navigates, but reports ready=False."""
-    monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
-    monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "PAGE_TEXT_TIMEOUT_S", 0.0)
     instant_warm_up(monkeypatch)
     page = FakePage([0])
-    adapter = NodriverBrowserAdapter()
-    adapter._browser = FakeBrowser(page)  # noqa: SLF001 - unit wiring test
+    adapter = PlaywrightBrowserAdapter()
+    adapter._page = page  # noqa: SLF001 - unit wiring test
 
     result = asyncio.run(adapter.open_url("https://example.wd1.myworkdayjobs.com/job/1"))
 

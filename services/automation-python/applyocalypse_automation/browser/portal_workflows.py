@@ -118,7 +118,7 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
             portal_id="unknown",
             display_name="Unknown portal",
             workflow_kind="GENERIC_REVIEW_FIRST",
-            default_adapter="nodriver",
+            default_adapter="playwright",
             requires_high_stealth=True,
             entry_action_labels=(),
             requires_login_watch=True,
@@ -185,7 +185,7 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
         review_checkpoints=("Login/MFA/CAPTCHA", "Redirect trust", "Sensitive questions", "Final submit"),
         notes=(
             "Job board flow may redirect to ATS or require login.",
-            "Use Nodriver by default for high-stealth portals and pause on uncertainty.",
+            "Drive the installed Chrome through Patchright for high-stealth portals and pause on uncertainty.",
             "After the apply click, re-read the URL; fill tactics must follow the destination ATS, not the job board.",
             *quirk_notes,
         ),

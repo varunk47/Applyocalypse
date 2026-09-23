@@ -1,7 +1,6 @@
 # Source of intent. Edit THIS file, then regenerate the lock:
 #   python -m piptools compile requirements.in -o requirements.txt --strip-extras
 litellm>=1.74.0
-nodriver>=0.44
 # Drives playwright_adapter.py. A drop-in fork of Playwright with the automation
 # tells patched out of the driver itself, so the import is playwright's API under
 # another name. Bundles its own Node driver, which is why the wheel is ~38 MB; it

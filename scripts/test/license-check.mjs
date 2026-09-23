@@ -66,17 +66,6 @@ const EXCEPTIONS = {
     verifyBeforeRelease:
       "Confirm the no-charge terms still cover a paid desktop product before charging for one."
   },
-  nodriver: {
-    reason:
-      "AGPL-3.0, and currently the FIRST browser engine tried by adapter_factory. " +
-      "Bundled into the PyInstaller binary, so distributing that binary would put the " +
-      "whole application under AGPL-3.0.",
-    resolved: false,
-    verifyBeforeRelease:
-      "Decide before the app is distributed: drop nodriver in favour of patchright " +
-      "(Apache-2.0) or seleniumbase (MIT), or release Applyocalypse itself under AGPL-3.0. " +
-      "Personal, undistributed use triggers neither obligation."
-  },
   "pyinstaller-hooks-contrib": {
     reason:
       "Dual Apache-2.0 or GPL-2.0, the same arrangement as PyInstaller itself, and " +
@@ -85,7 +74,7 @@ const EXCEPTIONS = {
   },
   pynose: {
     reason:
-      "LGPL, reached only through seleniumbase, which is the third-choice engine. " +
+      "LGPL, reached only through seleniumbase, which is the fallback engine. " +
       "LGPL permits distribution alongside a proprietary work; it is listed so the " +
       "dependency is not mistaken for permissive.",
     resolved: true

@@ -20,7 +20,6 @@ flowchart LR
   Main --> Secrets["Secure Secret Store"]
   Main --> Python["Bundled Python Worker"]
   Python --> Browser["BrowserAdapter Factory"]
-  Browser --> Nodriver["Nodriver Adapter"]
   Browser --> Playwright["Playwright Adapter (Patchright driver)"]
   Browser --> SeleniumBase["SeleniumBase Adapter"]
   Python --> Docs["Document Pipeline"]
@@ -34,9 +33,9 @@ Electron Main is the system authority. It owns migrations, queue claims, leases,
 
 The renderer is a control surface. It can request actions and subscribe to safe event streams, but it cannot access SQLite, raw filesystem APIs, child processes, or secrets.
 
-Python workers are supervised executors. They scrape job pages, analyze descriptions, mutate documents, drive browser sessions, emit JSON events, and pause on uncertainty. They never write the database directly. Portal workflows select deterministic browser adapter candidates from one chain, Nodriver then Playwright then SeleniumBase, for high-stealth boards and ATS portals alike. Nodriver leads because it carries the hand-built CDP stealth path; the Playwright adapter sits second because it is the other adapter that can enumerate frames and write inside the one that owns a field, which is most of what an ATS form is made of; SeleniumBase is last because it cannot. All three drivers ship in the bundle and are required, so an absent one is a build defect rather than a missing extra. Each workflow also carries expected runner steps and mandatory review checkpoints that are emitted to the Run Console before browser actions proceed. Workday, Greenhouse, Lever, Ashby, iCIMS, and Taleo also have explicit adapter plans with portal-specific step progression labels, material field hints, review gates, step caps, and final-submit labels.
+Python workers are supervised executors. They scrape job pages, analyze descriptions, mutate documents, drive browser sessions, emit JSON events, and pause on uncertainty. They never write the database directly. Portal workflows select deterministic browser adapter candidates from one chain, Playwright then SeleniumBase, for high-stealth boards and ATS portals alike. The Playwright adapter leads because it carries the stealth posture and is the adapter that can enumerate frames and write inside the one that owns a field, which is most of what an ATS form is made of; SeleniumBase is last because it cannot. Both drivers ship in the bundle and are required, so an absent one is a build defect rather than a missing extra. Each workflow also carries expected runner steps and mandatory review checkpoints that are emitted to the Run Console before browser actions proceed. Workday, Greenhouse, Lever, Ashby, iCIMS, and Taleo also have explicit adapter plans with portal-specific step progression labels, material field hints, review gates, step caps, and final-submit labels.
 
-Current implementation note: deterministic JD extraction is always available offline. If `LITELLM_MODEL` is present from a BYOK provider connection, Python attempts litellm-backed extraction and falls back to deterministic analysis without failing the run. Provider metadata can supply model, API base, Azure API version, AWS Bedrock region, and AWS access-key ID while the secret value remains OS-encrypted and is only decrypted inside Electron Main for worker launch. Portal detection selects the declared browser adapter, with Nodriver as the default for unknown or stealth-sensitive portals. The Playwright adapter is driven by Patchright, a drop-in fork of Playwright with the automation tells patched out of the driver rather than papered over from inside the page: it runs its scripts in isolated execution contexts instead of enabling `Runtime`, drops the `--enable-automation` flag family, and reaches into closed shadow roots. It drives the Chrome already installed on the machine, so nothing is downloaded at install time or at runtime.
+Current implementation note: deterministic JD extraction is always available offline. If `LITELLM_MODEL` is present from a BYOK provider connection, Python attempts litellm-backed extraction and falls back to deterministic analysis without failing the run. Provider metadata can supply model, API base, Azure API version, AWS Bedrock region, and AWS access-key ID while the secret value remains OS-encrypted and is only decrypted inside Electron Main for worker launch. Portal detection selects the declared browser adapter, with the Playwright adapter as the default for every portal, known or not. It is driven by Patchright, a drop-in fork of Playwright with the automation tells patched out of the driver rather than papered over from inside the page: it runs its scripts in isolated execution contexts instead of enabling `Runtime`, drops the `--enable-automation` flag family, and reaches into closed shadow roots. It drives the Chrome already installed on the machine, so nothing is downloaded at install time or at runtime.
 
 ## 3. Repository Structure
 
@@ -201,7 +200,7 @@ flowchart TD
 3. Data layer: migrations, repositories, scheduler, restart recovery.
 4. Document pipeline: PDF conversion, DOCX anchors, TEX parser and compiler.
 5. Analysis and tailoring: JD analysis, truthful evidence matching, validation.
-6. Automation: Nodriver adapter, portal adapters, screenshots, checkpoints.
+6. Automation: Playwright (Patchright) adapter, portal adapters, screenshots, checkpoints.
 7. Control center: live console, answer edits, approvals, retry, skip, diagnostics.
 8. Packaging: PyInstaller binary, electron-builder hooks, signing in the packaging phase.
 
@@ -209,7 +208,7 @@ Implemented controls now include pause/resume/cancel/retry/skip control files, p
 
 ## 9. Known Risks
 
-- Nodriver is younger than Playwright. The Python `BrowserAdapter` interface isolates this risk, and the Patchright-driven Playwright adapter is the shipped fallback rather than a future one.
+- Patchright tracks Playwright releases from a small team. The Python `BrowserAdapter` interface isolates this risk, and SeleniumBase is the shipped fallback rather than a future one.
 - Patchright patches the `Console.enable` leak by disabling the Console API outright, so a feature that reads page console output through that adapter would get nothing.
 - DOCX files vary heavily. Anchoring must be reviewed and confirmed before the product promises stable mutation.
 - PDF conversion is best-effort. The user must verify the generated editable master.

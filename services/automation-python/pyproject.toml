@@ -9,7 +9,7 @@ description = "Applyocalypse local Python worker for browser automation, documen
 requires-python = ">=3.12"
 dependencies = [
   "litellm>=1.72.0",
-  "nodriver>=0.44",
+  "patchright>=1.62.3",
   "pypdf>=6.15.0",
   "python-docx>=1.1.2",
   "TexSoup>=0.3.1",

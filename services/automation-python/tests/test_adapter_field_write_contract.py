@@ -8,7 +8,7 @@ itself autofills name/email/phone. An adapter that types without clearing turns
 which fails the portal's own format validation.
 
 Every adapter must satisfy the same contract, so each case is parametrized over
-all three implementations driven by in-memory doubles.
+both implementations driven by in-memory doubles.
 """
 from __future__ import annotations
 
@@ -19,13 +19,13 @@ from collections.abc import Callable
 
 import pytest
 
+from applyocalypse_automation.browser import human_typing
 from applyocalypse_automation.browser.adapter import BrowserField, BrowserStepResult
 from applyocalypse_automation.browser.field_detection import (
     SCRIPTED_WRITE_FIELD_TYPES,
     VERIFY_SCRIPT_MARKER,
     WRITE_SCRIPT_MARKER,
 )
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
 from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 from applyocalypse_automation.browser.seleniumbase_adapter import SeleniumBaseBrowserAdapter
 
@@ -103,35 +103,6 @@ def evaluate_script(control: FakeControl, script: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# nodriver doubles
-# ---------------------------------------------------------------------------
-
-
-class FakeNodriverElement:
-    def __init__(self, control: FakeControl) -> None:
-        self._control = control
-
-    async def clear_input(self) -> None:
-        self._control.do_clear()
-
-    async def send_keys(self, value: str) -> None:
-        self._control.do_type(value)
-
-
-class FakeNodriverPage:
-    def __init__(self, control: FakeControl) -> None:
-        self._control = control
-        self.evaluated_scripts: list[str] = []
-
-    async def select(self, selector: str) -> FakeNodriverElement:
-        return FakeNodriverElement(self._control)
-
-    async def evaluate(self, script: str) -> str:
-        self.evaluated_scripts.append(script)
-        return evaluate_script(self._control, script)
-
-
-# ---------------------------------------------------------------------------
 # playwright doubles
 # ---------------------------------------------------------------------------
 
@@ -140,10 +111,40 @@ class FakePlaywrightLocator:
     def __init__(self, control: FakeControl) -> None:
         self._control = control
 
+    async def focus(self, timeout: int | None = None) -> None:
+        pass
+
+    async def clear(self, timeout: int | None = None) -> None:
+        self._control.do_clear()
+
     async def fill(self, value: str, timeout: int | None = None) -> None:
         # Playwright's fill() clears the control before typing; model that.
         self._control.do_clear()
         self._control.do_type(value)
+
+
+class FakePlaywrightSession:
+    """The page's CDP session. Key events edit the one control the page has."""
+
+    def __init__(self, control: FakeControl) -> None:
+        self._control = control
+
+    async def send(self, method: str, params: dict[str, object]) -> None:
+        if method == "Input.insertText":
+            self._control.do_type(str(params["text"]))
+        elif method == "Input.dispatchKeyEvent" and params["type"] == "keyDown":
+            if "selectAll" in params.get("commands", []):  # type: ignore[operator]
+                self._control.do_clear()
+            elif "text" in params:
+                self._control.do_type(str(params["text"]))
+
+
+class FakePlaywrightContext:
+    def __init__(self, control: FakeControl) -> None:
+        self._control = control
+
+    async def new_cdp_session(self, page: object) -> FakePlaywrightSession:
+        return FakePlaywrightSession(self._control)
 
 
 class FakePlaywrightFrame:
@@ -161,7 +162,7 @@ class FakePlaywrightFrame:
     def locator(self, selector: str) -> FakePlaywrightLocator:
         return FakePlaywrightLocator(self._control)
 
-    async def evaluate(self, script: str) -> str:
+    async def evaluate(self, script: str, arg: object = None, isolated_context: bool = True) -> str:
         self._evaluated_scripts.append(script)
         return evaluate_script(self._control, script)
 
@@ -176,7 +177,7 @@ class FakePlaywrightPage:
     def locator(self, selector: str) -> FakePlaywrightLocator:
         return FakePlaywrightLocator(self._control)
 
-    async def evaluate(self, script: str) -> str:
+    async def evaluate(self, script: str, arg: object = None, isolated_context: bool = True) -> str:
         self.evaluated_scripts.append(script)
         return evaluate_script(self._control, script)
 
@@ -207,7 +208,7 @@ class FakeSeleniumDriver:
 
     def execute_script(self, script: str) -> str:
         # SeleniumBase wraps the expression in `return (...)`; unwrap so the
-        # double sees the same script the other two engines receive.
+        # double sees the same script the other engine receives.
         inner = script[len("return (") : -1] if script.startswith("return (") else script
         self.evaluated_scripts.append(inner)
         return evaluate_script(self._control, inner)
@@ -230,19 +231,12 @@ class AdapterHarness:
         return self.surface.evaluated_scripts  # type: ignore[attr-defined]
 
 
-def build_nodriver(prefilled: str) -> AdapterHarness:
-    control = FakeControl(prefilled)
-    page = FakeNodriverPage(control)
-    adapter = NodriverBrowserAdapter()
-    adapter._page = page
-    return AdapterHarness("nodriver", adapter, control, page)
-
-
 def build_playwright(prefilled: str) -> AdapterHarness:
     control = FakeControl(prefilled)
     page = FakePlaywrightPage(control)
     adapter = PlaywrightBrowserAdapter()
     adapter._page = page
+    adapter._context = FakePlaywrightContext(control)
     return AdapterHarness("playwright", adapter, control, page)
 
 
@@ -255,10 +249,14 @@ def build_seleniumbase(prefilled: str) -> AdapterHarness:
 
 
 ADAPTER_BUILDERS: tuple[tuple[str, Callable[[str], AdapterHarness]], ...] = (
-    ("nodriver", build_nodriver),
     ("playwright", build_playwright),
     ("seleniumbase", build_seleniumbase),
 )
+
+
+@pytest.fixture(autouse=True)
+def _no_typing_delay(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(human_typing, "keystroke_delay", lambda *_args: 0.0)
 
 
 def make_field(

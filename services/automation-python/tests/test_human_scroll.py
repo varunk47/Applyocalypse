@@ -28,7 +28,7 @@ from typing import Any
 import pytest
 from js_bridge import run_browser_script
 
-from applyocalypse_automation.browser import nodriver_adapter as nodriver_adapter_module
+from applyocalypse_automation.browser import playwright_adapter as playwright_adapter_module
 from applyocalypse_automation.browser.field_detection import (
     LOCATE_SCRIPT_MARKER,
     build_click_by_text_script,
@@ -45,7 +45,7 @@ from applyocalypse_automation.browser.human_scroll import (
     parse_scroll_anchor,
     scroll_notches,
 )
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
+from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 from applyocalypse_automation.browser.trusted_click import Point
 
 VIEWPORT = {"width": 1280, "height": 800}
@@ -237,7 +237,7 @@ def test_a_half_read_scroll_is_refused_rather_than_guessed(scroll_by: Any) -> No
 
 
 class FakeInputDomain:
-    """Stands in for ``nodriver.cdp.input_``, recording the calls made through it."""
+    """Stands in for ``cdp_input.INPUT_DOMAIN``, recording the calls made through it."""
 
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
@@ -325,13 +325,20 @@ IN_VIEW = {
 
 
 class ScriptedFrame:
-    """Answers each locate with the next queued payload, and every press the same way."""
+    """Answers each locate with the next queued payload, and every press the same way.
+
+    It is the top document too, so the click needs no frame translation.
+    """
 
     def __init__(self, *located: dict) -> None:
         self.located = list(located)
         self.scripts: list[str] = []
 
-    async def evaluate(self, script: str) -> str:
+    @property
+    def main_frame(self) -> ScriptedFrame:
+        return self
+
+    async def evaluate(self, script: str, arg: object = None, isolated_context: bool = True) -> str:
         self.scripts.append(script)
         if LOCATE_SCRIPT_MARKER not in script:
             return json.dumps({"ok": True, "action": "click_by_text", "clicked_label": "Apply now"})
@@ -343,14 +350,11 @@ class ScriptedFrame:
         return sum(1 for script in self.scripts if LOCATE_SCRIPT_MARKER in script)
 
 
-class RefusingWorlds:
-    """No isolated world, so every read falls through to the frame itself."""
+class FakeContext:
+    """Opens the input session; the dispatchers that would use it are stubbed out."""
 
-    def forget_all(self) -> None:
-        return None
-
-    async def evaluate(self, frame: object, script: str) -> tuple[bool, None]:
-        return (False, None)
+    async def new_cdp_session(self, page: object) -> object:
+        return object()
 
 
 def clicking(frame: ScriptedFrame, monkeypatch: pytest.MonkeyPatch, *, scrolls: bool = True) -> dict[str, Any]:
@@ -365,12 +369,12 @@ def clicking(frame: ScriptedFrame, monkeypatch: pytest.MonkeyPatch, *, scrolls: 
     async def fake_press(tab: Any, point: Point) -> None:
         presses.append(point)
 
-    monkeypatch.setattr(nodriver_adapter_module, "dispatch_wheel_scroll", fake_wheel)
-    monkeypatch.setattr(nodriver_adapter_module, "dispatch_trusted_click", fake_press)
+    monkeypatch.setattr(playwright_adapter_module, "dispatch_wheel_scroll", fake_wheel)
+    monkeypatch.setattr(playwright_adapter_module, "dispatch_trusted_click", fake_press)
 
-    adapter = NodriverBrowserAdapter()
+    adapter = PlaywrightBrowserAdapter()
     adapter._page = frame  # noqa: SLF001 - unit wiring test
-    adapter._worlds = RefusingWorlds()  # noqa: SLF001 - unit wiring test
+    adapter._context = FakeContext()  # noqa: SLF001 - unit wiring test
     result = asyncio.run(
         adapter._click_in_frame(  # noqa: SLF001 - unit wiring test
             frame,

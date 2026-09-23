@@ -233,7 +233,7 @@ def test_the_approach_holds_up_whatever_the_draw(seed: int) -> None:
 
 
 class _FakeInputDomain:
-    """Stands in for ``nodriver.cdp.input_``, recording the calls made through it."""
+    """Stands in for ``cdp_input.INPUT_DOMAIN``, recording the calls made through it."""
 
     class MouseButton(str):
         pass

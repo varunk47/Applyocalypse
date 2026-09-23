@@ -79,7 +79,7 @@ export const buildPortalWorkflowSummary = (events: readonly RunConsoleEvent[]): 
   const clickedLabel = stringValue(actionPayload["clicked_label"], "");
   const actionStatus = actionEvent ? (actionEvent.severity === "INFO" ? "APPLIED" : "NOT_APPLIED") : "PENDING";
   const actionMessage = actionEvent?.message ?? "No portal entry action has been attempted yet.";
-  const adapter = stringValue(workflow["adapter"], stringValue(workflow["default_adapter"], "nodriver"));
+  const adapter = stringValue(workflow["adapter"], stringValue(workflow["default_adapter"], "playwright"));
   const pageStateStatus = stateEvent ? (booleanValue(statePayload["requires_review"]) ? "REVIEW" : "TRUSTED") : "PENDING";
 
   return {

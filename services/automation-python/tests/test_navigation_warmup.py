@@ -18,7 +18,7 @@ import statistics
 
 import pytest
 
-from applyocalypse_automation.browser import nodriver_adapter as nodriver_adapter_module
+from applyocalypse_automation.browser import playwright_adapter as playwright_adapter_module
 from applyocalypse_automation.browser.navigation_warmup import (
     MAX_DWELL_S,
     MIN_DWELL_S,
@@ -26,7 +26,7 @@ from applyocalypse_automation.browser.navigation_warmup import (
     origin_of,
     warm_up_target,
 )
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
+from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 
 APPLY_URL = "https://boards.greenhouse.io/acme/jobs/4155832007"
 FRONT_DOOR = "https://boards.greenhouse.io/"
@@ -135,58 +135,42 @@ def test_most_landings_are_a_second_or_two_and_some_are_much_longer() -> None:
 class FakePage:
     """A page with enough text to be called rendered on the first probe."""
 
-    async def evaluate(self, script: str) -> str:
-        return "9239"
-
-
-class FakeBrowser:
     def __init__(self, *, broken: str | None = None) -> None:
         self.requested_urls: list[str] = []
         self._broken = broken
 
-    async def get(self, url: str) -> FakePage:
+    async def goto(self, url: str, **_options: object) -> None:
         self.requested_urls.append(url)
         if self._broken is not None and url == self._broken:
             raise RuntimeError("net::ERR_NAME_NOT_RESOLVED")
-        return FakePage()
+
+    async def evaluate(self, script: str) -> int:
+        return 9239
 
 
-class CountingWorlds:
-    """Refuses every probe, so reads fall back, and counts what it was told to forget."""
-
-    def __init__(self) -> None:
-        self.forgotten = 0
-
-    def forget_all(self) -> None:
-        self.forgotten += 1
-
-    async def evaluate(self, frame: object, script: str) -> tuple[bool, None]:
-        return (False, None)
-
-
-def adapter_for(browser: FakeBrowser, monkeypatch: pytest.MonkeyPatch) -> NodriverBrowserAdapter:
-    """An adapter wired to a fake browser, with the waiting taken out."""
-    monkeypatch.setattr(nodriver_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
-    monkeypatch.setattr(nodriver_adapter_module, "WARM_UP_TIMEOUT_S", 0.0)
-    monkeypatch.setattr(nodriver_adapter_module, "dwell_seconds", lambda: 0.0)
-    adapter = NodriverBrowserAdapter()
-    adapter._browser = browser  # noqa: SLF001 - unit wiring test
+def adapter_for(page: FakePage, monkeypatch: pytest.MonkeyPatch) -> PlaywrightBrowserAdapter:
+    """An adapter wired to a fake page, with the waiting taken out."""
+    monkeypatch.setattr(playwright_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "WARM_UP_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "dwell_seconds", lambda: 0.0)
+    adapter = PlaywrightBrowserAdapter()
+    adapter._page = page  # noqa: SLF001 - unit wiring test
     return adapter
 
 
 def test_the_front_door_is_opened_before_the_apply_page(monkeypatch: pytest.MonkeyPatch) -> None:
-    browser = FakeBrowser()
-    adapter = adapter_for(browser, monkeypatch)
+    page = FakePage()
+    adapter = adapter_for(page, monkeypatch)
 
     result = asyncio.run(adapter.open_url(APPLY_URL))
 
-    assert browser.requested_urls == [FRONT_DOOR, APPLY_URL]
+    assert page.requested_urls == [FRONT_DOOR, APPLY_URL]
     assert result.payload["warmed_up"] is True
 
 
 def test_the_apply_page_is_still_what_the_result_describes(monkeypatch: pytest.MonkeyPatch) -> None:
     """The warm-up is a detour, and a caller reading the payload must not see it."""
-    adapter = adapter_for(FakeBrowser(), monkeypatch)
+    adapter = adapter_for(FakePage(), monkeypatch)
 
     result = asyncio.run(adapter.open_url(APPLY_URL))
 
@@ -199,25 +183,25 @@ def test_a_site_is_warmed_once_however_many_pages_are_opened_there(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """A run opens the posting, the form, then the posting again."""
-    browser = FakeBrowser()
-    adapter = adapter_for(browser, monkeypatch)
+    page = FakePage()
+    adapter = adapter_for(page, monkeypatch)
 
     asyncio.run(adapter.open_url(APPLY_URL))
     asyncio.run(adapter.open_url("https://boards.greenhouse.io/acme/jobs/4155832007/application"))
     asyncio.run(adapter.open_url(APPLY_URL))
 
-    assert browser.requested_urls.count(FRONT_DOOR) == 1
+    assert page.requested_urls.count(FRONT_DOOR) == 1
 
 
 def test_a_new_site_mid_run_is_warmed_too(monkeypatch: pytest.MonkeyPatch) -> None:
     """Portals hand off between origins, and the next one has never seen this profile."""
-    browser = FakeBrowser()
-    adapter = adapter_for(browser, monkeypatch)
+    page = FakePage()
+    adapter = adapter_for(page, monkeypatch)
 
     asyncio.run(adapter.open_url(APPLY_URL))
     asyncio.run(adapter.open_url("https://acme.wd5.myworkdayjobs.com/en-US/External/job/x"))
 
-    assert browser.requested_urls[-2:] == [
+    assert page.requested_urls[-2:] == [
         "https://acme.wd5.myworkdayjobs.com/",
         "https://acme.wd5.myworkdayjobs.com/en-US/External/job/x",
     ]
@@ -227,8 +211,8 @@ def test_a_front_door_that_will_not_load_does_not_cost_the_navigation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """This is what makes the change safe: the run ends up where it would have been."""
-    browser = FakeBrowser(broken=FRONT_DOOR)
-    adapter = adapter_for(browser, monkeypatch)
+    page = FakePage(broken=FRONT_DOOR)
+    adapter = adapter_for(page, monkeypatch)
 
     result = asyncio.run(adapter.open_url(APPLY_URL))
 
@@ -241,33 +225,20 @@ def test_a_broken_front_door_is_not_tried_again_on_every_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """One failed navigation for the run, not one per page opened on the site."""
-    browser = FakeBrowser(broken=FRONT_DOOR)
-    adapter = adapter_for(browser, monkeypatch)
+    page = FakePage(broken=FRONT_DOOR)
+    adapter = adapter_for(page, monkeypatch)
 
     asyncio.run(adapter.open_url(APPLY_URL))
     asyncio.run(adapter.open_url("https://boards.greenhouse.io/acme/jobs/9"))
 
-    assert browser.requested_urls.count(FRONT_DOOR) == 1
-
-
-def test_the_front_door_context_is_not_carried_onto_the_apply_page(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Two documents, two navigations, and no cached world may outlive either."""
-    adapter = adapter_for(FakeBrowser(), monkeypatch)
-    worlds = CountingWorlds()
-    adapter._worlds = worlds  # noqa: SLF001 - unit wiring test
-
-    asyncio.run(adapter.open_url(APPLY_URL))
-
-    assert worlds.forgotten == 2
+    assert page.requested_urls.count(FRONT_DOOR) == 1
 
 
 def test_a_launch_that_never_happened_is_still_refused(monkeypatch: pytest.MonkeyPatch) -> None:
     """The warm-up must not be the thing that reaches for a browser that is not there."""
-    monkeypatch.setattr(nodriver_adapter_module, "dwell_seconds", lambda: 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "dwell_seconds", lambda: 0.0)
 
-    result = asyncio.run(NodriverBrowserAdapter().open_url(APPLY_URL))
+    result = asyncio.run(PlaywrightBrowserAdapter().open_url(APPLY_URL))
 
     assert result.ok is False
-    assert "not launched" in result.message
+    assert "not available" in result.message

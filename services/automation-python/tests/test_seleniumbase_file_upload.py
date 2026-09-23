@@ -1,9 +1,9 @@
 """SeleniumBase must still upload into a dropzone's hidden file input (audit row 15).
 
-Playwright and nodriver set files through a driver API that ignores visibility, so
-the discovery fix was enough for them. Selenium's ``send_keys`` refuses an element
+Playwright sets files through a driver API that ignores visibility, so the
+discovery fix was enough for it. Selenium's ``send_keys`` refuses an element
 it considers non-interactable, and SeleniumBase is a live fallback for ATS portals
-(``adapter_factory.py`` walks playwright then nodriver then seleniumbase). Without
+(``adapter_factory.py`` walks playwright then seleniumbase). Without
 the reveal, the run reaches the submit gate reporting a filled application whose
 resume never attached.
 

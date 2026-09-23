@@ -37,7 +37,7 @@ import pytest
 from applyocalypse_automation.browser.adapter import BrowserField
 from applyocalypse_automation.browser.chrome_discovery import discover_chrome_executable
 from applyocalypse_automation.browser.html_replay import analyze_portal_html_fixture
-from applyocalypse_automation.browser.nodriver_adapter import NodriverBrowserAdapter
+from applyocalypse_automation.browser.playwright_adapter import PlaywrightBrowserAdapter
 
 pytestmark = pytest.mark.browser
 
@@ -186,7 +186,7 @@ class _BrowserRun:
 
 
 async def _drive(url: str, user_data_dir: Path) -> _BrowserRun:
-    adapter = NodriverBrowserAdapter()
+    adapter = PlaywrightBrowserAdapter()
     launched = await adapter.launch(run_id="fixture-parity", user_data_dir=user_data_dir)
     if not launched.ok:
         pytest.skip(f"no browser available: {launched.message}")
@@ -254,8 +254,8 @@ def browser_run() -> Iterator[_BrowserRun]:
         pytest.skip("no Chrome installation was found")
     with _serve() as url, tempfile.TemporaryDirectory(prefix="applyo-parity-") as profile_dir:
         loop = asyncio.new_event_loop()
-        # nodriver reaches for the current event loop rather than the running one,
-        # so this has to be installed the way asyncio.run installs it.
+        # Installed the way asyncio.run installs it, so the driver sees a current
+        # loop.
         asyncio.set_event_loop(loop)
         try:
             yield loop.run_until_complete(_drive(url, Path(profile_dir)))

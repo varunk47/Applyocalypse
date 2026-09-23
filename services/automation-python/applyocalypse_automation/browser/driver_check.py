@@ -23,8 +23,6 @@ from pathlib import Path
 
 # adapter name -> (module, attribute the adapter binds, is it in the automatic chain)
 _DRIVERS: dict[str, tuple[str, str | None, bool]] = {
-    # nodriver_adapter.py: ``import nodriver as uc``
-    "nodriver": ("nodriver", None, True),
     # seleniumbase_adapter.py: ``from seleniumbase import SB``
     "seleniumbase": ("seleniumbase", "SB", True),
     # playwright_adapter.py: ``from patchright.async_api import async_playwright``.

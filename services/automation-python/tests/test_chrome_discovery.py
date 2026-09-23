@@ -5,6 +5,7 @@ import pytest
 from applyocalypse_automation.browser.chrome_discovery import (
     STABLE_CHANNEL_RANK,
     channel_rank,
+    chrome_candidates,
     discover_chrome_executable,
     preferred_chrome_executable,
 )
@@ -16,6 +17,15 @@ CANARY = r"C:\Users\varun\AppData\Local\Google\Chrome SxS\Application\chrome.exe
 FOR_TESTING = r"C:\chrome-for-testing\chrome.exe"
 LINUX_STABLE = "/usr/bin/google-chrome-stable"
 
+WINDOWS_ENV = {
+    "LOCALAPPDATA": r"C:\Users\varun\AppData\Local",
+    "PROGRAMFILES": r"C:\Program Files",
+    "PROGRAMFILES(X86)": r"C:\Program Files (x86)",
+}
+MAC_STABLE = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+MAC_CANARY = "/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary"
+MAC_PER_USER = "/Users/varun/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"
+
 
 @pytest.mark.parametrize(
     ("path", "expected_rank"),
@@ -23,10 +33,12 @@ LINUX_STABLE = "/usr/bin/google-chrome-stable"
         (STABLE_PER_USER, STABLE_CHANNEL_RANK),
         (STABLE_MACHINE_WIDE, STABLE_CHANNEL_RANK),
         (LINUX_STABLE, STABLE_CHANNEL_RANK),
+        (MAC_STABLE, STABLE_CHANNEL_RANK),
         (BETA, 1),
         (r"C:\Program Files\Google\Chrome Dev\Application\chrome.exe", 2),
         (r"C:\Program Files\Google\Chrome Canary\Application\chrome.exe", 3),
         (CANARY, 3),
+        (MAC_CANARY, 3),
         (FOR_TESTING, 4),
         ("/usr/bin/chromium-browser", 5),
     ],
@@ -40,7 +52,7 @@ def test_the_users_real_chrome_wins_even_when_its_path_is_longer() -> None:
 
     A per-user Chrome install sits under AppData and a machine-wide Chrome Beta
     sits under Program Files, so the stable binary has the longer path. nodriver
-    breaks that tie with min(rv, key=len) and therefore drives Beta.
+    broke that tie with min(rv, key=len) and therefore drove Beta.
     """
     assert len(STABLE_PER_USER) > len(BETA), "the premise of the bug"
 
@@ -66,39 +78,63 @@ def test_no_installed_browser_is_not_an_error() -> None:
     assert preferred_chrome_executable([]) is None
 
 
-def test_discovery_falls_back_to_nodriver_rather_than_failing_to_launch() -> None:
-    """A driver upgrade that moves or breaks the helper must not stop a run."""
-    config = pytest.importorskip("nodriver.core.config")
-
-    def _raise(**_kwargs: object) -> list[str]:
-        raise FileNotFoundError("no chrome installed")
-
-    original = config.find_chrome_executable
-    config.find_chrome_executable = _raise
-    try:
-        assert discover_chrome_executable() is None
-    finally:
-        config.find_chrome_executable = original
+def _discover(platform: str, installed: set[str], on_path: dict[str, str] | None = None) -> str | None:
+    return discover_chrome_executable(
+        platform=platform,
+        env=WINDOWS_ENV if platform == "win32" else {},
+        home="/Users/varun",
+        exists=installed.__contains__,
+        which=(on_path or {}).get,
+    )
 
 
-def test_discovery_accepts_a_single_path_as_well_as_a_list() -> None:
-    """find_chrome_executable returns a bare string unless asked for all of them."""
-    config = pytest.importorskip("nodriver.core.config")
+def test_windows_looks_in_the_per_user_and_machine_wide_install_roots() -> None:
+    candidates = chrome_candidates("win32", WINDOWS_ENV, "unused")
 
-    original = config.find_chrome_executable
-    config.find_chrome_executable = lambda **_kwargs: STABLE_MACHINE_WIDE
-    try:
-        assert discover_chrome_executable() == STABLE_MACHINE_WIDE
-    finally:
-        config.find_chrome_executable = original
+    assert STABLE_PER_USER in candidates
+    assert STABLE_MACHINE_WIDE in candidates
+    assert BETA in candidates
+    assert CANARY in candidates
 
 
-def test_discovery_picks_stable_out_of_what_nodriver_enumerates() -> None:
-    config = pytest.importorskip("nodriver.core.config")
+def test_windows_picks_stable_over_a_shorter_beta_path() -> None:
+    assert _discover("win32", {BETA, STABLE_PER_USER}) == STABLE_PER_USER
 
-    original = config.find_chrome_executable
-    config.find_chrome_executable = lambda **_kwargs: [BETA, STABLE_PER_USER, CANARY]
-    try:
-        assert discover_chrome_executable() == STABLE_PER_USER
-    finally:
-        config.find_chrome_executable = original
+
+def test_windows_skips_roots_the_environment_does_not_define() -> None:
+    candidates = chrome_candidates("win32", {"PROGRAMFILES": r"C:\Program Files"}, "unused")
+
+    assert candidates
+    assert all(candidate.startswith("C:\\Program Files\\") for candidate in candidates)
+
+
+def test_macos_looks_inside_the_app_bundles() -> None:
+    candidates = chrome_candidates("darwin", {}, "/Users/varun")
+
+    assert MAC_STABLE in candidates
+    assert MAC_CANARY in candidates
+    assert MAC_PER_USER in candidates
+
+
+@pytest.mark.parametrize(
+    ("installed", "expected"),
+    [
+        ({MAC_CANARY, MAC_STABLE}, MAC_STABLE),
+        ({MAC_CANARY}, MAC_CANARY),
+        ({MAC_PER_USER}, MAC_PER_USER),
+    ],
+)
+def test_macos_picks_the_most_ordinary_installed_channel(installed: set[str], expected: str) -> None:
+    assert _discover("darwin", installed) == expected
+
+
+def test_linux_asks_path() -> None:
+    on_path = {"chromium": "/usr/bin/chromium", "google-chrome-stable": LINUX_STABLE}
+
+    assert _discover("linux", set(), on_path) == LINUX_STABLE
+
+
+@pytest.mark.parametrize("platform", ["win32", "darwin", "linux"])
+def test_nothing_installed_leaves_the_choice_to_the_launch(platform: str) -> None:
+    """None makes the adapter launch by channel name instead of by path."""
+    assert _discover(platform, set()) is None
