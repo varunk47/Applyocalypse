@@ -80,11 +80,11 @@ that drives the browser and talks back over structured JSON events.
   `APPLYO_PYTHON`.
 - **electron-vite**: keep `"electron"` (and `"better-sqlite3"`) in
   `rollupOptions.external` in `apps/desktop/electron.vite.config.ts`.
-- **`pnpm verify` audit step**: `pnpm audit --audit-level high` currently flags a
-  transitive **esbuild** advisory via the dev toolchain (`tsx`, `vitest > vite`),
-  so the audit step is non-zero pending an esbuild/tsx bump. The functional gates
-  (typecheck, test, test:python) are green; don't mistake the audit failure for a
-  code regression.
+- **`pnpm verify` audit step**: `pnpm audit --audit-level high` is clean and
+  blocking in CI. Transitive advisories are fixed with version-ranged entries in
+  root `pnpm.overrides` (e.g. `"undici@<6.27.0": "^6.27.0"`) so only the
+  vulnerable range moves. Python advisories get a pin in `requirements.in`, then
+  a targeted `pip-compile -P pkg`, never a full relock.
 
 ## Configuration
 
