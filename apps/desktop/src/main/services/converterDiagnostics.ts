@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { homedir } from "node:os";
+import { join, posix } from "node:path";
 
 export interface ConverterStatus {
   available: boolean;
@@ -24,6 +25,11 @@ const WIN_PROGRAM_BASES = (): string[] => [
   process.env["ProgramFiles(x86)"] ?? "C:\\Program Files (x86)"
 ];
 
+// A macOS app is a bundle dragged into /Applications (or ~/Applications), and
+// neither LibreOffice nor Word puts anything on PATH. posix.join, because these
+// are macOS paths whatever machine the tests happen to run on.
+const MAC_APPLICATION_FOLDERS = (): string[] => ["/Applications", posix.join(homedir(), "Applications")];
+
 const findOnPath = (binaryName: string): string | null => {
   const finder = process.platform === "win32" ? "where" : "which";
   const result = spawnSync(finder, [binaryName], { encoding: "utf8", timeout: 4000 });
@@ -40,10 +46,20 @@ const findLibreOffice = (): string | null => {
       if (existsSync(candidate)) return candidate;
     }
   }
+  if (process.platform === "darwin") {
+    for (const folder of MAC_APPLICATION_FOLDERS()) {
+      const candidate = posix.join(folder, "LibreOffice.app", "Contents", "MacOS", "soffice");
+      if (existsSync(candidate)) return candidate;
+    }
+  }
   return findOnPath("soffice");
 };
 
 const findWord = (): string | null => {
+  if (process.platform === "darwin") {
+    const candidate = posix.join("/Applications", "Microsoft Word.app");
+    return existsSync(candidate) ? candidate : null;
+  }
   if (process.platform !== "win32") return null;
   const relPaths = [
     "Microsoft Office\\root\\Office16\\WINWORD.EXE",

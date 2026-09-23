@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { QueueRepository, SettingsRepository, closeApplyocalypseDatabase } from "@applyocalypse/db";
 import { createAppDatabase } from "./db/createAppDatabase";
 import { registerIpcHandlers } from "./ipc/registerIpc";
+import { withMacToolFolders } from "./macToolPath";
 import { LocalQueueScheduler } from "./scheduler/localQueueScheduler";
 import { registerArtifactProtocolHandler, registerArtifactScheme } from "./services/artifactProtocol";
 import { GeneratedFileCleanupService } from "./services/generatedFileCleanupService";
@@ -21,6 +22,10 @@ let cleanupTimer: NodeJS.Timeout | null = null;
 const getWindows = (): BrowserWindow[] => BrowserWindow.getAllWindows();
 
 registerArtifactScheme();
+
+if (process.platform === "darwin") {
+  process.env.PATH = withMacToolFolders(process.platform, process.env.PATH);
+}
 
 if (process.env.APPLYO_TEST_USER_DATA_DIR) {
   app.setPath("userData", process.env.APPLYO_TEST_USER_DATA_DIR);

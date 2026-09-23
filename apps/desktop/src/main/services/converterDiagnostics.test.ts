@@ -98,4 +98,28 @@ describe("checkConverters", () => {
       expect(String(call[0]).toUpperCase()).not.toContain("WINWORD");
     }
   });
+
+  it("finds LibreOffice inside the macOS app bundle, which is never on PATH", () => {
+    setPlatform("darwin");
+    vi.mocked(existsSync).mockImplementation(
+      (candidate) => String(candidate) === "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+    );
+    vi.mocked(spawnSync).mockReturnValue(spawnFail() as never);
+
+    const result = checkConverters();
+
+    expect(result.libreoffice.available).toBe(true);
+    expect(result.libreoffice.path).toBe("/Applications/LibreOffice.app/Contents/MacOS/soffice");
+  });
+
+  it("finds Word as the macOS app bundle", () => {
+    setPlatform("darwin");
+    vi.mocked(existsSync).mockImplementation((candidate) => String(candidate) === "/Applications/Microsoft Word.app");
+    vi.mocked(spawnSync).mockReturnValue(spawnFail() as never);
+
+    const result = checkConverters();
+
+    expect(result.word.available).toBe(true);
+    expect(result.word.path).toBe("/Applications/Microsoft Word.app");
+  });
 });

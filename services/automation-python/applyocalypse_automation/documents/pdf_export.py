@@ -28,15 +28,23 @@ def _collision_safe_pdf_path(docx_path: Path, output_dir: Path) -> Path:
 def _find_soffice() -> str | None:
     """Locate the LibreOffice binary.
 
-    PATH is checked first. On Windows the installer does not put soffice.exe on
-    PATH, so the standard install locations are checked too. Keep these in sync
-    with findLibreOffice() in apps/desktop/src/main/services/converterDiagnostics.ts:
-    if the diagnostic finds an install that this function misses, Settings reports
-    the converter as present while every export silently falls through it.
+    PATH is checked first. Neither the Windows installer nor the macOS app bundle
+    puts soffice on PATH, so the standard install locations are checked too. Keep
+    these in sync with findLibreOffice() in
+    apps/desktop/src/main/services/converterDiagnostics.ts: if the diagnostic finds
+    an install that this function misses, Settings reports the converter as present
+    while every export silently falls through it.
     """
     on_path = shutil.which("soffice") or shutil.which("libreoffice")
     if on_path:
         return on_path
+
+    if sys.platform == "darwin":
+        for applications in (Path("/Applications"), Path.home() / "Applications"):
+            candidate = applications / "LibreOffice.app" / "Contents" / "MacOS" / "soffice"
+            if candidate.exists():
+                return str(candidate)
+        return None
 
     if sys.platform != "win32":
         return None

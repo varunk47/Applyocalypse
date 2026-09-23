@@ -64,6 +64,41 @@ def test_find_soffice_skips_windows_paths_on_posix(tmp_path: Path, monkeypatch: 
     assert pdf_export._find_soffice() is None
 
 
+MAC_SOFFICE = "/Applications/LibreOffice.app/Contents/MacOS/soffice"
+
+
+def test_find_soffice_looks_inside_the_mac_app_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The macOS app is a bundle dragged into /Applications, and it never touches PATH."""
+    monkeypatch.setattr(pdf_export.sys, "platform", "darwin")
+    monkeypatch.setattr(pdf_export.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pdf_export.Path, "exists", lambda self: self.as_posix() == MAC_SOFFICE)
+
+    assert Path(pdf_export._find_soffice() or "").as_posix() == MAC_SOFFICE
+
+
+def test_find_soffice_finds_a_per_user_mac_install(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    installed = tmp_path / "Applications" / "LibreOffice.app" / "Contents" / "MacOS" / "soffice"
+    installed.parent.mkdir(parents=True)
+    installed.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(pdf_export.sys, "platform", "darwin")
+    monkeypatch.setattr(pdf_export.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pdf_export.Path, "home", lambda: tmp_path)
+
+    assert pdf_export._find_soffice() == str(installed)
+
+
+def test_find_soffice_returns_none_on_a_mac_without_libreoffice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(pdf_export.sys, "platform", "darwin")
+    monkeypatch.setattr(pdf_export.shutil, "which", lambda name: None)
+    monkeypatch.setattr(pdf_export.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(pdf_export.Path, "exists", lambda self: False)
+
+    assert pdf_export._find_soffice() is None
+
+
 def test_export_reports_missing_converters_when_nothing_is_installed(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
