@@ -70,6 +70,19 @@ wrong. Entries say what happened, not who to blame.
   moved about 80 packages. *Rule:* add the floor to `requirements.in`, then
   `pip-compile -P pkg` only for the affected subtree.
 
+- **A `sed` swap of `pass` for a new call also rewrote an unrelated `pass`** in
+  another `except` block of `playwright_adapter.py`. *Rule:* never sed-replace a
+  generic line; use the Edit tool with enough context to be unique, then read
+  the whole diff.
+- **The Word PDF export shipped with a test that only passed on machines without
+  Word.** "Nothing on PATH" stopped meaning "no exporter" once Word was found by
+  install path, and CI has no Word, so only the local suite caught it. *Rule:*
+  when adding a new way to find a tool, grep the tests that stub the old way.
+- **The first fix for the Workday navigation failure retried the goto**, and the
+  retry was interrupted by the same late error page. *Rule:* find what is
+  interrupting before adding a retry; here it was Chrome committing its error
+  page after goto had already raised.
+
 ## Tooling (Windows, this harness)
 
 - **Heredocs broke on quoting, several times**, including Python heredocs whose
@@ -96,3 +109,7 @@ wrong. Entries say what happened, not who to blame.
 - **Ran vitest from `apps/desktop`**, where it runs nothing and prints
   "PASS (0) FAIL (0)", which reads like a pass. *Rule:* run vitest from the repo
   root, and treat a zero test count as a failure.
+- **A background "run the Python suite" job chained `rtk grep ... && pnpm
+  test:python`.** The grep failed, the suite never ran, and the job was read as
+  "still running" for a long time. *Rule:* never gate a test run on a lookup;
+  run the suite on its own and check its summary line.
