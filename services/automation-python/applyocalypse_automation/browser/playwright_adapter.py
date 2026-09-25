@@ -33,7 +33,7 @@ from .field_detection import (
 from .field_write import verify_or_repair_text_write
 from .human_scroll import dispatch_wheel_scroll, parse_scroll_anchor
 from .human_typing import clear_element, type_into_element
-from .navigation_warmup import WARM_UP_TIMEOUT_S, dwell_seconds, origin_of, warm_up_target
+from .navigation_warmup import ERROR_PAGE_SETTLE_S, WARM_UP_TIMEOUT_S, dwell_seconds, origin_of, warm_up_target
 from .page_readiness import (
     PAGE_TEXT_POLL_INTERVAL_S,
     PAGE_TEXT_TIMEOUT_S,
@@ -235,8 +235,23 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             )
             await asyncio.sleep(dwell_seconds())
         except Exception:
+            await self._settle_after_failed_warm_up()
             return False
         return True
+
+    async def _settle_after_failed_warm_up(self) -> None:
+        """Let Chrome finish failing before the real navigation starts.
+
+        A front door that answers with an error status (Workday's bare host does)
+        makes goto raise first and Chrome commit ``chrome-error://`` just after.
+        Navigating in that gap gets the apply page cut off by the error page.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + ERROR_PAGE_SETTLE_S
+        while self._page is not None and not str(self._page.url).startswith("chrome-error:"):
+            if loop.time() >= deadline:
+                return
+            await asyncio.sleep(0.05)
 
     async def _probe_visible_text_length(self) -> int:
         if self._page is None:

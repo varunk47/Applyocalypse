@@ -1057,6 +1057,22 @@ def _ambiguous_selectors(raw_fields: list[Any]) -> frozenset[tuple[str, str]]:
     return frozenset(key for key, count in counts.items() if count > 1)
 
 
+# Inputs a portal plants for bots and tells people to leave alone. Workday's
+# create-account page has one ("Enter website. This input is for robots only, do
+# not enter if you're human."). Anything typed into it marks the session as a bot,
+# so such a field is dropped here, the one place every adapter's fields pass
+# through, rather than surfaced for review like other doubtful fields.
+_HONEYPOT_LABEL_RE = re.compile(
+    r"for robots only|if you(?:'|’| a)re (?:a )?human|leave this (?:field|input) (?:blank|empty)|"
+    r"do not (?:fill|enter|type)(?: in)? this (?:field|input)|honeypot",
+    re.IGNORECASE,
+)
+
+
+def is_honeypot_label(label: str) -> bool:
+    return bool(_HONEYPOT_LABEL_RE.search(label))
+
+
 def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) -> list[BrowserField]:
     if not isinstance(raw_fields, list):
         return []
@@ -1066,6 +1082,8 @@ def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) 
         if not isinstance(raw, dict):
             continue
         label = str(raw.get("label") or "").strip()
+        if is_honeypot_label(label):
+            continue
         label_source = str(raw.get("label_source") or "").strip()
         selector = raw.get("selector")
         # Kept and surfaced, never dropped, on the same reasoning as an unlabelled
