@@ -713,13 +713,13 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             last_result = result
         return last_result or BrowserStepResult(False, failure_message)
 
-    async def click_by_text(self, labels: list[str]) -> BrowserStepResult:
+    async def click_by_text(self, labels: list[str], *, after_selector: str | None = None) -> BrowserStepResult:
         if self._page is None:
             return BrowserStepResult(False, "page is not available")
         baseline = await self._probe_page_fingerprint()
         result = await self._click_across_frames(
-            build_click_by_text_script(labels, locate_only=True),
-            build_click_by_text_script(labels),
+            build_click_by_text_script(labels, locate_only=True, after_selector=after_selector),
+            build_click_by_text_script(labels, after_selector=after_selector),
             parse_click_by_text_result,
             "portal action click failed",
         )

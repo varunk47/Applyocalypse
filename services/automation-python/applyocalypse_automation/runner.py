@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
+from .account_wall import try_account_wall
 from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, BrowserStepResult
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.field_detection import is_secret_field
@@ -612,7 +613,8 @@ def gmail_inbox_reader_configured() -> bool:
 EmailVerificationOutcome = Literal["NAVIGATED", "CANCELLED", "SKIPPED"]
 
 # Blockers the inbox can answer, either with a code or with a confirmation link.
-# LOGIN is excluded: that is a password prompt, which is the user's alone.
+# LOGIN is excluded: the saved application login answers it (account_wall), and a
+# code the portal emails after that surfaces as an OTP blocker of its own.
 INBOX_RESOLVABLE_BLOCKER_TYPES = frozenset({"OTP", "MFA"})
 
 
@@ -641,7 +643,9 @@ async def _read_gmail_verification(run_id: str, *, context: str) -> GmailOtpResu
         ui_state={"current_step": "otp"},
         payload={"provider": "gmail"},
     ).emit()
-    result = await asyncio.to_thread(read_gmail_otp_from_env, accept="code_or_link")
+    # The code this run is waiting for was sent moments ago; five minutes of slack
+    # covers clock skew and a slow portal without reaching an earlier sign-up's code.
+    result = await asyncio.to_thread(read_gmail_otp_from_env, accept="code_or_link", received_after=time.time() - 300)
     if result.ok and (result.code or result.links):
         return result
     WorkerEvent(
@@ -805,6 +809,11 @@ async def pause_for_blockers(adapter: object, work_dir: Path, run_id: str, block
     active_blockers = _halting_blockers(blockers)
     pause_cycles = 0
     while active_blockers:
+        if any(blocker.blocker_type == "LOGIN" for blocker in active_blockers):
+            # Once per run, whatever the outcome; a second wall falls to the user.
+            if await try_account_wall(adapter, run_id, context=context):
+                active_blockers = _halting_blockers(await adapter.detect_blockers())  # type: ignore[attr-defined]
+                continue
         blocker_payload = blocker_payload_from(active_blockers)
         primary_blocker = active_blockers[0]
         resolved_from_inbox = False
@@ -1302,6 +1311,11 @@ async def execute_portal_entry_action(
         return BrowserStepResult(False, "no portal entry labels configured", {"attempted_labels": []})
     click_by_text = adapter.click_by_text
     result = await click_by_text(labels)
+    followup: dict[str, object] = {}
+    if result.ok and workflow.entry_followup_labels:
+        # No match is fine: the chooser only appears for some jobs and tenants.
+        chosen = await click_by_text(list(workflow.entry_followup_labels))
+        followup = {"followup_clicked_label": chosen.payload.get("clicked_label") if chosen.ok else None}
     WorkerEvent(
         event_type=EventType.PORTAL_ACTION_APPLIED,
         run_id=run_id,
@@ -1325,6 +1339,7 @@ async def execute_portal_entry_action(
             "context": context,
             "attempted_labels": labels,
             **result.payload,
+            **followup,
         },
     ).emit()
     return result

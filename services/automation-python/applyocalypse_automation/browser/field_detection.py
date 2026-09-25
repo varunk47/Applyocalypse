@@ -1908,8 +1908,15 @@ def _press_or_locate_js(action: str, match: str, extra_fields: str, *, locate_on
   }});"""
 
 
-def build_click_by_text_script(labels: list[str], *, locate_only: bool = False) -> str:
+def build_click_by_text_script(labels: list[str], *, locate_only: bool = False, after_selector: str | None = None) -> str:
+    """Click the one safe control carrying a requested label.
+
+    ``after_selector`` narrows the search to controls that come after that element
+    in document order and takes the first of them, which is how a form's own
+    button wins over a same-named one in the page header.
+    """
     labels_json = json.dumps([label for label in labels if label.strip()])
+    after_json = json.dumps(after_selector)
     tail = _press_or_locate_js(
         'click_by_text',
         'exact',
@@ -1965,6 +1972,27 @@ def build_click_by_text_script(labels: list[str], *, locate_only: bool = False) 
   }}
   const exactMatches = matches.filter((entry) => requested.includes(entry.normalized));
   const preferredMatches = exactMatches.length > 0 ? exactMatches : matches;
+  const afterSelector = {after_json};
+  if (afterSelector) {{
+    const anchor = document.querySelector(afterSelector);
+    const ordered = Array.from(document.querySelectorAll('button, a, input, select, textarea, [role="button"]'));
+    const anchorIndex = anchor ? ordered.indexOf(anchor) : -1;
+    const following = anchorIndex < 0
+      ? []
+      : preferredMatches
+        .map((entry) => ({{ entry, index: ordered.indexOf(entry.element) }}))
+        .filter((item) => item.index > anchorIndex)
+        .sort((a, b) => a.index - b.index);
+    if (following.length === 0) {{
+      return JSON.stringify({{
+        ok: false,
+        action: 'click_by_text',
+        message: 'no matching safe portal action was found after the form field',
+        candidate_count: candidates.length
+      }});
+    }}
+    const exact = following[0].entry;{tail}
+  }}
   const uniqueTargets = new Set(preferredMatches.map((entry) => `${{entry.normalized}}|${{entry.element.tagName.toLowerCase()}}|${{entry.element instanceof HTMLAnchorElement ? entry.element.href : ''}}`));
   if (uniqueTargets.size > 1) {{
     return JSON.stringify({{

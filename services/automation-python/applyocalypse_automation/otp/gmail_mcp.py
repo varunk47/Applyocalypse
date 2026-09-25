@@ -221,11 +221,20 @@ class GmailApiOtpExtractor:
         timeout_seconds: float = 45,
         poll_seconds: float = 5,
         accept: OtpAccept = "code",
+        received_after: float | None = None,
     ) -> None:
         self.token_json_path = token_json_path
         self.timeout_seconds = timeout_seconds
         self.poll_seconds = poll_seconds
         self.accept = accept
+        self.received_after = received_after
+
+    def search_query(self) -> str:
+        # Without a cutoff the newest match can be the code from an earlier sign-up,
+        # read before this one's email has even arrived.
+        if self.received_after is None:
+            return _GMAIL_OAUTH_SEARCH_QUERY
+        return f"{_GMAIL_OAUTH_SEARCH_QUERY} after:{int(self.received_after)}"
 
     def wait_for_latest_code(self) -> GmailOtpResult:
         try:
@@ -275,7 +284,7 @@ class GmailApiOtpExtractor:
             result = (
                 service.users()
                 .messages()
-                .list(userId="me", q=_GMAIL_OAUTH_SEARCH_QUERY, maxResults=10)
+                .list(userId="me", q=self.search_query(), maxResults=10)
                 .execute()
             )
             messages = result.get("messages", [])
@@ -321,7 +330,7 @@ class GmailApiOtpExtractor:
             )
 
 
-def read_gmail_otp_from_env(*, accept: OtpAccept = "code") -> GmailOtpResult:
+def read_gmail_otp_from_env(*, accept: OtpAccept = "code", received_after: float | None = None) -> GmailOtpResult:
     # OAuth path (preferred when token file is available)
     token_path = os.getenv("APPLYO_GMAIL_OAUTH_TOKEN_PATH", "")
     if token_path:
@@ -332,6 +341,7 @@ def read_gmail_otp_from_env(*, accept: OtpAccept = "code") -> GmailOtpResult:
             timeout_seconds=timeout,
             poll_seconds=poll,
             accept=accept,
+            received_after=received_after,
         ).wait_for_latest_code()
 
     # IMAP fallback (legacy app password flow)
