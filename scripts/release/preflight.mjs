@@ -30,7 +30,9 @@ const hasSigningConfig = () => {
     return Boolean(process.env.WINDOWS_SIGNTOOL_PATH && process.env.WINDOWS_CERT_SHA1);
   }
   if (process.platform === "darwin") {
-    return Boolean(process.env.APPLE_CODESIGN_IDENTITY);
+    // CSC_LINK is the Developer ID electron-builder signs the whole bundle with,
+    // the worker inside it included.
+    return Boolean(process.env.APPLE_CODESIGN_IDENTITY || process.env.CSC_LINK);
   }
   return true;
 };
@@ -40,7 +42,7 @@ const checks = [
   {
     id: "worker_signing_config",
     ok: hasSigningConfig(),
-    blocker: process.platform === "win32" ? "WINDOWS_SIGNTOOL_PATH_or_WINDOWS_CERT_SHA1_missing" : "APPLE_CODESIGN_IDENTITY_missing"
+    blocker: process.platform === "win32" ? "WINDOWS_SIGNTOOL_PATH_or_WINDOWS_CERT_SHA1_missing" : "APPLE_CODESIGN_IDENTITY_or_CSC_LINK_missing"
   },
   { id: "release_readiness_doc", ok: existsSync(join(rootDir, "docs", "release-readiness.md")) },
   { id: "live_certification_targets_template", ok: existsSync(join(rootDir, "certification", "live-portal-targets.example.json")) },
