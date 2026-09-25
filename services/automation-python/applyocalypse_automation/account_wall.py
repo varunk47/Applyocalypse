@@ -17,15 +17,28 @@ import os
 import re
 from dataclasses import dataclass
 from typing import Literal
+from urllib.parse import urlparse
 
 from .browser.adapter import BrowserField
-from .browser.portal_workflows import workflow_for_url
 from .event_protocol import EventType, Severity, WorkerEvent
 from .field_resolution import normalize_field_label
 from .secret_env import get_secret
 
 ACCOUNT_CREATE_LABELS = ("Create Account", "Create an Account", "Register", "Sign Up")
 SIGN_IN_LABELS = ("Sign In", "Log In", "Login")
+
+# Hosts whose login is the user's own account rather than a portal account made
+# with the saved login: LinkedIn (the user's rule), and the identity providers a
+# redirect or SSO frame can put in front of a portal. Typing the portal password
+# there is a failed login at best and a locked account at worst.
+REFUSED_LOGIN_HOSTS = (
+    "linkedin.com",
+    "accounts.google.com",
+    "login.microsoftonline.com",
+    "login.live.com",
+    "appleid.apple.com",
+    "okta.com",
+)
 
 # Ticking "I agree to the terms" is part of creating the account. A marketing
 # opt-in on the same page is not, so anything about alerts or offers stays unticked.
@@ -78,7 +91,7 @@ async def try_account_wall(adapter: object, run_id: str, *, context: str) -> boo
     """
     email = os.getenv("APPLYO_APPLICATION_EMAIL", "").strip()
     password = get_secret("APPLYO_APPLICATION_PASSWORD")
-    if not email or not password or run_id in _ATTEMPTED_RUNS or not await _on_known_ats(adapter):
+    if not email or not password or run_id in _ATTEMPTED_RUNS or not await _on_portal(adapter):
         return False
     form = classify_account_form(await adapter.detect_fields())  # type: ignore[attr-defined]
     if form is None or not _fillable(form):
@@ -101,36 +114,32 @@ async def try_account_wall(adapter: object, run_id: str, *, context: str) -> boo
     return await _submit(adapter, run_id, form, email, password, SIGN_IN_LABELS, "SIGN_IN", context)
 
 
-async def _on_known_ats(adapter: object) -> bool:
-    """Only an ATS the app recognises gets the saved password.
-
-    A redirect can land on LinkedIn, Indeed or a Google sign-in, where the login
-    is the user's own account; typing the portal password there is a failed
-    login at best and a lockout at worst.
-    """
+async def _on_portal(adapter: object) -> bool:
+    """Any portal gets the saved login, recognised or not, unless it is a refused host."""
     try:
         page = await adapter.extract_visible_text()  # type: ignore[attr-defined]
     except Exception:
         return False
     url = str(page.payload.get("url") or "")
-    return bool(url) and workflow_for_url(url).workflow_kind == "ATS_DIRECT_FORM"
+    return bool(url) and not _refused_host(url)
+
+
+def _refused_host(url: str) -> bool:
+    host = (urlparse(url).hostname or "").lower()
+    return any(host == refused or host.endswith(f".{refused}") for refused in REFUSED_LOGIN_HOSTS)
 
 
 def _fillable(form: AccountForm) -> bool:
-    """Every field sits in the page or in an ATS frame, and the submit can be anchored.
+    """No field sits in a refused host's frame, and the submit can be anchored.
 
-    An SSO iframe (Okta, Azure AD, Google) on a genuine Workday page belongs to the
-    identity provider, so a field in a frame from any other host refuses the form.
-    Without a password selector the submit click cannot be pinned below the form
-    and could land on the page header's own Sign In.
+    An SSO iframe (Okta, Azure AD, Google) on a genuine portal page belongs to the
+    identity provider, not the portal. Without a password selector the submit
+    click cannot be pinned below the form and could land on the page header's
+    own Sign In.
     """
     fields = (*form.emails, *form.passwords, *form.consent)
-    in_ats = all(
-        not item.metadata.get("frame_url")
-        or workflow_for_url(str(item.metadata["frame_url"])).workflow_kind == "ATS_DIRECT_FORM"
-        for item in fields
-    )
-    return in_ats and bool(form.passwords[-1].selector)
+    in_portal = not any(item.metadata.get("frame_url") and _refused_host(str(item.metadata["frame_url"])) for item in fields)
+    return in_portal and bool(form.passwords[-1].selector)
 
 
 async def _submit(

@@ -231,18 +231,43 @@ def test_without_a_saved_login_the_wall_is_left_to_the_user(monkeypatch: pytest.
 @pytest.mark.parametrize(
     "url",
     [
-        "https://www.linkedin.com/login",
-        "https://accounts.google.com/v3/signin/identifier",
-        "https://secure.indeed.com/auth",
         "https://careers.example.com/login",
+        "https://jobs.acme-industries.io/candidate/register",
+        "https://secure.indeed.com/auth",
     ],
 )
-def test_the_saved_password_is_only_typed_into_a_known_ats(saved_login: None, url: str) -> None:
-    """A job board or identity provider login is the user's own account, not a portal account."""
+def test_an_unrecognised_portal_gets_the_saved_login_too(saved_login: None, url: str) -> None:
+    adapter = FakeAccountAdapter("sign_in", {("sign_in", "Sign In"): "form"}, url=url)
+
+    assert run_wall(adapter) is True
+    assert adapter.filled == [("#input-7", EMAIL), ("#input-8", PASSWORD)]
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.linkedin.com/login",
+        "https://linkedin.com/checkpoint/lg/login",
+        "https://accounts.google.com/v3/signin/identifier",
+        "https://login.microsoftonline.com/common/oauth2/authorize",
+        "https://login.live.com/login.srf",
+        "https://appleid.apple.com/auth/authorize",
+        "https://acme.okta.com/login/login.htm",
+        "",
+    ],
+)
+def test_linkedin_and_identity_providers_never_get_the_saved_password(saved_login: None, url: str) -> None:
+    """LinkedIn is the user's own account, and so is a Google, Microsoft, Apple or Okta sign-in."""
     adapter = FakeAccountAdapter("sign_in", {("sign_in", "Sign In"): "form"}, url=url)
 
     assert run_wall(adapter) is False
     assert adapter.filled == []
+
+
+def test_a_lookalike_host_is_not_mistaken_for_linkedin(saved_login: None) -> None:
+    adapter = FakeAccountAdapter("sign_in", {("sign_in", "Sign In"): "form"}, url="https://notlinkedin.com/login")
+
+    assert run_wall(adapter) is True
 
 
 def test_a_login_box_in_a_foreign_frame_never_gets_the_password(saved_login: None) -> None:
