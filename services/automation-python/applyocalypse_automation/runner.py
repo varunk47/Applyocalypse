@@ -38,6 +38,7 @@ from .field_resolution import (
     resolve_secret_reviewed_value,
 )
 from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
+from .preference_rules import with_job_context
 from .secret_env import apply_provider_secrets_to_env
 from .submission_receipt import (
     ReceiptAnswer,
@@ -2708,6 +2709,7 @@ def _main_impl() -> None:
     job_metadata: dict[str, object] = {}
     if args.job_metadata_file:
         job_metadata = json.loads(Path(args.job_metadata_file).read_text(encoding="utf-8"))
+    canonical_profile = with_job_context(canonical_profile, job_metadata)
 
     WorkerEvent(
         event_type=EventType.RUN_STARTED,

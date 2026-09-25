@@ -6,6 +6,7 @@ import { GmailOAuthService } from "../services/gmailOAuthService";
 import { getLatestCoverLetterText } from "../services/documentIngestionService";
 import {
   JobRepository,
+  PreferenceRuleRepository,
   ProfileRepository,
   ProviderRepository,
   RunRepository,
@@ -121,7 +122,8 @@ export class LocalQueueScheduler {
       const canonicalProfile = profileRepository.getCanonicalProfile(item.profileId);
       const profileJsonFile = canonicalProfile ? join(runWorkDir, "canonical-profile.json") : undefined;
       if (profileJsonFile && canonicalProfile) {
-        writeFileSync(profileJsonFile, JSON.stringify(canonicalProfile, null, 2), "utf8");
+        const preferenceRules = new PreferenceRuleRepository(this.db).workerRules(item.profileId);
+        writeFileSync(profileJsonFile, JSON.stringify({ ...canonicalProfile, preferenceRules }, null, 2), "utf8");
       }
       const jobTextFile = jobTarget.sourceKind === "TEXT" ? join(runWorkDir, "job-description.txt") : undefined;
       if (jobTextFile) {

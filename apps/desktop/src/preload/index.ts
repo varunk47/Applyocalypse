@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IpcChannels, IpcContracts, RendererEventSchemas } from "@applyocalypse/ipc-contracts";
+import type { PreferenceRuleDto } from "@applyocalypse/ipc-contracts";
 import type {
   ApplicationAnswer,
   ApplicationRun,
@@ -206,6 +207,19 @@ const api = {
         IpcContracts.chatList.channel,
         { limit, offset }
       )
+  },
+  preferenceRules: {
+    list: (profileId: string) =>
+      invoke<{ profileId: string }, { items: PreferenceRuleDto[] }>(IpcContracts.preferenceRulesList.channel, { profileId }),
+    upsert: (input: {
+      id?: string;
+      profileId: string;
+      question: string;
+      answer: string;
+      conditions?: PreferenceRuleDto["conditions"];
+      enabled?: boolean;
+    }) => invoke<typeof input, PreferenceRuleDto>(IpcContracts.preferenceRulesUpsert.channel, input),
+    delete: (id: string) => invoke<{ id: string }, { deleted: boolean }>(IpcContracts.preferenceRulesDelete.channel, { id })
   },
   gmail: {
     startOAuth: (input: { clientId: string; clientSecret: string }) =>

@@ -8,6 +8,7 @@ import { registerJobQueueHandlers } from "./handlers/jobQueueHandlers";
 import { registerRunHandlers } from "./handlers/runHandlers";
 import { registerRunQueryHandlers } from "./handlers/runQueryHandlers";
 import { registerChatHandlers } from "./handlers/chatHandlers";
+import { registerPreferenceRuleHandlers } from "./handlers/preferenceRuleHandlers";
 import { registerSystemHandlers } from "./handlers/systemHandlers";
 
 export type { RegisterIpcHandlersInput };
@@ -31,4 +32,5 @@ export const registerIpcHandlers = (input: RegisterIpcHandlersInput): void => {
   registerRunHandlers(ctx);
   registerRunQueryHandlers(ctx);
   registerChatHandlers(ctx);
+  registerPreferenceRuleHandlers(ctx);
 };

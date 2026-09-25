@@ -63,6 +63,22 @@ const contract = <Request extends z.ZodTypeAny, Response extends z.ZodTypeAny>(
   response: Response
 ): IpcContract<Request, Response> => ({ channel, request, response });
 
+const RuleConditionValueSchema = z.string().trim().min(1).max(200);
+const PreferenceRuleConditionsSchema = z
+  .object({ location: RuleConditionValueSchema.optional(), company: RuleConditionValueSchema.optional(), portal: RuleConditionValueSchema.optional() })
+  .strict();
+export const PreferenceRuleSchema = z.object({
+  id: IdSchema,
+  profileId: IdSchema,
+  question: z.string(),
+  answer: z.string(),
+  conditions: PreferenceRuleConditionsSchema,
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type PreferenceRuleDto = z.infer<typeof PreferenceRuleSchema>;
+
 const RunControlResponseSchema = z.object({ accepted: z.boolean(), message: z.string().optional() });
 const RendererAnswerUpdateStatusSchema = z.enum(["EDITED", "REJECTED"]);
 
@@ -113,6 +129,9 @@ export const IpcChannels = {
   foldersChooseOutputDir: "folders:choose-output-dir",
   chatAppendMessage: "chat:append-message",
   chatList: "chat:list",
+  preferenceRulesList: "preference-rules:list",
+  preferenceRulesUpsert: "preference-rules:upsert",
+  preferenceRulesDelete: "preference-rules:delete",
   gmailStartOAuth: "gmail:start-oauth",
   gmailGetOAuthStatus: "gmail:get-oauth-status",
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
@@ -377,6 +396,28 @@ export const IpcContracts = {
     IpcChannels.chatList,
     PaginationSchema,
     z.object({ items: z.array(ChatMessageSchema), total: z.number().int().nonnegative() })
+  ),
+  preferenceRulesList: contract(
+    IpcChannels.preferenceRulesList,
+    z.object({ profileId: IdSchema }).strict(),
+    z.object({ items: z.array(PreferenceRuleSchema) })
+  ),
+  preferenceRulesUpsert: contract(
+    IpcChannels.preferenceRulesUpsert,
+    z.object({
+      id: IdSchema.optional(),
+      profileId: IdSchema,
+      question: z.string().trim().min(1).max(500),
+      answer: z.string().trim().min(1).max(2000),
+      conditions: PreferenceRuleConditionsSchema.default({}),
+      enabled: z.boolean().default(true)
+    }).strict(),
+    PreferenceRuleSchema
+  ),
+  preferenceRulesDelete: contract(
+    IpcChannels.preferenceRulesDelete,
+    z.object({ id: IdSchema }).strict(),
+    z.object({ deleted: z.boolean() })
   ),
   gmailStartOAuth: contract(
     IpcChannels.gmailStartOAuth,
