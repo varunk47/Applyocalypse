@@ -7,6 +7,7 @@ import json
 import os
 import sys
 import time
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -1345,6 +1346,33 @@ async def execute_portal_entry_action(
     return result
 
 
+ENTRY_FIELDS_TIMEOUT_S = 10.0
+ENTRY_FIELDS_POLL_INTERVAL_S = 0.5
+
+
+async def detect_fields_after_entry(
+    adapter: object,
+    entry_ok: bool,
+    *,
+    timeout_s: float = ENTRY_FIELDS_TIMEOUT_S,
+    poll_interval_s: float = ENTRY_FIELDS_POLL_INTERVAL_S,
+    sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    clock: Callable[[], float] = time.monotonic,
+) -> list[BrowserField]:
+    """Fields on the page the entry click led to, waiting a bounded time for them to paint.
+
+    The click's own settle ends once the URL changes, but Workday then shows a
+    spinner for seconds before the account form appears. Read too early, the page
+    had no fields and no login wall, so the run went straight past the wall.
+    """
+    started = clock()
+    fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    while entry_ok and not fields and clock() - started < timeout_s:
+        await sleep(poll_interval_s)
+        fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    return fields
+
+
 @dataclass(frozen=True, slots=True)
 class PortalPageFingerprint:
     """Enough page identity to tell "we moved on" from "the click did nothing"."""
@@ -1780,7 +1808,7 @@ async def run_url_observation_flow(
     if await handle_runtime_control(work_dir, run_id, context="portal entry action"):
         await adapter.close()
         return UrlObservationResult(should_stop=True, job_text_file=job_text_file, scraped_url=scraped_url)
-    entry_fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    entry_fields = await detect_fields_after_entry(adapter, portal_action.ok)
     if portal_entry_requires_manual_action(workflow, portal_action.ok, fields_already_present=len(entry_fields) > 0):
         if await pause_for_portal_entry_action(adapter, work_dir, run_id, workflow, context="observation", action_payload=portal_action.payload):
             await adapter.close()
@@ -1996,7 +2024,7 @@ async def run_browser_apply_after_review(
     if await handle_runtime_control(work_dir, run_id, context="approved portal entry action"):
         await adapter.close()
         return
-    entry_fields = await adapter.detect_fields()  # type: ignore[attr-defined]
+    entry_fields = await detect_fields_after_entry(adapter, portal_action.ok)
     if portal_entry_requires_manual_action(workflow, portal_action.ok, fields_already_present=len(entry_fields) > 0):
         if await pause_for_portal_entry_action(adapter, work_dir, run_id, workflow, context="apply_after_review", action_payload=portal_action.payload):
             await adapter.close()

@@ -29,7 +29,12 @@ from applyocalypse_automation.browser.adapter import BrowserBlocker, BrowserFiel
 from applyocalypse_automation.browser.field_detection import build_click_by_text_script, parse_click_by_text_result
 from applyocalypse_automation.browser.portal_workflows import workflow_for_url
 from applyocalypse_automation.otp.gmail_mcp import GmailApiOtpExtractor
-from applyocalypse_automation.runner import execute_portal_entry_action, pause_for_blockers
+from applyocalypse_automation.runner import (
+    ENTRY_FIELDS_TIMEOUT_S,
+    detect_fields_after_entry,
+    execute_portal_entry_action,
+    pause_for_blockers,
+)
 
 EMAIL = "grace.hopper@example.com"
 PASSWORD = "Sm0ke#Pass-4821!"
@@ -426,6 +431,58 @@ def test_a_portal_without_a_chooser_clicks_once(capsys: pytest.CaptureFixture[st
     capsys.readouterr()
 
     assert len(adapter.clicks) == 1
+
+
+class SlowFormAdapter:
+    """Workday's applyManually route shows a spinner before the account form paints."""
+
+    def __init__(self, empty_polls: int) -> None:
+        self.empty_polls = empty_polls
+        self.detections = 0
+
+    async def detect_fields(self) -> list[BrowserField]:
+        self.detections += 1
+        return [] if self.detections <= self.empty_polls else list(CREATE)
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    async def sleep(self, seconds: float) -> None:
+        self.now += seconds
+
+
+def detect_after_entry(adapter: SlowFormAdapter, entry_ok: bool, clock: FakeClock) -> list[BrowserField]:
+    return asyncio.run(detect_fields_after_entry(adapter, entry_ok, sleep=clock.sleep, clock=clock))
+
+
+def test_the_form_is_waited_for_after_the_entry_click() -> None:
+    """Found live: detection ran on the spinner, saw no fields and no login wall, and moved on."""
+    adapter = SlowFormAdapter(empty_polls=3)
+
+    fields = detect_after_entry(adapter, True, FakeClock())
+
+    assert fields == CREATE
+    assert adapter.detections == 4
+
+
+def test_a_failed_entry_click_is_not_waited_on() -> None:
+    adapter = SlowFormAdapter(empty_polls=3)
+
+    assert detect_after_entry(adapter, False, FakeClock()) == []
+    assert adapter.detections == 1
+
+
+def test_a_page_that_never_shows_a_form_stops_waiting() -> None:
+    adapter = SlowFormAdapter(empty_polls=10_000)
+    clock = FakeClock()
+
+    assert detect_after_entry(adapter, True, clock) == []
+    assert clock.now <= ENTRY_FIELDS_TIMEOUT_S + 1
 
 
 # ---------------------------------------------------------------------------
