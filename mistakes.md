@@ -113,3 +113,12 @@ wrong. Entries say what happened, not who to blame.
   test:python`.** The grep failed, the suite never ran, and the job was read as
   "still running" for a long time. *Rule:* never gate a test run on a lookup;
   run the suite on its own and check its summary line.
+- **The first account-wall design only checked the top page's host** before
+  typing the saved password. A login iframe from Okta or Google on a genuine
+  Workday page would have received it; a review caught it. *Rule:* when code
+  types a secret into a page, check the origin of the field itself (its
+  `frame_url`), not just the page it sits on.
+- **A heredoc command began with a stray `cat > /tmp/x`**, which waited on
+  stdin until the 120 s timeout. So did a `python - <<EOF || venv-python - <<EOF2`
+  chain, and an `rtk grep -A` on one file. *Rule:* one interpreter per heredoc,
+  no bare `cat >`; use the Grep tool for context searches.
