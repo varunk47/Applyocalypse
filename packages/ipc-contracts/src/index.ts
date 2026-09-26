@@ -135,6 +135,9 @@ export const IpcChannels = {
   gmailStartOAuth: "gmail:start-oauth",
   gmailGetOAuthStatus: "gmail:get-oauth-status",
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
+  jevSaveKey: "jev:save-key",
+  jevGetStatus: "jev:get-status",
+  jevClearKey: "jev:clear-key",
   documentsListGenerated: "documents:list-generated",
   systemCheckConverters: "system:check-converters",
   systemCheckHealth: "system:check-health",
@@ -434,6 +437,13 @@ export const IpcContracts = {
     EmptyRequestSchema,
     z.object({ ok: z.boolean() })
   ),
+  jevSaveKey: contract(
+    IpcChannels.jevSaveKey,
+    z.object({ key: z.string().trim().min(1).max(512) }).strict(),
+    z.object({ configured: z.boolean() })
+  ),
+  jevGetStatus: contract(IpcChannels.jevGetStatus, EmptyRequestSchema, z.object({ configured: z.boolean() })),
+  jevClearKey: contract(IpcChannels.jevClearKey, EmptyRequestSchema, z.object({ configured: z.boolean() })),
   systemCheckConverters: contract(
     IpcChannels.systemCheckConverters,
     EmptyRequestSchema,

@@ -235,6 +235,12 @@ const api = {
     disconnectOAuth: () =>
       invoke<Record<string, never>, { ok: boolean }>(IpcContracts.gmailDisconnectOAuth.channel, {})
   },
+  jev: {
+    saveKey: (key: string) =>
+      invoke<{ key: string }, { configured: boolean }>(IpcContracts.jevSaveKey.channel, { key }),
+    getStatus: () => invoke<Record<string, never>, { configured: boolean }>(IpcContracts.jevGetStatus.channel, {}),
+    clearKey: () => invoke<Record<string, never>, { configured: boolean }>(IpcContracts.jevClearKey.channel, {})
+  },
   system: {
     checkConverters: () =>
       invoke<
