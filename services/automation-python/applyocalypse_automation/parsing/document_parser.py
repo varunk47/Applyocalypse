@@ -27,12 +27,20 @@ SECTION_ALIASES = {
 }
 
 EMAIL_RE = re.compile(r"\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b", re.IGNORECASE)
-PHONE_RE = re.compile(r"(?:\+?\d[\d\s().-]{7,}\d)")
+PHONE_RE = re.compile(r"(?:\+?\(?\d[\d\s().-]{7,}\d)")
 URL_RE = re.compile(r"https?://[^\s)>\]]+", re.IGNORECASE)
+# Profile links are usually printed without a scheme ("linkedin.com/in/...").
+BARE_LINK_RE = re.compile(
+    r"(?<![\w./])(?:www\.)?(?:linkedin\.com|github\.com|gitlab\.com|kaggle\.com|medium\.com|behance\.net)"
+    r"/[^\s|,;)>\]]+",
+    re.IGNORECASE,
+)
 BULLET_CHARS = "\u2022\u2023\u25aa\u25cf\u25e6\u00b7\u2043\u25a0\uf0a7\uf0b7"
 BULLET_SPLIT_RE = re.compile(f"[{re.escape(BULLET_CHARS)}]")
 LIST_PREFIX_RE = re.compile(rf"^\s*(?:[-*{re.escape(BULLET_CHARS)}]\s*|\d+[.)]\s+)")
-SKILL_SPLIT_RE = re.compile(r"[,|;/]")
+# A slash separates skills only when spaced ("Java / Kotlin"); "CI/CD" is one skill.
+SKILL_SPLIT_RE = re.compile(r"[,|;]|\s/\s")
+SKILL_LABEL_RE = re.compile(r"^(?P<label>[A-Za-z][A-Za-z /+&-]{1,31}):\s*")
 APPLYO_PLACEHOLDER_RE = re.compile(r"\{\{APPLYO_[A-Z0-9_]+\}\}")
 SHORT_HEADING_MAX_CHARS = 120
 
@@ -48,7 +56,8 @@ COLUMN_RUN_RE = re.compile(r"(?:\s*\|\s*)+")
 _MONTH = r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Sept|Oct|Nov|Dec)[a-z]*\.?"
 _DATE_TOKEN = rf"(?:{_MONTH}\s+\d{{4}}|{_MONTH}\s*'\d{{2}}|\d{{1,2}}/\d{{4}}|\d{{4}})"
 _OPEN_ENDED = r"(?:Present|Current|Ongoing|Now)"
-_DASH = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212~"
+# U+FFFD: older PDF conversions wrote it where the source had an en dash.
+_DASH = "\\-\u2010\u2011\u2012\u2013\u2014\u2015\u2212~\ufffd"
 DATE_RANGE_RE = re.compile(
     rf"(?P<start>{_DATE_TOKEN})\s*(?:[{_DASH}]|to|through|until)\s*(?P<end>{_DATE_TOKEN}|{_OPEN_ENDED})",
     re.IGNORECASE,
@@ -331,7 +340,8 @@ def _extract_sections(lines: list[str]) -> list[ParsedSection]:
     markers: list[tuple[int, str, str, float]] = []
     for index, line in enumerate(lines):
         label = _canonical_section_label(line)
-        if label:
+        # The first line is the name, even when it is set in capitals.
+        if label and not (index == 0 and label[0] not in SECTION_ALIASES):
             markers.append((index, line, label[0], label[1]))
 
     sections: list[ParsedSection] = []
@@ -360,48 +370,61 @@ def _identity_from_lines(lines: list[str]) -> dict[str, Any]:
     joined = "\n".join(lines[:18])
     email = EMAIL_RE.search(joined)
     phone = PHONE_RE.search(joined)
+    urls = URL_RE.findall(joined) + [f"https://{link}" for link in BARE_LINK_RE.findall(joined)]
     links = [
-        {"label": url.split("//", 1)[-1].split("/", 1)[0], "url": url.rstrip(".,")}
-        for url in URL_RE.findall(joined)
+        {"label": url.split("//", 1)[-1].split("/", 1)[0].removeprefix("www."), "url": url.rstrip(".,")}
+        for url in urls
     ]
 
     legal_name: str | None = None
     for line in lines[:6]:
         if EMAIL_RE.search(line) or URL_RE.search(line) or PHONE_RE.search(line):
             continue
+        section = _canonical_section_label(line)
+        if section and section[0] in SECTION_ALIASES:
+            break  # the name sits above the first section
         candidate = _normalize_line(line)
         if 2 <= len(candidate.split()) <= 5 and len(candidate) <= 80:
-            legal_name = candidate
+            legal_name = candidate.title() if candidate.isupper() else candidate
             break
+
+    # The contact row carries the city as one of its columns.
+    location = next(
+        (
+            segment
+            for line in lines[:6]
+            for segment in _split_columns(line)
+            if LOCATION_RE.fullmatch(segment) and not EMAIL_RE.search(segment)
+        ),
+        None,
+    )
 
     return {
         "legalName": legal_name,
         "email": email.group(0) if email else None,
         "phone": _normalize_line(phone.group(0)) if phone else None,
-        "location": None,
+        "location": location,
         "links": links,
     }
 
 
-def _skills_from_section(section: ParsedSection) -> list[str]:
-    skills: list[str] = []
-    for item in section.items:
-        cleaned = re.sub(r"^[A-Za-z /+&-]{2,32}:\s*", "", item)
-        parts = [part.strip() for part in SKILL_SPLIT_RE.split(cleaned)]
-        for part in parts:
-            if not part or len(part) > 48:
-                continue
-            if len(part.split()) > 5:
-                continue
-            skills.append(part)
-    deduped: list[str] = []
+def _skills_from_section(section: ParsedSection) -> list[tuple[str, list[str]]]:
+    """(label, skills) per group. A "Languages: Python, SQL" row is its own group;
+    unlabelled rows share the section heading as their label."""
+    groups: dict[str, list[str]] = {}
     seen: set[str] = set()
-    for skill in skills:
-        key = skill.lower()
-        if key not in seen:
-            seen.add(key)
-            deduped.append(skill)
-    return deduped
+    for item in section.items:
+        match = SKILL_LABEL_RE.match(item)
+        label = _normalize_line(match.group("label")) if match else section.label
+        cleaned = item[match.end() :] if match else item
+        group = groups.setdefault(label, [])
+        for part in (part.strip() for part in SKILL_SPLIT_RE.split(cleaned)):
+            if not part or len(part) > 48 or len(part.split()) > 5:
+                continue
+            if part.lower() not in seen:
+                seen.add(part.lower())
+                group.append(part)
+    return [(label, skills) for label, skills in groups.items() if skills]
 
 
 def _split_once(value: str, separators: list[str]) -> tuple[str, str] | None:
@@ -502,6 +525,26 @@ def _entry_detail_only(item: str) -> dict[str, str] | None:
     return fields or None
 
 
+def _entry_title_row(item: str) -> dict[str, str] | None:
+    """The "Title | Location" row under a "Company | Dates" row names the role
+    of the job above it rather than starting a new one."""
+    if not _is_probable_heading(item):
+        return None
+    named: list[str] = []
+    fields: dict[str, str] = {}
+    for segment in _split_columns(item):
+        parsed = _date_range(segment)
+        if parsed is not None and not parsed[2]:
+            fields["startDate"], fields["endDate"] = parsed[0], parsed[1]
+        elif LOCATION_RE.fullmatch(segment):
+            fields["location"] = segment
+        else:
+            named.append(segment)
+    if len(named) != 1 or not fields:
+        return None
+    return {"title": named[0], **fields}
+
+
 def _experience_heading(item: str) -> dict[str, Any] | None:
     if not _is_probable_heading(item):
         return None
@@ -527,6 +570,12 @@ def _experience_from_section(section: ParsedSection) -> list[dict[str, Any]]:
     entries: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
     for item in section.items:
+        title_row = _entry_title_row(item) if current and not current["title"] and not current["bullets"] else None
+        # A second set of dates is the next job, not this one's role.
+        if current and title_row and not (current["startDate"] and "startDate" in title_row):
+            for key, value in title_row.items():
+                current[key] = current[key] or value
+            continue
         heading = _experience_heading(item)
         if heading:
             if current:
@@ -551,6 +600,25 @@ def _experience_from_section(section: ParsedSection) -> list[dict[str, Any]]:
     return entries
 
 
+def _project_columns(item: str) -> tuple[str, str | None, list[str]]:
+    """"Name | Tool, Tool | Apr 2026 - Present": the name, any other text, and the
+    tool list. The dates are dropped because a project has nowhere to keep them."""
+    columns: list[str] = []
+    for segment in _split_columns(item):
+        parsed = _date_range(segment)
+        if parsed is None and DATE_ONLY_RE.fullmatch(segment):
+            continue
+        remainder = parsed[2] if parsed else segment
+        if remainder:
+            columns.append(remainder)
+    if not columns:
+        return item, None, []
+    name, rest = columns[0], columns[1:]
+    tools = [part.strip() for column in rest if "," in column for part in SKILL_SPLIT_RE.split(column) if part.strip()]
+    summary = " | ".join(column for column in rest if "," not in column) or None
+    return name, summary, tools
+
+
 def _project_from_items(section: ParsedSection) -> list[dict[str, Any]]:
     projects: list[dict[str, Any]] = []
     current: dict[str, Any] | None = None
@@ -561,12 +629,15 @@ def _project_from_items(section: ParsedSection) -> list[dict[str, Any]]:
                 if current:
                     projects.append(current)
                 name, summary = split if split else (item, None)
+                tools: list[str] = []
+                if " | " in item:
+                    name, summary, tools = _project_columns(item)
                 current = {
                     "name": name,
                     "role": None,
                     "summary": summary,
                     "bullets": [],
-                    "tools": [],
+                    "tools": tools,
                     "links": URL_RE.findall(item),
                     "confidence": min(section.confidence, 0.82),
                 }
@@ -679,9 +750,8 @@ def _canonical_from_sections(*, source_format: str, document_kind: str, text: st
     skill_groups = []
     for section in sections:
         if section.normalized_label == "skills":
-            skills = _skills_from_section(section)
-            if skills:
-                skill_groups.append({"label": section.label, "skills": skills, "confidence": min(section.confidence, 0.82)})
+            for label, skills in _skills_from_section(section):
+                skill_groups.append({"label": label, "skills": skills, "confidence": min(section.confidence, 0.82)})
 
     education = [
         entry
