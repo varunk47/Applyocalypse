@@ -1230,6 +1230,8 @@ def select_generated_file_for_upload(field: BrowserField, generated_files: objec
         upload_status = str(generated_file_value(generated_file, "upload_status") or "NOT_UPLOADED").upper()
         if format_name not in accepted_formats or upload_status == "UPLOADED":
             continue
+        if generated_file_value(generated_file, "do_not_upload") is True:
+            continue
         if not isinstance(local_path, str) or not local_path.strip():
             continue
         if not Path(local_path).is_file():

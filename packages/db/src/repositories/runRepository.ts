@@ -706,7 +706,12 @@ export class RunRepository {
     });
   }
 
-  addGeneratedFile(input: Omit<GeneratedFile, "id" | "applicationRunId"> & { applicationRunId?: string | null }): GeneratedFile {
+  addGeneratedFile(
+    input: Omit<GeneratedFile, "id" | "applicationRunId" | "doNotUpload"> & {
+      applicationRunId?: string | null;
+      doNotUpload?: boolean;
+    }
+  ): GeneratedFile {
     const id = randomUUID();
     const now = nowIso();
     this.db
@@ -714,12 +719,12 @@ export class RunRepository {
         `
         INSERT INTO generated_files (
           id, application_run_id, tailoring_run_id, profile_id, job_target_id, file_kind, format, filename, local_path,
-          sha256, size_bytes, upload_status, uploaded_at, retention_policy, delete_after,
+          sha256, size_bytes, upload_status, uploaded_at, retention_policy, delete_after, do_not_upload,
           created_at, updated_at, deleted_at
         )
         VALUES (
           @id, @applicationRunId, @tailoringRunId, @profileId, @jobTargetId, @fileKind, @format, @filename, @localPath,
-          @sha256, @sizeBytes, @uploadStatus, @uploadedAt, @retentionPolicy, @deleteAfter,
+          @sha256, @sizeBytes, @uploadStatus, @uploadedAt, @retentionPolicy, @deleteAfter, @doNotUpload,
           @now, @now, @deletedAt
         )
       `
@@ -740,6 +745,7 @@ export class RunRepository {
         uploadedAt: input.uploadedAt,
         retentionPolicy: input.retentionPolicy,
         deleteAfter: input.deleteAfter,
+        doNotUpload: input.doNotUpload ? 1 : 0,
         deletedAt: input.deletedAt,
         now
       });
@@ -793,6 +799,7 @@ export class RunRepository {
       uploaded_at: string | null;
       retention_policy: string;
       delete_after: string | null;
+      do_not_upload: number;
       deleted_at: string | null;
     }>;
 
@@ -813,7 +820,8 @@ export class RunRepository {
         uploadedAt: row.uploaded_at,
         retentionPolicy: row.retention_policy,
         deleteAfter: row.delete_after,
-        deletedAt: row.deleted_at
+        deletedAt: row.deleted_at,
+        doNotUpload: row.do_not_upload === 1
       })
     );
   }
@@ -845,6 +853,7 @@ export class RunRepository {
       uploaded_at: string | null;
       retention_policy: string;
       delete_after: string | null;
+      do_not_upload: number;
       deleted_at: string | null;
     }>;
 
@@ -865,7 +874,8 @@ export class RunRepository {
         uploadedAt: row.uploaded_at,
         retentionPolicy: row.retention_policy,
         deleteAfter: row.delete_after,
-        deletedAt: row.deleted_at
+        deletedAt: row.deleted_at,
+        doNotUpload: row.do_not_upload === 1
       })
     );
   }
