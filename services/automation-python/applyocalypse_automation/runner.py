@@ -17,6 +17,8 @@ from .browser.adapter import BrowserAdapter, BrowserBlocker, BrowserField, Brows
 from .browser.adapter_factory import adapter_candidates_for_workflow, create_browser_adapter
 from .browser.field_detection import is_secret_field
 from .browser.greenhouse_schema import GreenhouseQuestion, fetch_questions, unanswered_required
+from .browser.jev_client import JevError
+from .browser.jev_step import JevStatus, run_jev_steps
 from .browser.portal_adapters import (
     COMMON_STEP_PROGRESSION_LABELS,
     PortalRuntimePolicy,
@@ -39,6 +41,7 @@ from .field_resolution import (
     proposed_answer_for_browser_field,
     resolve_secret_reviewed_value,
 )
+from .jev_run import JEV_GOAL, AdapterJevDriver, jev_ask, jev_ready, personal_values
 from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
 from .preference_rules import with_job_context
 from .secret_env import apply_provider_secrets_to_env
@@ -1601,6 +1604,103 @@ async def attempt_safe_step_progression(
     return "advanced"
 
 
+# Jev stops on anything it is unsure of, and each stop is a pause for the user.
+# A page that keeps stopping it after this many resumes fails the run instead.
+MAX_JEV_PAUSES = 5
+JevAdvance = Literal["fill", "final", "cancelled"]
+
+
+async def jev_advance(
+    *,
+    adapter: object,
+    work_dir: Path,
+    run_id: str,
+    personal: list[str],
+    context: str,
+    require_move: bool = False,
+    ask: Callable[..., Awaitable[dict]] | None = None,
+) -> JevAdvance:
+    """Let Jev click toward the next page with fields to fill, or the final review page.
+
+    "fill" hands a page to the runner's field loop, "final" hands the run to the
+    submit gate. With `require_move`, a page Jev wants filled again before it has
+    clicked anything is the page the runner just filled, so that goes to the user.
+    Jev never clicks a final submit: that comes back as "final".
+    """
+    ask = ask or jev_ask(run_id)
+    pauses = 0
+    while True:
+        driver = AdapterJevDriver(adapter, run_id, context=context)
+        try:
+            outcome = await run_jev_steps(driver, ask, JEV_GOAL, personal, stop_on=frozenset({JevStatus.FILL}))
+            status, reason = outcome.status, outcome.reason
+        except JevError as exc:
+            status, reason = JevStatus.ERROR, f"Jev could not be reached ({exc})"
+        if status is JevStatus.FILL and (driver.clicks or not require_move):
+            return "fill"
+        if status in {JevStatus.DONE, JevStatus.NEEDS_CONFIRMATION}:
+            return "final"
+        if status is JevStatus.NEEDS_LOGIN and await try_account_wall(adapter, run_id, context=context):
+            continue
+        if status in {JevStatus.NEEDS_LOGIN, JevStatus.BLOCKED}:
+            blockers = _halting_blockers(await adapter.detect_blockers())  # type: ignore[attr-defined]
+            if blockers:
+                if await pause_for_blockers(adapter, work_dir, run_id, blockers, context=context):
+                    return "cancelled"
+                continue
+        if status is JevStatus.FILL:
+            reason = "this page still has fields Jev thinks need answers; fill them in the browser"
+        pauses += 1
+        if pauses > MAX_JEV_PAUSES:
+            WorkerEvent(
+                event_type=EventType.FAILED,
+                run_id=run_id,
+                step_id=None,
+                severity=Severity.ERROR,
+                message=f"Jev kept stopping during {context}. Finish the application in the browser window.",
+                machine_state={"reason": "JEV_UNRESOLVED", "context": context, "jev_status": status.value},
+                ui_state={"requires_user_review": True, "current_step": "blocked"},
+                payload={"code": "JEV_UNRESOLVED", "jev_reason": reason},
+            ).emit()
+            return "cancelled"
+        if await pause_for_jev(adapter, work_dir, run_id, status=status, reason=reason, context=context):
+            return "cancelled"
+        # The user has acted on the page, so it is no longer the page just filled.
+        require_move = False
+
+
+async def pause_for_jev(
+    adapter: object, work_dir: Path, run_id: str, *, status: JevStatus, reason: str, context: str
+) -> bool:
+    """Hand the page to the user. True when they cancel the run instead."""
+    await _surface_browser_for_human(adapter)
+    WorkerEvent(
+        event_type=EventType.PAUSED,
+        run_id=run_id,
+        step_id=None,
+        severity=Severity.WARN,
+        message=f"Jev stopped: {reason}. Handle this page in the browser, then resume.",
+        machine_state={"reason": f"JEV_{status.value}", "context": context},
+        ui_state={"requires_user_review": True, "current_step": "portal_step"},
+        payload={"jev_status": status.value, "jev_reason": reason},
+    ).emit()
+    control = await asyncio.to_thread(wait_for_review_resume, work_dir, run_id=run_id, current_step="portal_step", context=context)
+    if control.command == "CANCEL":
+        emit_worker_cancelled(run_id, control, message=f"Worker cancelled by local user while Jev was paused during {context}")
+        return True
+    WorkerEvent(
+        event_type=EventType.RESUMED,
+        run_id=run_id,
+        step_id=control.step_id,
+        severity=Severity.INFO,
+        message="User handled the page; Jev is reading it again",
+        machine_state={"reason": control.reason or "local_user_resolved_jev_pause", "context": context},
+        ui_state={"current_step": "automation"},
+        payload={"jev_status": status.value},
+    ).emit()
+    return False
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="applyocalypse-worker")
     parser.add_argument("--run-id", required=True)
@@ -2020,15 +2120,25 @@ async def run_browser_apply_after_review(
     if await handle_runtime_control(work_dir, run_id, context="pre-fill review"):
         await adapter.close()
         return
-    portal_action = await execute_portal_entry_action(adapter=adapter, workflow=workflow, run_id=run_id, context="apply_after_review")
-    if await handle_runtime_control(work_dir, run_id, context="approved portal entry action"):
-        await adapter.close()
-        return
-    entry_fields = await detect_fields_after_entry(adapter, portal_action.ok)
-    if portal_entry_requires_manual_action(workflow, portal_action.ok, fields_already_present=len(entry_fields) > 0):
-        if await pause_for_portal_entry_action(adapter, work_dir, run_id, workflow, context="apply_after_review", action_payload=portal_action.payload):
+    # With Jev, it clicks through to the form on any portal; a page it is unsure
+    # of pauses for the user rather than falling back to the portal's label list.
+    use_jev = jev_ready(adapter)
+    jev_personal = personal_values(control.payload.get("approvedAnswers") or control.payload.get("approved_answers"))
+    if use_jev:
+        entry = await jev_advance(adapter=adapter, work_dir=work_dir, run_id=run_id, personal=jev_personal, context="apply_after_review")
+        if entry == "cancelled":
             await adapter.close()
             return
+    else:
+        portal_action = await execute_portal_entry_action(adapter=adapter, workflow=workflow, run_id=run_id, context="apply_after_review")
+        if await handle_runtime_control(work_dir, run_id, context="approved portal entry action"):
+            await adapter.close()
+            return
+        entry_fields = await detect_fields_after_entry(adapter, portal_action.ok)
+        if portal_entry_requires_manual_action(workflow, portal_action.ok, fields_already_present=len(entry_fields) > 0):
+            if await pause_for_portal_entry_action(adapter, work_dir, run_id, workflow, context="apply_after_review", action_payload=portal_action.payload):
+                await adapter.close()
+                return
     blockers = await adapter.detect_blockers()
     if blockers:
         if await pause_for_blockers(adapter, work_dir, run_id, blockers, context="approved portal entry action"):
@@ -2384,14 +2494,27 @@ async def run_browser_apply_after_review(
             if await handle_runtime_control(work_dir, run_id, context="safe step progression"):
                 await adapter.close()
                 return
-            progression_result = await attempt_safe_step_progression(
-                adapter=adapter,
-                work_dir=work_dir,
-                run_id=run_id,
-                workflow=workflow,
-                context="approved_field_application",
-                step_index=progression_step_index + 1,
-            )
+            if use_jev:
+                jev_step = await jev_advance(
+                    adapter=adapter,
+                    work_dir=work_dir,
+                    run_id=run_id,
+                    personal=jev_personal,
+                    context="approved_field_application",
+                    require_move=True,
+                )
+                # A new page to fill is the step advancing; the final review page is
+                # where the label search also ends, at the submit gate.
+                progression_result = {"fill": "advanced", "final": "not_found", "cancelled": "cancelled"}[jev_step]
+            else:
+                progression_result = await attempt_safe_step_progression(
+                    adapter=adapter,
+                    work_dir=work_dir,
+                    run_id=run_id,
+                    workflow=workflow,
+                    context="approved_field_application",
+                    step_index=progression_step_index + 1,
+                )
             if progression_result == "cancelled":
                 await adapter.close()
                 return

@@ -47,10 +47,12 @@ _NOT_CONSENT = re.compile(r"\b(alert|alerts|marketing|newsletter|offers|promotio
 
 AccountFormKind = Literal["CREATE", "SIGN_IN"]
 
-# Runs whose saved login has already been tried. A worker process handles one run,
-# but the runner pauses for blockers at several steps, and each of those pauses
-# must not type a password the portal may already have rejected.
-_ATTEMPTED_RUNS: set[str] = set()
+# (run, form kind) pairs whose saved login has already been tried. A worker process
+# handles one run, but the runner pauses for blockers at several steps, and each of
+# those pauses must not type a password the portal may already have rejected. The
+# kinds are counted apart because creating an account is often followed, after the
+# emailed verification, by a sign-in page asking for the password just set.
+_ATTEMPTED_RUNS: set[tuple[str, str]] = set()
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,17 +88,17 @@ def classify_account_form(fields: list[BrowserField]) -> AccountForm | None:
 async def try_account_wall(adapter: object, run_id: str, *, context: str) -> bool:
     """Create the account, or sign in, with the saved login. True once a form was submitted.
 
-    Tried at most once per run: retrying a password the portal rejected is how an
-    account gets locked.
+    Each kind of form is tried at most once per run: retrying a password the portal
+    rejected is how an account gets locked.
     """
     email = os.getenv("APPLYO_APPLICATION_EMAIL", "").strip()
     password = get_secret("APPLYO_APPLICATION_PASSWORD")
-    if not email or not password or run_id in _ATTEMPTED_RUNS or not await _on_portal(adapter):
+    if not email or not password or not await _on_portal(adapter):
         return False
     form = classify_account_form(await adapter.detect_fields())  # type: ignore[attr-defined]
-    if form is None or not _fillable(form):
+    if form is None or not _fillable(form) or (run_id, form.kind) in _ATTEMPTED_RUNS:
         return False
-    _ATTEMPTED_RUNS.add(run_id)
+    _ATTEMPTED_RUNS.add((run_id, form.kind))
     if form.kind == "CREATE":
         if not await _submit(adapter, run_id, form, email, password, ACCOUNT_CREATE_LABELS, "CREATE_ACCOUNT", context):
             return False
@@ -109,8 +111,9 @@ async def try_account_wall(adapter: object, run_id: str, *, context: str) -> boo
         if not opened.ok:
             return False
         form = classify_account_form(await adapter.detect_fields())  # type: ignore[attr-defined]
-        if form is None or form.kind != "SIGN_IN" or not _fillable(form):
+        if form is None or form.kind != "SIGN_IN" or not _fillable(form) or (run_id, "SIGN_IN") in _ATTEMPTED_RUNS:
             return False
+        _ATTEMPTED_RUNS.add((run_id, "SIGN_IN"))
     return await _submit(adapter, run_id, form, email, password, SIGN_IN_LABELS, "SIGN_IN", context)
 
 

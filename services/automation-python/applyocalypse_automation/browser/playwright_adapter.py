@@ -33,6 +33,7 @@ from .field_detection import (
 from .field_write import verify_or_repair_text_write
 from .human_scroll import dispatch_wheel_scroll, parse_scroll_anchor
 from .human_typing import clear_element, type_into_element
+from .jev_page import ENUMERATE_ELEMENTS_JS, JEV_INDEX_ATTRIBUTE, JevElement, JevPage, page_from_frames
 from .navigation_warmup import ERROR_PAGE_SETTLE_S, WARM_UP_TIMEOUT_S, dwell_seconds, origin_of, warm_up_target
 from .page_readiness import (
     PAGE_TEXT_POLL_INTERVAL_S,
@@ -138,6 +139,8 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
         self._context = None
         self._page = None
         self._input: CdpTarget | None = None
+        # Which frame each element of the last Jev page read lives in.
+        self._jev_frames: dict[int, Any] = {}
         self._visited_origins: set[str] = set()
 
     async def launch(self, *, run_id: str, user_data_dir: Path) -> BrowserStepResult:
@@ -742,6 +745,44 @@ class PlaywrightBrowserAdapter(BrowserAdapter):
             return result
         settle = await self._settle_after_click(baseline)
         return BrowserStepResult(result.ok, result.message, {**result.payload, "page_settle": settle})
+
+    async def jev_read_page(self) -> JevPage:
+        """Number every interactive element, frame by frame, for Jev to choose from."""
+        self._jev_frames = {}
+        frames: list[tuple[str, dict[str, Any]]] = []
+        next_index = 0
+        for frame in self._form_frames():
+            try:
+                raw = await frame.evaluate(ENUMERATE_ELEMENTS_JS, next_index)
+            except Exception:
+                # A frame that navigated mid-read is simply left out of this read.
+                continue
+            if not isinstance(raw, dict):
+                continue
+            for item in raw.get("elements") or []:
+                self._jev_frames[int(item["i"])] = frame
+            frames.append((frame.url, raw))
+            next_index = int(raw.get("next") or next_index)
+        if not frames:
+            return JevPage("", "", "", (), ())
+        return page_from_frames(frames)
+
+    async def jev_click(self, element: JevElement) -> BrowserStepResult:
+        """Click the element Jev chose, by the number the last page read gave it."""
+        frame = self._jev_frames.get(element.index)
+        if self._page is None or frame is None:
+            return BrowserStepResult(False, "element is not on the current page", {"index": element.index})
+        baseline = await self._probe_page_fingerprint()
+        try:
+            await frame.locator(f'[{JEV_INDEX_ATTRIBUTE}="{element.index}"]').first.click(timeout=8_000)
+        except Exception as exc:
+            return BrowserStepResult(False, "click failed", {"index": element.index, "error": type(exc).__name__})
+        settle = await self._settle_after_click(baseline)
+        return BrowserStepResult(True, f"clicked {element.name}", {"index": element.index, "page_settle": settle})
+
+    async def jev_scroll(self) -> None:
+        if self._page is not None:
+            await self._page.mouse.wheel(0, 700)
 
     async def upload_file(self, field: BrowserField, path: Path) -> BrowserStepResult:
         if not path.exists():

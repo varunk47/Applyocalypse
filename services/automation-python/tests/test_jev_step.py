@@ -113,8 +113,8 @@ async def _no_sleep(_seconds):
     return None
 
 
-def run(driver, ask, personal=()):
-    return asyncio.run(run_jev_steps(driver, ask, "apply to the job", list(personal), sleep=_no_sleep))
+def run(driver, ask, personal=(), **kwargs):
+    return asyncio.run(run_jev_steps(driver, ask, "apply to the job", list(personal), sleep=_no_sleep, **kwargs))
 
 
 def page_with_text(text):
@@ -170,3 +170,13 @@ def test_loop_sends_redacted_state_only():
     run(driver, ask, personal=["Jordan Rivera"])
 
     assert "Jordan Rivera" not in states[0]
+
+
+def test_a_caller_that_fills_pages_itself_gets_the_fill_step_back():
+    driver = FakeDriver([page_with_text("a"), page_with_text("b")])
+    ask, _ = scripted(answers(target=1), answers(tool="fill"))
+
+    outcome = run(driver, ask, stop_on=frozenset({JevStatus.FILL}))
+
+    assert outcome.status is JevStatus.FILL
+    assert driver.actions == ["click 1"]

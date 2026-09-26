@@ -6,6 +6,7 @@ import pytest
 
 from applyocalypse_automation import secret_env
 from applyocalypse_automation.browser.jev_client import (
+    JEV_BUSY_RETRIES,
     JEV_ENDPOINT,
     JEV_KEY_NAME,
     JEV_MODEL,
@@ -96,6 +97,26 @@ def test_retries_stop_after_the_limit():
     with pytest.raises(JevError, match="HTTP 500"):
         ask(recorder)
     assert len(recorder.requests) == 3
+
+
+def test_a_busy_model_is_waited_out_and_reported():
+    recorder = Recorder(*[httpx.Response(429, json={})] * 5, ok({"is_signup": {"type": "noul", "noul": 0.9}}))
+    busy: list[int] = []
+
+    result = asyncio.run(
+        ask_jev("state", QUESTIONS, transport=httpx.MockTransport(recorder), sleep=_no_sleep, on_busy=busy.append)
+    )
+
+    assert result.answers["is_signup"]["noul"] == 0.9
+    assert busy == [1, 2, 3, 4, 5]
+
+
+def test_a_model_busy_for_too_long_fails():
+    recorder = Recorder(*[httpx.Response(429, json={"error": {"type": "rate_limit_exceeded"}})] * (JEV_BUSY_RETRIES + 1))
+
+    with pytest.raises(JevError, match="429: rate_limit_exceeded"):
+        ask(recorder)
+    assert len(recorder.requests) == JEV_BUSY_RETRIES + 1
 
 
 def test_errors_never_contain_the_key():

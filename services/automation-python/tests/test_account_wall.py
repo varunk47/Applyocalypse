@@ -354,6 +354,18 @@ def test_the_wall_is_tried_once_per_run_not_once_per_pause(saved_login: None) ->
     assert len(adapter.clicks) == 1
 
 
+def test_a_new_account_can_still_sign_in_once_after_its_verification_email(saved_login: None) -> None:
+    """Workday: create the account, verify the email, then sign in with the password just set."""
+    adapter = FakeAccountAdapter("create", {("create", "Create Account"): "form", ("sign_in", "Sign In"): "form"})
+    assert run_wall(adapter) is True
+
+    adapter.page = "sign_in"
+    assert run_wall(adapter) is True
+    adapter.page = "sign_in"
+    assert run_wall(adapter) is False
+    assert [labels[0] for labels, _ in adapter.clicks] == ["Create Account", "Sign In"]
+
+
 # ---------------------------------------------------------------------------
 # which button the submit lands on
 # ---------------------------------------------------------------------------

@@ -25,6 +25,10 @@ JEV_KEY_NAME = "AI_GATEWAY_API_KEY"
 JEV_TIMEOUT_S = 30.0
 JEV_RETRIES = 2
 JEV_RETRY_BACKOFF_S = 0.8
+# The upstream model answers 429 "high demand" for minutes at a time. That is a
+# queue, not a failure, so it gets its own, much longer budget.
+JEV_BUSY_RETRIES = 36
+JEV_BUSY_WAIT_S = 10.0
 
 
 class JevError(RuntimeError):
@@ -47,34 +51,46 @@ async def ask_jev(
     *,
     transport: httpx.AsyncBaseTransport | None = None,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    on_busy: Callable[[int], None] | None = None,
 ) -> JevResult:
     """Ask Jev every question about `state` in one request.
 
-    Retries network errors, 429 and 5xx twice with a linear backoff; any other
-    status fails at once, since resending a rejected request cannot succeed.
+    Network errors and 5xx are retried twice with a linear backoff. A 429 means
+    the model is busy, so it is waited out for up to six minutes, calling
+    `on_busy` with the attempt number each time. Any other status fails at once,
+    since resending a rejected request cannot succeed.
     """
     key = get_secret(JEV_KEY_NAME)
     if not key:
         raise JevError(f"{JEV_KEY_NAME} is not set")
     body = {"model": JEV_MODEL, "state": state, "questions": questions}
     headers = {"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+    failures = 0
+    busy = 0
     async with httpx.AsyncClient(timeout=JEV_TIMEOUT_S, transport=transport) as client:
-        for attempt in range(JEV_RETRIES + 1):
-            last_attempt = attempt == JEV_RETRIES
+        while True:
             try:
                 response = await client.post(JEV_ENDPOINT, json=body, headers=headers)
             except httpx.HTTPError as exc:
-                if last_attempt:
+                if failures == JEV_RETRIES:
                     raise JevError(f"Jev request failed: {type(exc).__name__}") from None
-            else:
-                if response.status_code == 200:
-                    return _parse(response)
-                retryable = response.status_code == 429 or response.status_code >= 500
-                if last_attempt or not retryable:
-                    detail = _error_detail(response).replace(key, "***")
-                    raise JevError(f"Jev returned HTTP {response.status_code}: {detail}")
-            await sleep(JEV_RETRY_BACKOFF_S * (attempt + 1))
-    raise AssertionError("unreachable")
+                failures += 1
+                await sleep(JEV_RETRY_BACKOFF_S * failures)
+                continue
+            if response.status_code == 200:
+                return _parse(response)
+            if response.status_code == 429 and busy < JEV_BUSY_RETRIES:
+                busy += 1
+                if on_busy is not None:
+                    on_busy(busy)
+                await sleep(JEV_BUSY_WAIT_S)
+                continue
+            if response.status_code >= 500 and failures < JEV_RETRIES:
+                failures += 1
+                await sleep(JEV_RETRY_BACKOFF_S * failures)
+                continue
+            detail = _error_detail(response).replace(key, "***")
+            raise JevError(f"Jev returned HTTP {response.status_code}: {detail}")
 
 
 def _parse(response: httpx.Response) -> JevResult:

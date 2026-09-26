@@ -206,8 +206,13 @@ async def run_jev_steps(
     *,
     max_rounds: int = MAX_ROUNDS,
     sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
+    stop_on: frozenset[JevStatus] = frozenset(),
 ) -> JevOutcome:
-    """Drive the page toward `goal` until Jev is done, unsure, or needs the user."""
+    """Drive the page toward `goal` until Jev is done, unsure, or needs the user.
+
+    `stop_on` ends the loop on a step it would otherwise take, for a caller that
+    takes that step itself (the runner fills pages with its own field loop).
+    """
     history: list[str] = []
     seen: Counter[str] = Counter()
     waits = 0
@@ -217,7 +222,7 @@ async def run_jev_steps(
         targets = clickable(page)
         answers = await ask(jev_state(page, personal_values), build_questions(goal, targets))
         decision = resolve(answers, page, round_index=round_index)
-        if decision.status in TERMINAL:
+        if decision.status in TERMINAL or decision.status in stop_on:
             return _outcome(decision, page, history, round_index + 1)
         action_key = f"{decision.status.value}|{decision.target.index if decision.target else ''}|{page.fingerprint()}"
         seen[action_key] += 1
