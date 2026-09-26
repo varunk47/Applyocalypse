@@ -94,8 +94,12 @@ mac:
   # There is no Apple Developer ID yet. Without one electron-builder ad-hoc signs
   # an arm64 build, which Apple Silicon needs before it will run anything, and
   # leaves an Intel build unsigned. Hardened runtime exists for notarization and
-  # notarization needs a real identity, so both stay off until a certificate
-  # exists. Either way Gatekeeper warns on first open of a downloaded build.
+  # notarization needs a real identity, so both stay off here. Gatekeeper warns
+  # on first open of such a build. scripts/build/mac-signing.mjs turns both on,
+  # with entitlements.mac.plist, as soon as a Developer ID certificate is set.
   hardenedRuntime: false
   notarize: false
+  extendInfo:
+    # macOS shows this when PDF export first asks Microsoft Word for a PDF.
+    NSAppleEventsUsageDescription: Applyocalypse asks Microsoft Word to save your tailored documents as PDF.
 afterPack: ../../scripts/build/after-pack.cjs

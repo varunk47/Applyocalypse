@@ -405,7 +405,9 @@ export const GeneratedFileSchema = z.object({
   uploadedAt: IsoDateTimeSchema.nullable(),
   retentionPolicy: z.enum(["DELETE_AFTER_UPLOAD", "DELETE_AFTER_RETENTION", "KEEP_UNTIL_USER_DELETES"]),
   deleteAfter: IsoDateTimeSchema.nullable(),
-  deletedAt: IsoDateTimeSchema.nullable()
+  deletedAt: IsoDateTimeSchema.nullable(),
+  // Never attached to an application (e.g. a comparison copy of the resume).
+  doNotUpload: z.boolean().default(false)
 });
 
 export const RunEventSchema = z.object({

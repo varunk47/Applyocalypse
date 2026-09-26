@@ -24,7 +24,20 @@ Live portal certification requires current test application URLs, permitted test
 
 The release workflow builds Windows (x64 NSIS installer) on `windows-latest` and macOS (DMG and zip) on two runners, `macos-latest` for Apple Silicon and `macos-15-intel` for Intel. Each Mac arch needs its own runner because PyInstaller only builds the worker for the machine it runs on.
 
-Mac builds are not signed with a Developer ID and are not notarized. electron-builder ad-hoc signs the Apple Silicon build and leaves the Intel build unsigned, so Gatekeeper warns on first open. To ship to other people, add a Developer ID Application certificate (`CSC_LINK` and `CSC_KEY_PASSWORD` for the app, `APPLE_CODESIGN_IDENTITY` for the worker) and notarization credentials, then turn `hardenedRuntime` and `notarize` back on in `apps/desktop/electron-builder/electron-builder.yml`.
+Mac builds are not signed with a Developer ID and are not notarized yet. electron-builder ad-hoc signs the Apple Silicon build and leaves the Intel build unsigned, so Gatekeeper warns on first open.
+
+Signing and notarization are wired up and switch on from secrets alone; no code or config change is needed:
+
+1. Join the Apple Developer Program ($99 a year).
+2. In Xcode or the developer portal, create a **Developer ID Application** certificate and export it with its private key as a `.p12` file.
+3. Create an app-specific password at appleid.apple.com, and note your 10-character Team ID from the developer portal.
+4. Add these repository secrets in GitHub (Settings, Secrets and variables, Actions):
+   - `MAC_CSC_LINK`: the `.p12` file, base64 encoded (`base64 -i cert.p12 | pbcopy`).
+   - `MAC_CSC_KEY_PASSWORD`: the password you set when exporting the `.p12`.
+   - `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`: for notarization.
+5. Push a `v*` tag or run the release workflow by hand.
+
+With `MAC_CSC_LINK` set, `scripts/build/mac-signing.mjs` turns on the hardened runtime and signs the app and everything inside it, the Python worker included, with `apps/desktop/electron-builder/entitlements.mac.plist`. With the three `APPLE_*` secrets set as well, electron-builder notarizes and staples the build. To sign a local build on a Mac instead, have the certificate in your login keychain and run `CSC_NAME="Developer ID Application: Your Name (TEAMID)" pnpm desktop:package`.
 
 ## Update Channel
 

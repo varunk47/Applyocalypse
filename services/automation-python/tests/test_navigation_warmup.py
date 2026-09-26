@@ -138,6 +138,7 @@ class FakePage:
     def __init__(self, *, broken: str | None = None) -> None:
         self.requested_urls: list[str] = []
         self._broken = broken
+        self.url = "about:blank"
 
     async def goto(self, url: str, **_options: object) -> None:
         self.requested_urls.append(url)
@@ -152,6 +153,7 @@ def adapter_for(page: FakePage, monkeypatch: pytest.MonkeyPatch) -> PlaywrightBr
     """An adapter wired to a fake page, with the waiting taken out."""
     monkeypatch.setattr(playwright_adapter_module, "PAGE_TEXT_POLL_INTERVAL_S", 0.0)
     monkeypatch.setattr(playwright_adapter_module, "WARM_UP_TIMEOUT_S", 0.0)
+    monkeypatch.setattr(playwright_adapter_module, "ERROR_PAGE_SETTLE_S", 0.0)
     monkeypatch.setattr(playwright_adapter_module, "dwell_seconds", lambda: 0.0)
     adapter = PlaywrightBrowserAdapter()
     adapter._page = page  # noqa: SLF001 - unit wiring test
@@ -219,6 +221,75 @@ def test_a_front_door_that_will_not_load_does_not_cost_the_navigation(
     assert result.ok is True
     assert result.payload["url"] == APPLY_URL
     assert result.payload["warmed_up"] is False
+
+
+class LateErrorPage(FakePage):
+    """A front door that fails the way Chrome fails on an HTTP error status.
+
+    ``goto`` raises first and Chrome commits its own error page a few polls later;
+    a navigation started before that commit is cut off by it. Seen on Workday,
+    whose bare host answers with an error status.
+    """
+
+    def __init__(self, *, broken: str) -> None:
+        super().__init__(broken=broken)
+        self._polls_until_error_page: int | None = None
+
+    @property
+    def url(self) -> str:
+        if self._polls_until_error_page is not None:
+            if self._polls_until_error_page == 0:
+                self._polls_until_error_page = None
+                self._url = "chrome-error://chromewebdata/"
+            else:
+                self._polls_until_error_page -= 1
+        return self._url
+
+    @url.setter
+    def url(self, value: str) -> None:
+        self._url = value
+
+    async def goto(self, url: str, **_options: object) -> None:
+        self.requested_urls.append(url)
+        if url == self._broken:
+            self._polls_until_error_page = 3
+            raise RuntimeError(f"Page.goto: net::ERR_HTTP_RESPONSE_CODE_FAILURE at {url}")
+        if self._polls_until_error_page is not None:
+            raise RuntimeError(
+                f'Page.goto: Navigation to "{url}" is interrupted by another navigation to "chrome-error://chromewebdata/"'
+            )
+        self._url = url
+
+
+def test_a_front_door_error_page_committing_late_does_not_cost_the_navigation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    page = LateErrorPage(broken=FRONT_DOOR)
+    adapter = adapter_for(page, monkeypatch)
+    monkeypatch.setattr(playwright_adapter_module, "ERROR_PAGE_SETTLE_S", 5.0)
+
+    result = asyncio.run(adapter.open_url(APPLY_URL))
+
+    assert result.ok is True
+    assert result.payload["warmed_up"] is False
+    assert page.requested_urls == [FRONT_DOOR, APPLY_URL]
+
+
+def test_a_front_door_with_no_error_page_coming_is_not_waited_on_for_long(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A timeout or an abort commits nothing; the wait is bounded, not open ended."""
+    page = FakePage(broken=FRONT_DOOR)
+    adapter = adapter_for(page, monkeypatch)
+    monkeypatch.setattr(playwright_adapter_module, "ERROR_PAGE_SETTLE_S", 0.2)
+
+    async def timed() -> float:
+        loop = asyncio.get_running_loop()
+        started = loop.time()
+        await adapter.open_url(APPLY_URL)
+        return loop.time() - started
+
+    assert asyncio.run(timed()) < 1.0
 
 
 def test_a_broken_front_door_is_not_tried_again_on_every_page(

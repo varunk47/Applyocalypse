@@ -1057,6 +1057,22 @@ def _ambiguous_selectors(raw_fields: list[Any]) -> frozenset[tuple[str, str]]:
     return frozenset(key for key, count in counts.items() if count > 1)
 
 
+# Inputs a portal plants for bots and tells people to leave alone. Workday's
+# create-account page has one ("Enter website. This input is for robots only, do
+# not enter if you're human."). Anything typed into it marks the session as a bot,
+# so such a field is dropped here, the one place every adapter's fields pass
+# through, rather than surfaced for review like other doubtful fields.
+_HONEYPOT_LABEL_RE = re.compile(
+    r"for robots only|if you(?:'|’| a)re (?:a )?human|leave this (?:field|input) (?:blank|empty)|"
+    r"do not (?:fill|enter|type)(?: in)? this (?:field|input)|honeypot",
+    re.IGNORECASE,
+)
+
+
+def is_honeypot_label(label: str) -> bool:
+    return bool(_HONEYPOT_LABEL_RE.search(label))
+
+
 def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) -> list[BrowserField]:
     if not isinstance(raw_fields, list):
         return []
@@ -1066,6 +1082,8 @@ def fields_from_dom_snapshot(raw_fields: Any, *, frame: FrameRef | None = None) 
         if not isinstance(raw, dict):
             continue
         label = str(raw.get("label") or "").strip()
+        if is_honeypot_label(label):
+            continue
         label_source = str(raw.get("label_source") or "").strip()
         selector = raw.get("selector")
         # Kept and surfaced, never dropped, on the same reasoning as an unlabelled
@@ -1890,8 +1908,15 @@ def _press_or_locate_js(action: str, match: str, extra_fields: str, *, locate_on
   }});"""
 
 
-def build_click_by_text_script(labels: list[str], *, locate_only: bool = False) -> str:
+def build_click_by_text_script(labels: list[str], *, locate_only: bool = False, after_selector: str | None = None) -> str:
+    """Click the one safe control carrying a requested label.
+
+    ``after_selector`` narrows the search to controls that come after that element
+    in document order and takes the first of them, which is how a form's own
+    button wins over a same-named one in the page header.
+    """
     labels_json = json.dumps([label for label in labels if label.strip()])
+    after_json = json.dumps(after_selector)
     tail = _press_or_locate_js(
         'click_by_text',
         'exact',
@@ -1947,6 +1972,27 @@ def build_click_by_text_script(labels: list[str], *, locate_only: bool = False) 
   }}
   const exactMatches = matches.filter((entry) => requested.includes(entry.normalized));
   const preferredMatches = exactMatches.length > 0 ? exactMatches : matches;
+  const afterSelector = {after_json};
+  if (afterSelector) {{
+    const anchor = document.querySelector(afterSelector);
+    const ordered = Array.from(document.querySelectorAll('button, a, input, select, textarea, [role="button"]'));
+    const anchorIndex = anchor ? ordered.indexOf(anchor) : -1;
+    const following = anchorIndex < 0
+      ? []
+      : preferredMatches
+        .map((entry) => ({{ entry, index: ordered.indexOf(entry.element) }}))
+        .filter((item) => item.index > anchorIndex)
+        .sort((a, b) => a.index - b.index);
+    if (following.length === 0) {{
+      return JSON.stringify({{
+        ok: false,
+        action: 'click_by_text',
+        message: 'no matching safe portal action was found after the form field',
+        candidate_count: candidates.length
+      }});
+    }}
+    const exact = following[0].entry;{tail}
+  }}
   const uniqueTargets = new Set(preferredMatches.map((entry) => `${{entry.normalized}}|${{entry.element.tagName.toLowerCase()}}|${{entry.element instanceof HTMLAnchorElement ? entry.element.href : ''}}`));
   if (uniqueTargets.size > 1) {{
     return JSON.stringify({{

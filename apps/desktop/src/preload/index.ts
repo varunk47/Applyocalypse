@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IpcChannels, IpcContracts, RendererEventSchemas } from "@applyocalypse/ipc-contracts";
+import type { PreferenceRuleDto } from "@applyocalypse/ipc-contracts";
 import type {
   ApplicationAnswer,
   ApplicationRun,
@@ -207,6 +208,19 @@ const api = {
         { limit, offset }
       )
   },
+  preferenceRules: {
+    list: (profileId: string) =>
+      invoke<{ profileId: string }, { items: PreferenceRuleDto[] }>(IpcContracts.preferenceRulesList.channel, { profileId }),
+    upsert: (input: {
+      id?: string;
+      profileId: string;
+      question: string;
+      answer: string;
+      conditions?: PreferenceRuleDto["conditions"];
+      enabled?: boolean;
+    }) => invoke<typeof input, PreferenceRuleDto>(IpcContracts.preferenceRulesUpsert.channel, input),
+    delete: (id: string) => invoke<{ id: string }, { deleted: boolean }>(IpcContracts.preferenceRulesDelete.channel, { id })
+  },
   gmail: {
     startOAuth: (input: { clientId: string; clientSecret: string }) =>
       invoke<{ clientId: string; clientSecret: string }, { ok: boolean; message: string; email: string | null }>(
@@ -220,6 +234,12 @@ const api = {
       ),
     disconnectOAuth: () =>
       invoke<Record<string, never>, { ok: boolean }>(IpcContracts.gmailDisconnectOAuth.channel, {})
+  },
+  jev: {
+    saveKey: (key: string) =>
+      invoke<{ key: string }, { configured: boolean }>(IpcContracts.jevSaveKey.channel, { key }),
+    getStatus: () => invoke<Record<string, never>, { configured: boolean }>(IpcContracts.jevGetStatus.channel, {}),
+    clearKey: () => invoke<Record<string, never>, { configured: boolean }>(IpcContracts.jevClearKey.channel, {})
   },
   system: {
     checkConverters: () =>

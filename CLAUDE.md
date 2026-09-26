@@ -10,6 +10,37 @@ automation while keeping the user in the loop. Stack: Electron 42 + SolidJS 1.9
 renderer, better-sqlite3 for durable state, and a packaged Python 3.12 worker
 that drives the browser and talks back over structured JSON events.
 
+## How to work (Karpathy guidelines)
+
+These bias toward caution over speed. For trivial tasks, use judgment.
+
+1. **Think before coding.** Don't assume, don't hide confusion, surface
+   tradeoffs. State assumptions explicitly; if uncertain, ask. If several
+   readings exist, present them rather than picking one silently. If a simpler
+   approach exists, say so and push back when warranted. If something is
+   unclear, stop, name what is confusing, and ask.
+2. **Simplicity first.** Write the minimum code that solves the problem, nothing
+   speculative: no features beyond the request, no abstractions for single-use
+   code, no unrequested configurability, no error handling for impossible
+   cases. If 200 lines could be 50, rewrite it. Would a senior engineer call it
+   overcomplicated? Then simplify.
+3. **Surgical changes.** Touch only what you must and clean up only your own
+   mess. Don't "improve" adjacent code, comments or formatting; don't refactor
+   what isn't broken; match the existing style. Mention unrelated dead code,
+   don't delete it. Remove imports, variables and functions that *your* change
+   orphaned. Every changed line should trace to the request.
+4. **Goal-driven execution.** Turn the task into verifiable goals ("fix the
+   bug" becomes "write a test that reproduces it, then make it pass") and loop
+   until they are verified. For multi-step work, state a short plan with a
+   check per step:
+   ```
+   1. [Step] -> verify: [check]
+   2. [Step] -> verify: [check]
+   ```
+
+Past mistakes made in this repo, and the rule each one taught, are in
+[`mistakes.md`](mistakes.md). Read it before starting.
+
 ## Layout (pnpm workspaces)
 
 - `apps/desktop` — Electron main + SolidJS renderer + preload (the app).
@@ -80,11 +111,11 @@ that drives the browser and talks back over structured JSON events.
   `APPLYO_PYTHON`.
 - **electron-vite**: keep `"electron"` (and `"better-sqlite3"`) in
   `rollupOptions.external` in `apps/desktop/electron.vite.config.ts`.
-- **`pnpm verify` audit step**: `pnpm audit --audit-level high` currently flags a
-  transitive **esbuild** advisory via the dev toolchain (`tsx`, `vitest > vite`),
-  so the audit step is non-zero pending an esbuild/tsx bump. The functional gates
-  (typecheck, test, test:python) are green; don't mistake the audit failure for a
-  code regression.
+- **`pnpm verify` audit step**: `pnpm audit --audit-level high` is clean and
+  blocking in CI. Transitive advisories are fixed with version-ranged entries in
+  root `pnpm.overrides` (e.g. `"undici@<6.27.0": "^6.27.0"`) so only the
+  vulnerable range moves. Python advisories get a pin in `requirements.in`, then
+  a targeted `pip-compile -P pkg`, never a full relock.
 
 ## Configuration
 

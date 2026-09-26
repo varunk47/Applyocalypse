@@ -3,9 +3,11 @@ import { randomUUID } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { app } from "electron";
 import { GmailOAuthService } from "../services/gmailOAuthService";
+import { JevKeyService } from "../services/jevKeyService";
 import { getLatestCoverLetterText } from "../services/documentIngestionService";
 import {
   JobRepository,
+  PreferenceRuleRepository,
   ProfileRepository,
   ProviderRepository,
   RunRepository,
@@ -121,7 +123,8 @@ export class LocalQueueScheduler {
       const canonicalProfile = profileRepository.getCanonicalProfile(item.profileId);
       const profileJsonFile = canonicalProfile ? join(runWorkDir, "canonical-profile.json") : undefined;
       if (profileJsonFile && canonicalProfile) {
-        writeFileSync(profileJsonFile, JSON.stringify(canonicalProfile, null, 2), "utf8");
+        const preferenceRules = new PreferenceRuleRepository(this.db).workerRules(item.profileId);
+        writeFileSync(profileJsonFile, JSON.stringify({ ...canonicalProfile, preferenceRules }, null, 2), "utf8");
       }
       const jobTextFile = jobTarget.sourceKind === "TEXT" ? join(runWorkDir, "job-description.txt") : undefined;
       if (jobTextFile) {
@@ -163,6 +166,11 @@ export class LocalQueueScheduler {
           : undefined;
         providerEnv = providerRuntime?.env;
         const secretPayload: Record<string, string> = { ...(providerRuntime?.secretEnv ?? {}) };
+        // With this key set, Jev chooses the worker's clicks on every portal.
+        const jevKey = new JevKeyService(new SettingsRepository(this.db)).getDecryptedKey();
+        if (jevKey) {
+          secretPayload.AI_GATEWAY_API_KEY = jevKey;
+        }
 
         const credentials = profileRepository.getApplicationCredentialReference(item.profileId);
         if (credentials?.applicationEmail && credentials.encryptedReference) {

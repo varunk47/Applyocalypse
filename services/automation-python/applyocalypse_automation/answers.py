@@ -494,6 +494,38 @@ def _sensitive_history_answer(*, field_label: str, field_type: str, category: st
     )
 
 
+def _preference_rule_answer(
+    *,
+    field_label: str,
+    field_type: str,
+    canonical_profile: dict[str, Any],
+    autofill_approved_defaults: bool,
+) -> ProposedApplicationAnswer | None:
+    """The user's own rule for this question on this job, ahead of any profile rule.
+
+    None when no rule covers the question. Two equally specific rules that
+    disagree produce an empty, review-gated answer rather than falling through to
+    the profile, because the user has said the profile value is not the answer.
+    """
+    # Imported here because preference_rules builds on this module's label matching.
+    from .preference_rules import resolve_preference_rule
+
+    outcome = resolve_preference_rule(
+        field_label, canonical_profile.get("preferenceRules"), canonical_profile.get("jobContext")
+    )
+    if outcome.ambiguous:
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=None,
+            confidence=0.20, source="UNKNOWN", requires_review=True,
+        )
+    if outcome.answer is None:
+        return None
+    return ProposedApplicationAnswer(
+        field_label=field_label, field_type=field_type, proposed_value=outcome.answer,
+        confidence=0.95, source="PROFILE", requires_review=not autofill_approved_defaults,
+    )
+
+
 def propose_answer_for_detected_field(
     *,
     field_label: str,
@@ -505,16 +537,23 @@ def propose_answer_for_detected_field(
 ) -> ProposedApplicationAnswer:
     """Propose an answer for a detected field, enforcing the always-review gate."""
     category = sensitive_review_category(field_label, field_name=field_name)
-    if category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
-        return _sensitive_history_answer(field_label=field_label, field_type=field_type, category=category)
-
-    answer = _propose_answer(
+    answer = _preference_rule_answer(
         field_label=field_label,
         field_type=field_type,
         canonical_profile=canonical_profile,
         autofill_approved_defaults=autofill_approved_defaults,
-        jd_text=jd_text,
     )
+    if answer is None and category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
+        return _sensitive_history_answer(field_label=field_label, field_type=field_type, category=category)
+
+    if answer is None:
+        answer = _propose_answer(
+            field_label=field_label,
+            field_type=field_type,
+            canonical_profile=canonical_profile,
+            autofill_approved_defaults=autofill_approved_defaults,
+            jd_text=jd_text,
+        )
     if category is None:
         return answer
     # Defence in depth: whichever rule produced the answer, the gate still holds.

@@ -1340,3 +1340,26 @@ def test_a_field_the_page_never_labeled_is_handed_to_a_person_not_guessed_at(tmp
         event["payload"].get("reason") for event in events if event["event_type"] == "USER_REVIEW_REQUIRED"
     ]
     assert "SYNTHETIC_FIELD_LABEL" in review_reasons
+
+
+def test_select_generated_file_for_upload_never_picks_a_do_not_upload_copy(tmp_path):
+    compare_path = tmp_path / "Ada Example Resume rebuilt.pdf"
+    tailored_path = tmp_path / "Ada Example Resume.pdf"
+    compare_path.write_bytes(b"%PDF-1.7")
+    tailored_path.write_bytes(b"%PDF-1.7")
+    field = BrowserField(
+        field_id="field-resume",
+        label="Upload resume",
+        field_type="file",
+        selector="#resume",
+        required=True,
+        confidence=0.92,
+        metadata={"accept": ".pdf"},
+    )
+    compare = {"id": "compare", "fileKind": "RESUME", "format": "PDF", "localPath": str(compare_path),
+               "uploadStatus": "NOT_UPLOADED", "doNotUpload": True}
+    tailored = {"id": "tailored", "fileKind": "RESUME", "format": "PDF", "localPath": str(tailored_path),
+                "uploadStatus": "NOT_UPLOADED"}
+
+    assert select_generated_file_for_upload(field, [compare, tailored])["id"] == "tailored"
+    assert select_generated_file_for_upload(field, [compare]) is None

@@ -22,6 +22,7 @@ export const GeneratedFilePayloadSchema = z.object({
   retention_policy: z.enum(["DELETE_AFTER_UPLOAD", "DELETE_AFTER_RETENTION", "KEEP_UNTIL_USER_DELETES"]),
   delete_after: IsoDateTimeSchema.nullable(),
   review_only: z.boolean().optional(),
+  do_not_upload: z.boolean().optional(),
   validation_report_path: LocalPathSchema.optional()
 }).strict();
 

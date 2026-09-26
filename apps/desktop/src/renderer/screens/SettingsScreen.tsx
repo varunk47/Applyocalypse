@@ -4,7 +4,7 @@ import {
   HARD_MAX_CONCURRENT_APPLICATIONS,
 } from '@applyocalypse/config'
 import { createStore } from 'solid-js/store'
-import { ShieldCheck, Mail, Wrench } from 'lucide-solid'
+import { ShieldCheck, Mail, Wrench, KeyRound } from 'lucide-solid'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import type { ThemePreference } from '@applyocalypse/shared-types'
 import { PROVIDER_OPTIONS, type ProviderOptionValue } from '../utils/providerOptions'
@@ -137,6 +137,40 @@ export default function SettingsScreen() {
   const disconnectGmail = async () => {
     await window.applyocalypse.gmail.disconnectOAuth()
     setGmailStatus({ connected: false, email: null })
+  }
+
+  const [jevConfigured, setJevConfigured] = createSignal(false)
+  const [jevKeyInput, setJevKeyInput] = createSignal('')
+  const [jevSaving, setJevSaving] = createSignal(false)
+  const [jevError, setJevError] = createSignal<string | null>(null)
+
+  onMount(async () => {
+    const status = await window.applyocalypse.jev.getStatus()
+    setJevConfigured(status.configured)
+  })
+
+  const saveJevKey = async () => {
+    const key = jevKeyInput().trim()
+    if (!key) {
+      setJevError('Enter your Vercel AI Gateway key.')
+      return
+    }
+    setJevError(null)
+    setJevSaving(true)
+    try {
+      const status = await window.applyocalypse.jev.saveKey(key)
+      setJevConfigured(status.configured)
+      setJevKeyInput('')
+    } catch {
+      setJevError('The key could not be saved.')
+    } finally {
+      setJevSaving(false)
+    }
+  }
+
+  const clearJevKey = async () => {
+    const status = await window.applyocalypse.jev.clearKey()
+    setJevConfigured(status.configured)
   }
 
   return (
@@ -426,6 +460,54 @@ export default function SettingsScreen() {
             </button>
           </div>
         </Show>
+        </Show>
+      </div>
+
+      {/* Section 6: Jev browser driver */}
+      <div style={{ 'margin-top': '2rem' }}>
+        <div class="section-header">
+          <div>
+            <div class="panel-kicker">Browser driver</div>
+            <h3>Jev (Vercel AI Gateway)</h3>
+          </div>
+          <KeyRound size={20} aria-hidden="true" />
+        </div>
+        <Show
+          when={jevConfigured()}
+          fallback={
+            <div class="starter-profile">
+              <p class="fine-print">With a key saved, Jev chooses each click on every portal. Your answers are still typed by the app, personal details are hidden from Jev, and it never submits.</p>
+              <label>
+                <span>AI Gateway API key</span>
+                <input
+                  type="password"
+                  value={jevKeyInput()}
+                  onInput={(e) => setJevKeyInput(e.currentTarget.value)}
+                  autocomplete="off"
+                />
+              </label>
+              <Show when={jevError()}>
+                <p class="fine-print" style={{ color: 'var(--danger)' }}>{jevError()}</p>
+              </Show>
+              <button
+                class="secondary-action"
+                type="button"
+                disabled={jevSaving()}
+                onClick={() => void saveJevKey()}
+              >
+                <KeyRound size={17} aria-hidden="true" />
+                <span>{jevSaving() ? 'Saving...' : 'Save key'}</span>
+              </button>
+            </div>
+          }
+        >
+          <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
+            <span style={{ color: 'var(--success)' }}>CONFIGURED</span>
+            <strong>Jev drives the browser</strong>
+            <button class="secondary-action" type="button" onClick={() => void clearJevKey()}>
+              Remove key
+            </button>
+          </div>
         </Show>
       </div>
     </section>

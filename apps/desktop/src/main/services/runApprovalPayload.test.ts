@@ -20,6 +20,7 @@ const generatedFile = (overrides: Partial<GeneratedFile> = {}): GeneratedFile =>
   retentionPolicy: "DELETE_AFTER_UPLOAD",
   deleteAfter: null,
   deletedAt: null,
+  doNotUpload: false,
   ...overrides
 });
 
@@ -40,6 +41,15 @@ const uploadedFile = (overrides: Partial<UploadedFile> = {}): UploadedFile => ({
 });
 
 describe("buildControlDocumentFiles", () => {
+  it("never offers a do-not-upload file for upload", () => {
+    const files = buildControlDocumentFiles({
+      generatedFiles: [generatedFile({ id: "comparison-copy", doNotUpload: true }), generatedFile()],
+      uploadedFiles: []
+    });
+
+    expect(files.map((file) => file.id)).toEqual(["generated-resume"]);
+  });
+
   it("includes generated files and reviewed cover-letter uploads", () => {
     const files = buildControlDocumentFiles({
       generatedFiles: [generatedFile()],
