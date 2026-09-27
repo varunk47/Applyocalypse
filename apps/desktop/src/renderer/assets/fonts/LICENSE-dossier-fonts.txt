@@ -1,9 +1,0 @@
-Bundled fonts for the Instrument design system, all licensed under the
-SIL Open Font License 1.1 (https://openfontlicense.org):
-
-- Hanken Grotesk — Copyright 2020 The Hanken Grotesk Project Authors
-  (https://github.com/marcologous/hanken-grotesk)
-- JetBrains Mono — Copyright 2020 The JetBrains Mono Project Authors
-  (https://github.com/JetBrains/JetBrainsMono)
-
-Downloaded as woff2 (latin subset) from Google Fonts on 2026-07-03.

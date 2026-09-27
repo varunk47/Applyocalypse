@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import Any
 
 # Standard "highest level of education" ladder; matched against resume degree text.
@@ -551,6 +552,34 @@ def _sensitive_history_answer(
     )
 
 
+_SIGNATURE_DATE_PHRASES: tuple[str, ...] = ("signature date", "date of signature", "date signed", "today's date")
+_SIGNATURE_PHRASES: tuple[str, ...] = ("signature", "e-signature", "esignature", "sign your name", "type your full name")
+
+
+def _signature_answer(
+    *, field_label: str, field_type: str, tokens: tuple[str, ...], profile: dict[str, Any]
+) -> ProposedApplicationAnswer | None:
+    """Sign with the legal name and today's date, or None when the field is no signature.
+
+    Signing is a legal act, so the answer is always held for the user to read
+    before submit. A checkbox or radio ("I agree that typing my name is my
+    signature") gets no value: a name typed there is never right.
+    """
+    if _matches_any(tokens, _SIGNATURE_DATE_PHRASES):
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=date.today().strftime("%m/%d/%Y"),
+            confidence=0.90, source="PROFILE", requires_review=True,
+        )
+    if not _matches_any(tokens, _SIGNATURE_PHRASES):
+        return None
+    legal_name = profile.get("legalName") if field_type not in _CHOICE_FIELD_TYPES else None
+    value = str(legal_name).strip() if legal_name else None
+    return ProposedApplicationAnswer(
+        field_label=field_label, field_type=field_type, proposed_value=value or None,
+        confidence=0.90 if value else 0.20, source="PROFILE" if value else "UNKNOWN", requires_review=True,
+    )
+
+
 def _preference_rule_answer(
     *,
     field_label: str,
@@ -631,6 +660,11 @@ def _propose_answer(
     tokens = label_tokens(field_label)
     # Fields about somebody else never receive the applicant's own details.
     foreign_subject = _matches_any(tokens, _FOREIGN_SUBJECT_QUALIFIERS)
+
+    # ── Signature: ahead of the name rules, which would answer it unreviewed ──
+    signature = _signature_answer(field_label=field_label, field_type=field_type, tokens=tokens, profile=profile)
+    if signature is not None:
+        return signature
 
     # ── References: the user's own list, never the applicant's details ─────────
     reference = _reference_answer(tokens=tokens, profile=profile)
