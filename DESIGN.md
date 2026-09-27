@@ -1,10 +1,9 @@
-# Design: the card catalog
+# Design: soft UI
 
-Applyocalypse looks like a library card catalog: an oak drawer front, white
-index cards with a blue ruled line and a red header rule, and colored guide tabs
-that tell you what state a card is in. It should read as a tool a person keeps
-records in, not as a generated dashboard. Light is the main theme. Dark ("after
-hours") comes second.
+Applyocalypse uses light neumorphism. Every surface shares one soft grey. Elements
+are either pressed out of it (raised) or pressed into it (inset). Depth does the
+separating, so there are almost no borders and no decoration. Light is the main
+theme. Dark comes second and uses the same rules on a charcoal base.
 
 Tokens live at the top of `apps/desktop/src/renderer/styles/app.css`. Fonts are
 in `apps/desktop/src/renderer/fonts.css`.
@@ -13,53 +12,44 @@ in `apps/desktop/src/renderer/fonts.css`.
 
 | Role | Face | Where |
 |------|------|-------|
-| Everything a person reads | Atkinson Hyperlegible Next (`--sans`, `--display`) | UI, headings, labels |
-| Anything the app typed for you | Courier Prime (`--mono`) | filled answers, file names, paths, the titlebar label |
+| Everything | Onest (`--sans`, `--display`), bundled locally | UI, headings, labels |
+| File paths only | system monospace (`--mono`) | settings paths |
 
-- The split in type carries meaning: Courier means "the machine wrote this, check it".
-- There are no uppercase micro-labels and no letter-spacing. Labels are 700 weight, 12px or larger.
+- Headings are 650 to 700 weight, never 800 or heavier. There are no uppercase micro-labels.
 - Nothing is smaller than 12px.
 
 ## Color
 
 | Token | Light | Use |
 |-------|-------|-----|
-| `--paper` | #e7e6e3 | the desk behind the cards |
-| `--card` | #fff | every surface you read from |
-| `--ink` / `--ink-2` / `--ink-3` | #1d2126 / #50565e / #676d75 | text, from primary to quiet |
-| `--rule-red` | #e0474c | the header rule on a card, the active tab, the headline underline |
-| `--rule-blue` | #d6e6f5 | ruled lines |
-| `--wax` | #2a5fa8 | links and focus only |
-| `--armed` | #5a3aa6 | the submit gate, and nothing else |
-| `--danger` | #b3261e | errors |
+| `--paper` = `--card` = `--chrome` | #e6eaf0 | the one surface |
+| `--ink` / `--ink-2` / `--ink-3` | #232a36 / #465163 / #566174 | text, tuned for 4.5:1 on the surface |
+| `--wax` | #4353c9 | the accent: primary buttons, focus, active step, emphasis |
+| `--armed` | #6a45d6 | the submit gate, and nothing else |
+| `--danger` | #b4322a | errors |
 
-Status always shows as a guide tab, and the color always comes with the status word:
-
-| Tab | Token | Meaning |
-|-----|-------|---------|
-| manila | `--tab-queued` | queued |
-| salmon | `--tab-needs` | needs you |
-| sky | `--tab-running` | running |
-| mint | `--tab-done` | done or filed |
-| grey | `--tab-failed` | failed |
+Status shows as a soft pill, and the color always comes with the status word:
+`--tab-queued`, `--tab-needs`, `--tab-running`, `--tab-done`, `--tab-failed`.
 
 ## Shape and depth
 
-- Cards have a 3px radius (`--r-card`). Tabs have 6px on the top corners only (`--r-tab`).
-- Depth comes from edge lines (`--card-shadow` is a 1px bottom line), not blurred drop shadows. The toast is the one floating element and gets a small shadow.
-- No side-stripe accent borders. To mark state, use a status tab or a full border in the state color.
-- Primary buttons are filled with ink. The submit button is filled with violet, so it looks like no other button.
+- `--neu-raised` / `--neu-raised-sm`: a white shadow up-left and a cool grey one down-right. Used for cards, buttons and chips.
+- `--neu-inset` / `--neu-inset-sm`: the same shadows, inset. Used for inputs, drop zones, nav and segmented tracks, and pressed or picked states.
+- State is shown with an inset 2px ring in the state colour (`inset 0 0 0 2px var(--wax)`), never a side stripe.
+- Radii: `--r-card` 16px for cards, `--r-sm` 11px for buttons and fields, pills for nav, chips and status.
+- The primary button is the only filled surface in view (indigo). The submit button is violet so it looks like no other button.
+- Focus is a solid 2px indigo outline, because soft shadows alone are not visible enough.
 
 ## Layout
 
-- The titlebar is the oak drawer front, with a brass label holder for the name.
-- Navigation is a strip of guide tabs across the top. The active tab is a white card with a red top rule. The number of runs waiting on you shows as a salmon chip reading "N need you".
-- Onboarding is one column of index cards. Each group has a red header rule, and a confirm bar puts the note on the left and the way forward on the right.
+- The titlebar is part of the surface: a small indigo mark, the name and the vault note.
+- Navigation is an inset pill track with the current screen raised inside it.
+- Onboarding is one column of raised cards; nested entries sit inset inside their card.
 
 ## Motion
 
-- A new screen is pulled up out of the drawer (y 10px to 0 with a fade), then dropped back.
-- Only transform and opacity animate.
+- A new screen rises 10px with a fade, then drops back.
+- Only transform, opacity and shadows animate.
 - Everything respects `prefers-reduced-motion`.
 
 ## Onboarding order
