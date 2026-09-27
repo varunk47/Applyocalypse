@@ -252,7 +252,7 @@ export default function DocumentsScreen() {
               when={generated().length > 0}
               fallback={
                 <div class="empty-state">
-                  <span>{generated.loading ? 'Loading tailored documents...' : 'Tailored copies appear here as missions run. Paste a job link on Missions to start one.'}</span>
+                  <span>{generated.loading ? 'Loading tailored documents…' : 'Tailored copies appear here as missions run. Paste a job link on Missions to start one.'}</span>
                 </div>
               }
             >

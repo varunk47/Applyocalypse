@@ -374,7 +374,7 @@ export default function RunConsoleScreen() {
                     void approveFinalSubmit().finally(() => setGateBusy(false))
                   }}
                 >
-                  {gateBusy() ? 'Working...' : 'Approve final submit'}
+                  {gateBusy() ? 'Working…' : 'Approve final submit'}
                 </button>
                 <button
                   class="btn-quiet"

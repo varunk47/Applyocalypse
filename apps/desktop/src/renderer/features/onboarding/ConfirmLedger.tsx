@@ -34,6 +34,8 @@ export type ExperienceRow = {
   location: string
   startDate: string
   endDate: string
+  /** Portals ask why each role ended; held for review before any submit. */
+  reasonForLeaving: string
   bullets: string[]
 }
 
@@ -212,6 +214,7 @@ export function ConfirmLedger(props: Props) {
                     class="ob-entry-title"
                     value={entry.title}
                     placeholder="Title"
+                    aria-label="Job title"
                     onInput={(event) => props.setExperience(index(), 'title', event.currentTarget.value)}
                   />
                   <Flag confidence={experienceConfidence(index())} />
@@ -228,24 +231,36 @@ export function ConfirmLedger(props: Props) {
                   <input
                     value={entry.company}
                     placeholder="Company"
+                    aria-label="Company"
                     onInput={(event) => props.setExperience(index(), 'company', event.currentTarget.value)}
                   />
                   <input
                     value={entry.location}
                     placeholder="Location"
+                    aria-label="Location"
                     onInput={(event) => props.setExperience(index(), 'location', event.currentTarget.value)}
                   />
                   <input
                     value={entry.startDate}
                     placeholder="MM/DD/YYYY"
+                    aria-label="Start date"
                     onInput={(event) => props.setExperience(index(), 'startDate', event.currentTarget.value)}
                   />
                   <input
                     value={entry.endDate}
                     placeholder="MM/DD/YYYY or blank"
+                    aria-label="End date"
                     onInput={(event) => props.setExperience(index(), 'endDate', event.currentTarget.value)}
                   />
                 </div>
+                <label class="form-field ob-entry-reason">
+                  <span>Why you left</span>
+                  <input
+                    value={entry.reasonForLeaving}
+                    placeholder={entry.endDate ? 'e.g. Moved to a larger team' : 'Leave blank if you still work here'}
+                    onInput={(event) => props.setExperience(index(), 'reasonForLeaving', event.currentTarget.value)}
+                  />
+                </label>
                 <p class="fine-print">
                   {entry.bullets.length} bullet{entry.bullets.length === 1 ? '' : 's'} kept for tailoring
                 </p>
@@ -271,6 +286,7 @@ export function ConfirmLedger(props: Props) {
                     class="ob-entry-title"
                     value={entry.institution}
                     placeholder="Institution"
+                    aria-label="Institution"
                     onInput={(event) => props.setEducation(index(), 'institution', event.currentTarget.value)}
                   />
                   <Flag confidence={educationConfidence(index())} />
@@ -287,21 +303,25 @@ export function ConfirmLedger(props: Props) {
                   <input
                     value={entry.degree}
                     placeholder="Degree"
+                    aria-label="Degree"
                     onInput={(event) => props.setEducation(index(), 'degree', event.currentTarget.value)}
                   />
                   <input
                     value={entry.field}
                     placeholder="Field"
+                    aria-label="Field"
                     onInput={(event) => props.setEducation(index(), 'field', event.currentTarget.value)}
                   />
                   <input
                     value={entry.startDate}
                     placeholder="MM/DD/YYYY"
+                    aria-label="Start date"
                     onInput={(event) => props.setEducation(index(), 'startDate', event.currentTarget.value)}
                   />
                   <input
                     value={entry.endDate}
                     placeholder="MM/DD/YYYY"
+                    aria-label="End date"
                     onInput={(event) => props.setEducation(index(), 'endDate', event.currentTarget.value)}
                   />
                 </div>

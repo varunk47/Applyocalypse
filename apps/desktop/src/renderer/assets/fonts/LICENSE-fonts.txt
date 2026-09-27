@@ -1,0 +1,10 @@
+Bundled fonts for the card-catalog design system, all licensed under the
+SIL Open Font License 1.1 (https://openfontlicense.org):
+
+- Atkinson Hyperlegible Next: Copyright 2020-2024 Braille Institute of America
+  (https://www.brailleinstitute.org/freefont)
+- Courier Prime: Copyright 2013 The Courier Prime Project Authors
+  (https://github.com/quoteunquoteapps/CourierPrime)
+
+Taken as woff2 (latin and latin-ext subsets) from the @fontsource packages,
+version 5.3.0, on 2026-09-26.

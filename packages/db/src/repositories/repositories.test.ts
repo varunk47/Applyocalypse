@@ -41,6 +41,8 @@ describe("db repositories", () => {
     const { db } = createDb();
     try {
       const settings = new SettingsRepository(db);
+      // Light is the default until the user picks otherwise.
+      expect(settings.getThemePreference()).toBe("light");
       settings.setThemePreference("dark");
       expect(settings.getThemePreference()).toBe("dark");
     } finally {

@@ -11,7 +11,7 @@
     <script>
       try {
         var state = window.applyocalypse && window.applyocalypse.theme.getInitialState();
-        var active = state && state.activeTheme ? state.activeTheme : "dark";
+        var active = state && state.activeTheme ? state.activeTheme : "light";
         document.documentElement.dataset.theme = active;
         if (active === "dark") {
           document.documentElement.classList.add("dark");
@@ -19,8 +19,7 @@
           document.documentElement.classList.remove("dark");
         }
       } catch {
-        document.documentElement.dataset.theme = "dark";
-        document.documentElement.classList.add("dark");
+        document.documentElement.dataset.theme = "light";
       }
     </script>
   </head>

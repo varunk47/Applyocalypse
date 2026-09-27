@@ -6,18 +6,19 @@ const settle = (el: Element, done: () => void, props: Record<string, unknown>) =
   done()
 }
 
-export const enterFromRight = (el: Element, done: () => void) => {
-  if (prefersReducedMotion()) return settle(el, done, { x: 0, opacity: 1, scale: 1 })
+// A screen is a card pulled up out of the drawer, then dropped back in.
+export const pullCardForward = (el: Element, done: () => void) => {
+  if (prefersReducedMotion()) return settle(el, done, { y: 0, opacity: 1 })
   gsap.fromTo(el,
-    { x: 32, opacity: 0, scale: 0.994 },
-    { x: 0, opacity: 1, scale: 1, duration: dur.slow, ease: ease.out, onComplete: done }
+    { y: 10, opacity: 0 },
+    { y: 0, opacity: 1, duration: dur.normal, ease: ease.out, onComplete: done }
   )
 }
 
-export const exitToLeft = (el: Element, done: () => void) => {
+export const dropCardBack = (el: Element, done: () => void) => {
   if (prefersReducedMotion()) return done()
   gsap.to(el,
-    { x: -24, opacity: 0, scale: 0.994, duration: dur.fast, ease: ease.in, onComplete: done }
+    { y: 6, opacity: 0, duration: dur.fast, ease: ease.in, onComplete: done }
   )
 }
 

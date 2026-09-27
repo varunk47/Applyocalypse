@@ -9,6 +9,8 @@ import {
   type WorkAuthorizationStatus,
 } from '@applyocalypse/shared-types'
 import { WorkAuthorizationFields } from '../features/profile/WorkAuthorizationFields'
+import { MAX_PROFILE_REFERENCES, type LegalFields, type ReferenceRow } from '../features/onboarding/BackgroundStep'
+import { Choice } from '../features/onboarding/EqualEmploymentStep'
 import { useProfileStore } from '../contexts/ProfileStore'
 
 /** Rehydrate the editor from whatever the profile holds; the old free-text blob reads back as unanswered. */
@@ -24,7 +26,7 @@ const applicationPasswordIsValid = (v: string) =>
   /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[^A-Za-z0-9]).{12,}$/.test(v)
 
 // ── Local editable snapshot of structured canonical sections ─────────────────
-type LocalExperience = { company: string; title: string; location: string; startDate: string; endDate: string; bullets: string[]; tools: string[] }
+type LocalExperience = { company: string; title: string; location: string; startDate: string; endDate: string; reasonForLeaving: string; bullets: string[]; tools: string[] }
 type LocalProject    = { name: string; role: string; summary: string; bullets: string[]; tools: string[]; links: string[] }
 type LocalEducation  = { institution: string; degree: string; field: string; gpa: string; startDate: string; endDate: string; details: string[] }
 type LocalSkillGroup = { label: string; skills: string[] }
@@ -33,6 +35,7 @@ const fromCanonical = (c: CanonicalProfile | null) => ({
   experience: (c?.experience ?? []).map((e) => ({
     company: e.company, title: e.title,
     location: e.location ?? '', startDate: e.startDate ?? '', endDate: e.endDate ?? '',
+    reasonForLeaving: e.reasonForLeaving ?? '',
     bullets: [...(e.bullets ?? [])],
     tools: [...(e.tools ?? [])],
   })) as LocalExperience[],
@@ -64,6 +67,11 @@ export default function ProfileScreen() {
   })
 
   const [structured, setStructured] = createStore(fromCanonical(null))
+  const [background, setBackground] = createStore({
+    references: [] as ReferenceRow[],
+    criminalRecordDefault: 'No' as LegalFields['criminalRecordDefault'],
+    previouslyEmployedDefault: 'No' as LegalFields['previouslyEmployedDefault'],
+  })
   const [skillInput, setSkillInput] = createSignal<Record<number, string>>({})
   let hydratedProfileId = ''
 
@@ -81,6 +89,18 @@ export default function ProfileScreen() {
       profileApplicationEmail: profile.applicationEmail ?? profile.email ?? '',
       profileApplicationPassword: '',
       profileGmailOtpEnabled: profile.otpHandlingEnabled,
+    })
+    setBackground({
+      references: profile.references.map((reference) => ({
+        name: reference.name,
+        relationship: reference.relationship ?? '',
+        company: reference.company ?? '',
+        title: reference.title ?? '',
+        email: reference.email ?? '',
+        phone: reference.phone ?? '',
+      })),
+      criminalRecordDefault: profile.equalEmploymentDefaults.criminalRecordDefault,
+      previouslyEmployedDefault: profile.equalEmploymentDefaults.previouslyEmployedDefault,
     })
   })
 
@@ -119,6 +139,28 @@ export default function ProfileScreen() {
       phone: form.profilePhone || null,
       location: form.profileLocation || null,
       workAuthorization: workAuthorizationValue(),
+    })
+  }
+
+  const submitBackground = () => {
+    if (!state.profile) return
+    void saveProfile({
+      ...state.profile,
+      references: background.references
+        .filter((reference) => reference.name.trim())
+        .map((reference) => ({
+          name: reference.name.trim(),
+          relationship: reference.relationship.trim() || null,
+          company: reference.company.trim() || null,
+          title: reference.title.trim() || null,
+          email: reference.email.trim() || null,
+          phone: reference.phone.trim() || null,
+        })),
+      equalEmploymentDefaults: {
+        ...state.profile.equalEmploymentDefaults,
+        criminalRecordDefault: background.criminalRecordDefault,
+        previouslyEmployedDefault: background.previouslyEmployedDefault,
+      },
     })
   }
 
@@ -170,7 +212,7 @@ export default function ProfileScreen() {
               setStatus={(value) => setForm('workAuthStatus', value)}
               setSponsorship={(value) => setForm('workAuthSponsorship', value)}
             />
-            <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>{state.isLoading ? 'Saving...' : 'Save identity'}</span></button>
+            <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>{state.isLoading ? 'Saving…' : 'Save identity'}</span></button>
           </div>
         </details>
 
@@ -200,6 +242,10 @@ export default function ProfileScreen() {
                       <input class="entry-date-input" value={entry.startDate} placeholder="Start" onInput={(e) => setStructured('experience', idx(), 'startDate', e.currentTarget.value)} />
                       <input class="entry-date-input" value={entry.endDate} placeholder="End" onInput={(e) => setStructured('experience', idx(), 'endDate', e.currentTarget.value)} />
                     </div>
+                    <label class="form-field entry-reason">
+                      <span>Why you left</span>
+                      <input value={entry.reasonForLeaving} placeholder={entry.endDate ? 'e.g. Moved to a larger team' : 'Leave blank if you still work here'} onInput={(e) => setStructured('experience', idx(), 'reasonForLeaving', e.currentTarget.value)} />
+                    </label>
                   </div>
                   <button class="icon-button" type="button" aria-label="Remove entry" onClick={() => { if (!window.confirm('Remove this experience entry and all its bullets?')) return; setStructured('experience', produce((arr) => { arr.splice(idx(), 1) })) }}><X size={14} /></button>
                 </div>
@@ -222,7 +268,7 @@ export default function ProfileScreen() {
             )}
           </For>
           <button class="secondary-action" type="button" style={{ 'margin-top': '0.5rem' }}
-            onClick={() => setStructured('experience', produce((arr) => { arr.push({ company: '', title: '', location: '', startDate: '', endDate: '', bullets: [''], tools: [] }) }))}>
+            onClick={() => setStructured('experience', produce((arr) => { arr.push({ company: '', title: '', location: '', startDate: '', endDate: '', reasonForLeaving: '', bullets: [''], tools: [] }) }))}>
             <Plus size={14} /><span>Add experience</span>
           </button>
         </details>
@@ -362,7 +408,50 @@ export default function ProfileScreen() {
           </button>
         </details>
 
-        {/* ── Section 6: Application credentials ── */}
+        {/* ── Section 6: Legal answers and references ── */}
+        <details>
+          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>
+            Legal and references ({background.references.length} of {MAX_PROFILE_REFERENCES})
+          </summary>
+          <div class="starter-profile profile-editor">
+            <Choice
+              label="Have you ever been convicted of a crime?"
+              options={['Yes', 'No']}
+              value={background.criminalRecordDefault}
+              onChange={(value) => setBackground('criminalRecordDefault', value === 'Yes' ? 'Yes' : 'No')}
+            />
+            <Choice
+              label="Have you worked for the employer you are applying to before?"
+              options={['Yes', 'No']}
+              value={background.previouslyEmployedDefault}
+              onChange={(value) => setBackground('previouslyEmployedDefault', value === 'Yes' ? 'Yes' : 'No')}
+            />
+            <For each={background.references}>
+              {(reference, idx) => (
+                <div class="structured-entry">
+                  <div class="structured-entry-header">
+                    <span class="ob-entry-label">Reference {idx() + 1}</span>
+                    <button class="icon-button" type="button" aria-label={`Remove reference ${idx() + 1}`} onClick={() => setBackground('references', produce((arr) => { arr.splice(idx(), 1) }))}><X size={14} aria-hidden="true" /></button>
+                  </div>
+                  <label><span>Full name</span><input value={reference.name} onInput={(e) => setBackground('references', idx(), 'name', e.currentTarget.value)} /></label>
+                  <label><span>Relationship</span><input value={reference.relationship} onInput={(e) => setBackground('references', idx(), 'relationship', e.currentTarget.value)} /></label>
+                  <label><span>Company</span><input value={reference.company} onInput={(e) => setBackground('references', idx(), 'company', e.currentTarget.value)} /></label>
+                  <label><span>Their title</span><input value={reference.title} onInput={(e) => setBackground('references', idx(), 'title', e.currentTarget.value)} /></label>
+                  <label><span>Email</span><input type="email" value={reference.email} onInput={(e) => setBackground('references', idx(), 'email', e.currentTarget.value)} /></label>
+                  <label><span>Phone</span><input type="tel" value={reference.phone} onInput={(e) => setBackground('references', idx(), 'phone', e.currentTarget.value)} /></label>
+                </div>
+              )}
+            </For>
+            <Show when={background.references.length < MAX_PROFILE_REFERENCES}>
+              <button class="secondary-action small" type="button" onClick={() => setBackground('references', produce((arr) => { arr.push({ name: '', relationship: '', company: '', title: '', email: '', phone: '' }) }))}>
+                <Plus size={12} aria-hidden="true" /><span>Add a reference</span>
+              </button>
+            </Show>
+            <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitBackground}><Save size={17} aria-hidden="true" /><span>Save legal and references</span></button>
+          </div>
+        </details>
+
+        {/* ── Section 7: Application credentials ── */}
         <details>
           <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>Application identity</summary>
           <div class="starter-profile credential-editor">

@@ -247,7 +247,7 @@ export default function SettingsScreen() {
         </Show>
         <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProviderKey}>
           <ShieldCheck size={17} aria-hidden="true" />
-          <span>{state.isLoading ? 'Saving...' : 'Save key reference'}</span>
+          <span>{state.isLoading ? 'Saving…' : 'Save key reference'}</span>
         </button>
       </div>
 
@@ -361,7 +361,7 @@ export default function SettingsScreen() {
               onClick={() => void checkConverters()}
             >
               <Wrench size={17} aria-hidden="true" />
-              <span>{convertersLoading() ? 'Checking...' : 'Check converters'}</span>
+              <span>{convertersLoading() ? 'Checking…' : 'Check converters'}</span>
             </button>
           }
         >
@@ -375,7 +375,7 @@ export default function SettingsScreen() {
                   </span>
                   <strong>{CONVERTER_LABELS[key]}</strong>
                   <Show when={status().available && status().version}>
-                    <span style={{ color: 'var(--text-secondary)', 'font-size': '0.78rem' }}>{status().version}</span>
+                    <span style={{ color: 'var(--ink-3)', 'font-size': '12px' }}>{status().version}</span>
                   </Show>
                   <Show when={!status().available}>
                     <a
@@ -399,7 +399,7 @@ export default function SettingsScreen() {
             disabled={convertersLoading()}
             onClick={() => void checkConverters()}
           >
-            <span>{convertersLoading() ? 'Checking...' : 'Re-check'}</span>
+            <span>{convertersLoading() ? 'Checking…' : 'Re-check'}</span>
           </button>
         </Show>
       </div>
@@ -413,7 +413,7 @@ export default function SettingsScreen() {
           </div>
           <Mail size={20} aria-hidden="true" />
         </div>
-        <Show when={!gmailStatusLoading()} fallback={<p class="fine-print" style={{ 'margin-top': '0.5rem' }}>Checking Gmail connection...</p>}>
+        <Show when={!gmailStatusLoading()} fallback={<p class="fine-print" style={{ 'margin-top': '0.5rem' }}>Checking Gmail connection…</p>}>
         <Show
           when={gmailStatus().connected}
           fallback={
@@ -447,7 +447,7 @@ export default function SettingsScreen() {
                 onClick={() => void connectGmail()}
               >
                 <Mail size={17} aria-hidden="true" />
-                <span>{gmailConnecting() ? 'Connecting...' : 'Connect Gmail'}</span>
+                <span>{gmailConnecting() ? 'Connecting…' : 'Connect Gmail'}</span>
               </button>
             </div>
           }
@@ -496,7 +496,7 @@ export default function SettingsScreen() {
                 onClick={() => void saveJevKey()}
               >
                 <KeyRound size={17} aria-hidden="true" />
-                <span>{jevSaving() ? 'Saving...' : 'Save key'}</span>
+                <span>{jevSaving() ? 'Saving…' : 'Save key'}</span>
               </button>
             </div>
           }

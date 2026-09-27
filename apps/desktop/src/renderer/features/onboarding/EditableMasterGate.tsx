@@ -47,7 +47,7 @@ export function EditableMasterGate(props: Props) {
           onClick={() => props.onConfirm()}
         >
           <ArrowRight size={16} aria-hidden="true" />
-          <span>{props.isBusy ? 'Confirming...' : 'Use this for tailoring'}</span>
+          <span>{props.isBusy ? 'Confirming…' : 'Use this for tailoring'}</span>
         </button>
       </div>
 

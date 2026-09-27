@@ -15,6 +15,8 @@ import {
   type IdentityFields,
 } from '../features/onboarding/ConfirmLedger'
 import { FinalDetails, type CredentialFields, type ProviderFields } from '../features/onboarding/FinalDetails'
+import { OptionalDocumentStep } from '../features/onboarding/OptionalDocumentStep'
+import { BackgroundStep, type LegalFields, type ReferenceRow } from '../features/onboarding/BackgroundStep'
 import { deriveLegalName } from '../features/onboarding/onboardingUtils'
 import {
   formatDateMMDDYYYY,
@@ -27,16 +29,19 @@ import {
 } from '@applyocalypse/shared-types'
 
 /**
- * Onboarding is four moments, not thirteen steps: hand over a resume, confirm
- * what we read out of it, answer the handful of things a resume cannot say, go.
+ * Documents first (a resume, then two optional ones), then confirm what we read,
+ * then the questions about the person a resume cannot answer, then sign-in, go.
  */
-type Moment = 'resume' | 'review' | 'details' | 'ready'
+type Moment = 'resume' | 'letter' | 'extras' | 'review' | 'about' | 'details' | 'ready'
 
-const MOMENTS: Moment[] = ['resume', 'review', 'details', 'ready']
+const MOMENTS: Moment[] = ['resume', 'letter', 'extras', 'review', 'about', 'details', 'ready']
 const MOMENT_LABELS: Record<Moment, string> = {
   resume: 'Resume',
+  letter: 'Cover letter',
+  extras: 'Other documents',
   review: 'Review',
-  details: 'Details',
+  about: 'About you',
+  details: 'Sign-in',
   ready: 'Ready',
 }
 
@@ -49,7 +54,17 @@ const emptyExperience = (): ExperienceRow => ({
   location: '',
   startDate: '',
   endDate: '',
+  reasonForLeaving: '',
   bullets: [],
+})
+
+const emptyReference = (): ReferenceRow => ({
+  name: '',
+  relationship: '',
+  company: '',
+  title: '',
+  email: '',
+  phone: '',
 })
 
 const emptyEducation = (): EducationRow => ({
@@ -69,6 +84,8 @@ function OnboardingScreen() {
     saveStructuredSections,
     saveProfile,
     pickAndRegisterResume,
+    pickAndRegisterCoverLetter,
+    pickAndRegisterSupportingDetails,
     confirmEditableMaster,
     openLocalPath,
   } = useProfileStore()
@@ -114,6 +131,11 @@ function OnboardingScreen() {
     eeoHispanicOrLatino: null as string | null,
     eeoSexualOrientation: null as string[] | null,
 
+    // The two legal history answers default to "No"; always held for review.
+    criminalRecordDefault: 'No' as LegalFields['criminalRecordDefault'],
+    previouslyEmployedDefault: 'No' as LegalFields['previouslyEmployedDefault'],
+    references: [] as ReferenceRow[],
+
     workAuthStatus: '' as WorkAuthorizationStatus | '',
     workAuthSponsorship: '' as SponsorshipNeed | '',
 
@@ -128,9 +150,20 @@ function OnboardingScreen() {
   })
 
   const moment = (): Moment => MOMENTS[Math.min(momentIndex(), MOMENTS.length - 1)] as Moment
-  const progressPct = () => `${(momentIndex() / (MOMENTS.length - 1)) * 100}%`
+  const progressScale = () => `scaleX(${momentIndex() / (MOMENTS.length - 1)})`
 
   const resumeFile = () => profileState.uploadedFiles.find((file) => file.fileKind === 'RESUME')
+  const fileNamesOf = (kind: 'COVER_LETTER' | 'SUPPORTING_DETAILS') =>
+    profileState.uploadedFiles.filter((file) => file.fileKind === kind).map((file) => file.originalName)
+
+  const pickOptional = async (pick: () => Promise<void>) => {
+    setIsPicking(true)
+    try {
+      await pick()
+    } finally {
+      setIsPicking(false)
+    }
+  }
 
   /**
    * A PDF upload leaves behind a converted DOCX awaiting the user's blessing.
@@ -195,6 +228,7 @@ function OnboardingScreen() {
         location: entry.location ?? '',
         startDate: formatDateMMDDYYYY(entry.startDate) ?? '',
         endDate: formatDateMMDDYYYY(entry.endDate) ?? '',
+        reasonForLeaving: '',
         bullets: entry.bullets,
       })),
     )
@@ -215,7 +249,7 @@ function OnboardingScreen() {
     setPrefilled(true)
     if (form.experience.length === 0) setForm('experience', [emptyExperience()])
     if (form.education.length === 0) setForm('education', [emptyEducation()])
-    go('review')
+    go('letter')
   }
 
   const handleChooseResume = async () => {
@@ -228,13 +262,13 @@ function OnboardingScreen() {
     // A converted PDF stays on this moment: the gate below takes over the stage
     // and moves on once the user has confirmed the editable copy.
     if (pendingMaster()) return
-    if (profileState.uploadedFiles.some((file) => file.fileKind === 'RESUME')) go('review')
+    if (profileState.uploadedFiles.some((file) => file.fileKind === 'RESUME')) go('letter')
   }
 
   const handleConfirmMaster = async (uploadedFileId: string) => {
     await confirmEditableMaster(uploadedFileId)
     // confirmEditableMaster surfaces its own failure; only advance on success.
-    if (!pendingMaster()) go('review')
+    if (!pendingMaster()) go('letter')
   }
 
   /**
@@ -278,6 +312,7 @@ function OnboardingScreen() {
             location: entry.location || null,
             startDate: parseDateMMDDYYYY(entry.startDate),
             endDate: parseDateMMDDYYYY(entry.endDate),
+            reasonForLeaving: entry.reasonForLeaving.trim() || null,
             bullets: entry.bullets,
           })),
         projects: (canonical()?.projects ?? []).map((entry) => ({
@@ -313,6 +348,16 @@ function OnboardingScreen() {
           },
           linkedinUrl: form.linkedinUrl || null,
           githubUrl: form.githubUrl || null,
+          references: form.references
+            .filter((reference) => reference.name.trim())
+            .map((reference) => ({
+              name: reference.name.trim(),
+              relationship: reference.relationship.trim() || null,
+              company: reference.company.trim() || null,
+              title: reference.title.trim() || null,
+              email: reference.email.trim() || null,
+              phone: reference.phone.trim() || null,
+            })),
           equalEmploymentDefaults: {
             authorizedToWorkUS: form.eeoAuthorizedToWorkUS as 'Yes' | 'No' | null,
             requiresSponsorship: form.eeoRequiresSponsorship as 'Yes' | 'No' | null,
@@ -324,8 +369,8 @@ function OnboardingScreen() {
             race: form.eeoRace || null,
             hispanicOrLatino: form.eeoHispanicOrLatino as 'Yes' | 'No' | null,
             sexualOrientation: form.eeoSexualOrientation,
-            previouslyEmployedDefault: 'No',
-            criminalRecordDefault: 'No',
+            previouslyEmployedDefault: form.previouslyEmployedDefault,
+            criminalRecordDefault: form.criminalRecordDefault,
           },
         })
         if (profileState.error) return
@@ -395,7 +440,7 @@ function OnboardingScreen() {
             aria-valuenow={momentIndex() + 1}
             aria-valuetext={`Step ${momentIndex() + 1} of ${MOMENTS.length}: ${MOMENT_LABELS[moment()]}`}
           >
-            <div class="fill" style={{ width: progressPct() }} />
+            <div class="fill" style={{ transform: progressScale() }} />
           </div>
           <ol class="ob-rail-stops">
             <For each={MOMENTS}>
@@ -424,7 +469,7 @@ function OnboardingScreen() {
                   fileName={resumeFile()?.originalName ?? null}
                   isBusy={isPicking()}
                   onChoose={() => void handleChooseResume()}
-                  onContinue={() => go('review')}
+                  onContinue={() => go('letter')}
                   onManual={startManualEntry}
                 />
               }
@@ -438,6 +483,32 @@ function OnboardingScreen() {
                 />
               )}
             </Show>
+          </Show>
+
+          <Show when={moment() === 'letter'}>
+            <OptionalDocumentStep
+              eyebrow="Optional"
+              title="A cover letter you like."
+              sub="We borrow its tone and structure when writing new ones. We never send it as is."
+              addLabel="Add a cover letter"
+              fileNames={fileNamesOf('COVER_LETTER')}
+              isBusy={isPicking()}
+              onAdd={() => void pickOptional(pickAndRegisterCoverLetter)}
+              onContinue={() => go('extras')}
+            />
+          </Show>
+
+          <Show when={moment() === 'extras'}>
+            <OptionalDocumentStep
+              eyebrow="Optional"
+              title="Anything else worth knowing."
+              sub="Transcripts, a portfolio, a longer project write-up. We read them for facts your resume leaves out."
+              addLabel="Add a document"
+              fileNames={fileNamesOf('SUPPORTING_DETAILS')}
+              isBusy={isPicking()}
+              onAdd={() => void pickOptional(pickAndRegisterSupportingDetails)}
+              onContinue={() => go('review')}
+            />
           </Show>
 
           <Show when={moment() === 'review'}>
@@ -459,15 +530,12 @@ function OnboardingScreen() {
               removeExperience={(index) =>
                 setForm('experience', (rows) => rows.filter((_, position) => position !== index))
               }
-              onConfirm={() => go('details')}
+              onConfirm={() => go('about')}
             />
           </Show>
 
-          <Show when={moment() === 'details'}>
-            <FinalDetails
-              workAuth={{ workAuthStatus: form.workAuthStatus, workAuthSponsorship: form.workAuthSponsorship }}
-              setWorkAuthStatus={(value) => setForm('workAuthStatus', value)}
-              setWorkAuthSponsorship={(value) => setForm('workAuthSponsorship', value)}
+          <Show when={moment() === 'about'}>
+            <BackgroundStep
               eeo={{
                 eeoAuthorizedToWorkUS: form.eeoAuthorizedToWorkUS,
                 eeoRequiresSponsorship: form.eeoRequiresSponsorship,
@@ -481,6 +549,26 @@ function OnboardingScreen() {
                 eeoSexualOrientation: form.eeoSexualOrientation,
               }}
               setEeoField={(key, value) => setForm(key as never, value as never)}
+              legal={{
+                criminalRecordDefault: form.criminalRecordDefault,
+                previouslyEmployedDefault: form.previouslyEmployedDefault,
+              }}
+              setLegalField={(key, value) => setForm(key, value)}
+              references={form.references}
+              setReference={(index, key, value) => setForm('references', index, key, value)}
+              addReference={() => setForm('references', form.references.length, emptyReference())}
+              removeReference={(index) =>
+                setForm('references', (rows) => rows.filter((_, position) => position !== index))
+              }
+              onContinue={() => go('details')}
+            />
+          </Show>
+
+          <Show when={moment() === 'details'}>
+            <FinalDetails
+              workAuth={{ workAuthStatus: form.workAuthStatus, workAuthSponsorship: form.workAuthSponsorship }}
+              setWorkAuthStatus={(value) => setForm('workAuthStatus', value)}
+              setWorkAuthSponsorship={(value) => setForm('workAuthSponsorship', value)}
               credentials={credentials()}
               setCredential={(key, value) => setForm(key as never, value as never)}
               passwordIsValid={applicationPasswordIsValid(form.applicationPassword)}
@@ -502,17 +590,13 @@ function OnboardingScreen() {
               </h1>
               <p class="ob-hero-sub">
                 {form.experience.length} role{form.experience.length === 1 ? '' : 's'} and{' '}
-                {form.education.length} school{form.education.length === 1 ? '' : 's'} on file. Paste a job link in
-                Intake and Applyocalypse tailors from here. Nothing is ever submitted without your approval.
+                {form.education.length} school{form.education.length === 1 ? '' : 's'} on file. Paste a job link on
+                Missions and Applyocalypse fills the application. You read it, then you submit.
               </p>
               <button class="primary-action ob-advance" type="button" onClick={() => navigate('/', { replace: true })}>
                 <ArrowRight size={17} aria-hidden="true" />
                 <span>Go to the queue</span>
               </button>
-              <p class="fine-print">
-                Have a cover letter you like the tone of? Add it any time under Documents to use it as a style
-                reference.
-              </p>
             </div>
           </Show>
         </div>
