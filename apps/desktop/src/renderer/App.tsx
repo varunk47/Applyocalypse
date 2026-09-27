@@ -1,10 +1,11 @@
-import { createEffect, onCleanup, onMount, type ParentProps } from 'solid-js'
+import { createEffect, onCleanup, onMount, Show, type ParentProps } from 'solid-js'
 import { useNavigate } from '@solidjs/router'
 import { dropCardBack, pullCardForward } from './animations/screenTransition'
 import { AppProviders } from './contexts/AppProviders'
 import { useProfileStore } from './contexts/ProfileStore'
 import { AppRouter } from './router'
 import { NavRail } from './components/NavRail'
+import { PreferenceChat } from './features/preferences/PreferenceChat'
 import { SystemHealthBanner } from './components/SystemHealthBanner'
 import { Titlebar } from './components/Titlebar'
 
@@ -35,9 +36,14 @@ export const AppShell = (props: ParentProps) => {
     <div class="app-shell">
       <Titlebar />
       <SystemHealthBanner />
-      <div class="workspace">
-        <NavRail />
-        <main>{props.children}</main>
+      <div class="shell-body">
+        <Show when={profileState.profile}>
+          <PreferenceChat />
+        </Show>
+        <div class="workspace">
+          <NavRail />
+          <main>{props.children}</main>
+        </div>
       </div>
     </div>
   )

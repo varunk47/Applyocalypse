@@ -8,6 +8,7 @@ import { ShieldCheck, Mail, Wrench, KeyRound } from 'lucide-solid'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import type { ThemePreference } from '@applyocalypse/shared-types'
 import { PROVIDER_OPTIONS, type ProviderOptionValue } from '../utils/providerOptions'
+import { RememberedSettings } from '../features/preferences/RememberedSettings'
 
 const providerOptions = PROVIDER_OPTIONS
 
@@ -23,6 +24,13 @@ const CONCURRENCY_CHOICES = Array.from(
   (_, index) => index + 1
 )
 const TOGGLE_CHOICES = [false, true]
+const SETTINGS_PANES = [
+  { id: 'remembered', label: 'Remembered' },
+  { id: 'model', label: 'Model' },
+  { id: 'applying', label: 'Applying' },
+  { id: 'accounts', label: 'Accounts' },
+] as const
+type SettingsPane = (typeof SETTINGS_PANES)[number]['id']
 const CONVERTER_KEYS = ['libreoffice', 'word', 'tectonic'] as const
 const CONVERTER_LABELS: Record<(typeof CONVERTER_KEYS)[number], string> = {
   libreoffice: 'LibreOffice',
@@ -39,6 +47,7 @@ export default function SettingsScreen() {
     chooseOutputDir,
     saveProviderApiKey,
   } = useSettingsStore()
+  const [pane, setPane] = createSignal<SettingsPane>('remembered')
 
   const [form, setForm] = createStore({
     provider: 'openai' as ProviderValue,
@@ -175,6 +184,21 @@ export default function SettingsScreen() {
 
   return (
     <section class="surface-panel surface-panel-active" data-gsap="panel" data-view-panel>
+      <div class="settings-layout">
+      <nav class="settings-subnav" aria-label="Settings sections">
+        <For each={SETTINGS_PANES}>
+          {(item) => (
+            <button type="button" classList={{ active: pane() === item.id }} aria-current={pane() === item.id ? 'page' : undefined} onClick={() => setPane(item.id)}>
+              {item.label}
+            </button>
+          )}
+        </For>
+      </nav>
+      <div class="settings-pane">
+      <Show when={pane() === 'remembered'}>
+        <RememberedSettings />
+      </Show>
+      <Show when={pane() === 'model'}>
       {/* Section 1: LLM Providers */}
       <div class="section-header">
         <div>
@@ -262,6 +286,8 @@ export default function SettingsScreen() {
         </For>
       </div>
 
+      </Show>
+      <Show when={pane() === 'applying'}>
       {/* Section 2: Theme */}
       <section class="settings-block">
         <div class="settings-block-head">
@@ -404,6 +430,8 @@ export default function SettingsScreen() {
         </Show>
       </div>
 
+      </Show>
+      <Show when={pane() === 'accounts'}>
       {/* Section 5: Gmail OTP via OAuth */}
       <div style={{ 'margin-top': '2rem' }}>
         <div class="section-header">
@@ -509,6 +537,9 @@ export default function SettingsScreen() {
             </button>
           </div>
         </Show>
+      </div>
+      </Show>
+      </div>
       </div>
     </section>
   )
