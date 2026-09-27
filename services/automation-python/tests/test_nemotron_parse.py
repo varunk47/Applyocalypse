@@ -7,7 +7,6 @@ to the plain "this is a scan" message instead of breaking the upload.
 
 from __future__ import annotations
 
-import json
 import struct
 import zlib
 from pathlib import Path
@@ -26,10 +25,17 @@ from applyocalypse_automation.documents.nemotron_parse import (
 )
 from applyocalypse_automation.documents.pdf_ingestion import convert_pdf_to_candidate_docx
 
+# Trimmed from a real nemotron-parse-2.0 reply: each block sits between its box
+# corners and is closed by its class.
+REPLY_TEXT = (
+    "<x_0.1445><y_0.1086>## JANE DOE<x_0.2666><y_0.1258><class_Section-header>\n\n"
+    "<x_0.1426><y_0.1664>Senior Engineer, Initech 2021 - 2024<x_0.4043><y_0.1781><class_Text>\n\n"
+    r"<x_0.1543><y_0.1810>\- Built a billing pipeline<x_0.4082><y_0.1930><class_List-item>"
+)
 
-def _reply(blocks: Any) -> dict[str, Any]:
-    arguments = json.dumps(blocks)
-    return {"choices": [{"message": {"tool_calls": [{"function": {"arguments": arguments}}]}}]}
+
+def _reply(content: str | None) -> dict[str, Any]:
+    return {"choices": [{"message": {"role": "assistant", "content": content}}]}
 
 
 @pytest.fixture(autouse=True)
@@ -68,6 +74,7 @@ def test_png_is_a_valid_grayscale_image() -> None:
         ({"type": "Text", "text": "Senior Engineer, Initech"}, [("Senior Engineer, Initech", False, DEFAULT_SIZE)]),
         ({"type": "Text", "text": "**Initech**"}, [("Initech", True, DEFAULT_SIZE)]),
         ({"type": "List-item", "text": "- Cut costs\n- Led team"}, [("- Cut costs", False, DEFAULT_SIZE), ("- Led team", False, DEFAULT_SIZE)]),
+        ({"type": "List-item", "text": r"\- Led a team of 4\."}, [("- Led a team of 4.", False, DEFAULT_SIZE)]),
         ({"type": "Page-header", "text": "Page 1"}, []),
         ({"type": "Page-footer", "text": "jane@example.com"}, []),
         ({"type": "Picture", "text": ""}, []),
@@ -80,25 +87,28 @@ def test_blocks_become_lines(block: dict[str, str], expected: list[tuple[str, bo
     assert [(line.runs[0].text, line.runs[0].bold, line.size) for line in lines] == expected
 
 
-@pytest.mark.parametrize(
-    "blocks",
-    [
-        [[{"type": "Text", "text": "Hello"}]],
-        [{"type": "Text", "text": "Hello"}],
-    ],
-)
-def test_parse_page_accepts_nested_or_flat_blocks(blocks: Any) -> None:
+def test_parse_page_reads_blocks_in_order() -> None:
     sent: dict[str, Any] = {}
 
     def post(url: str, headers: dict[str, str], body: dict[str, Any]) -> dict[str, Any]:
         sent.update(url=url, headers=headers, body=body)
-        return _reply(blocks)
+        return _reply(REPLY_TEXT)
 
-    assert parse_page(b"png", "test-key", post) == [{"type": "Text", "text": "Hello"}]
+    assert parse_page(b"png", "test-key", post) == [
+        {"type": "Section-header", "text": "## JANE DOE"},
+        {"type": "Text", "text": "Senior Engineer, Initech 2021 - 2024"},
+        {"type": "List-item", "text": r"\- Built a billing pipeline"},
+    ]
     assert sent["headers"]["Authorization"] == "Bearer test-key"
     assert sent["body"]["model"] == nemotron_parse.MODEL
-    image = sent["body"]["messages"][0]["content"][0]["image_url"]["url"]
-    assert image.startswith("data:image/png;base64,")
+    prompt, image = sent["body"]["messages"][0]["content"]
+    assert prompt == {"type": "text", "text": nemotron_parse.PROMPT}
+    assert image["image_url"]["url"].startswith("data:image/png;base64,")
+
+
+@pytest.mark.parametrize("content", [None, "", "no tagged blocks here"])
+def test_parse_page_with_nothing_tagged_returns_no_blocks(content: str | None) -> None:
+    assert parse_page(b"png", "test-key", lambda url, headers, body: _reply(content)) == []
 
 
 def test_scan_without_a_key_keeps_the_scan_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -109,9 +119,8 @@ def test_scan_without_a_key_keeps_the_scan_message(tmp_path: Path, monkeypatch: 
 
 
 def test_scan_with_a_key_is_read_by_the_model(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    blocks = [[{"type": "Section-header", "text": "## JANE DOE"}, {"type": "Text", "text": "Senior Engineer, Initech"}]]
     monkeypatch.setattr(nemotron_parse, "nvidia_key", lambda: "test-key")
-    monkeypatch.setattr(nemotron_parse, "_post", lambda url, headers, body: _reply(blocks))
+    monkeypatch.setattr(nemotron_parse, "_post", lambda url, headers, body: _reply(REPLY_TEXT))
     # Default arguments bind at definition time, so route the default through the patch.
     real_read = nemotron_parse.read_scanned_pdf_lines
     monkeypatch.setattr(
@@ -123,7 +132,7 @@ def test_scan_with_a_key_is_read_by_the_model(tmp_path: Path, monkeypatch: pytes
     result = convert_pdf_to_candidate_docx(_scan_pdf(tmp_path / "scan.pdf"), tmp_path / "out")
 
     texts = [paragraph.text for paragraph in Document(str(result.candidate_docx_path)).paragraphs if paragraph.text]
-    assert texts == ["JANE DOE", "Senior Engineer, Initech"]
+    assert texts == ["JANE DOE", "Senior Engineer, Initech 2021 - 2024", "Built a billing pipeline"]
 
 
 def test_a_failed_call_falls_back_to_the_scan_message(

@@ -14,7 +14,6 @@ default font; the user reviews the candidate before it becomes the master.
 from __future__ import annotations
 
 import base64
-import json
 import re
 import struct
 import zlib
@@ -28,7 +27,12 @@ from .pdf_ingestion import DEFAULT_FONT, DEFAULT_SIZE, PdfLine, PdfRun
 
 API_KEY_NAME = "NVIDIA_NIM_API_KEY"
 ENDPOINT = "https://integrate.api.nvidia.com/v1/chat/completions"
-MODEL = "nvidia/nemotron-parse"
+MODEL = "nvidia/nemotron-parse-2.0"
+# Control tokens from the model card: boxes, classes and markdown text, with no
+# text transcribed from inside pictures.
+PROMPT = "</s><s><predict_bbox><predict_classes><output_markdown><predict_no_text_in_pic>"
+# The model's context is 4096 tokens and the image does not count against it.
+MAX_TOKENS = 3500
 # 150 dpi: small enough to upload quickly, large enough for 9pt resume text.
 RENDER_SCALE = 150 / 72
 MAX_PAGES = 6
@@ -39,6 +43,10 @@ _HEADING_TYPES = {"Title", "Section-header"}
 _SKIPPED_TYPES = {"Page-header", "Page-footer", "Picture"}
 _MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+")
 _MARKDOWN_EMPHASIS_RE = re.compile(r"(\*\*|__)(.+?)\1")
+# The model escapes markdown punctuation, e.g. "\- Built" for a literal dash.
+_MARKDOWN_ESCAPE_RE = re.compile(r"\\([\\`*_{}\[\]()#+\-.!|])")
+# One block: <x_..><y_..>text<x_..><y_..><class_Name>
+_BLOCK_RE = re.compile(r"<x_[\d.]+><y_[\d.]+>(.*?)<x_[\d.]+><y_[\d.]+><class_([^>]+)>", re.DOTALL)
 
 Poster = Callable[[str, dict[str, str], dict[str, Any]], dict[str, Any]]
 
@@ -83,22 +91,24 @@ def parse_page(png: bytes, api_key: str, post: Poster = _post) -> list[dict[str,
     image = "data:image/png;base64," + base64.b64encode(png).decode("ascii")
     body = {
         "model": MODEL,
-        "tools": [{"type": "function", "function": {"name": "markdown_bbox"}}],
-        "messages": [{"role": "user", "content": [{"type": "image_url", "image_url": {"url": image}}]}],
+        "max_tokens": MAX_TOKENS,
+        "temperature": 0,
+        "messages": [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": PROMPT}, {"type": "image_url", "image_url": {"url": image}}],
+            }
+        ],
     }
     reply = post(ENDPOINT, {"Authorization": f"Bearer {api_key}", "Accept": "application/json"}, body)
-    arguments = reply["choices"][0]["message"]["tool_calls"][0]["function"]["arguments"]
-    blocks = json.loads(arguments)
-    # The tool wraps the page's blocks in one more list.
-    if blocks and isinstance(blocks[0], list):
-        blocks = blocks[0]
-    return [block for block in blocks if isinstance(block, dict)]
+    content = reply["choices"][0]["message"]["content"] or ""
+    return [{"type": kind, "text": text.strip()} for text, kind in _BLOCK_RE.findall(content)]
 
 
 def _plain(text: str) -> tuple[str, bool]:
     stripped = _MARKDOWN_HEADING_RE.sub("", text.strip())
     bold = bool(_MARKDOWN_EMPHASIS_RE.fullmatch(stripped))
-    return _MARKDOWN_EMPHASIS_RE.sub(r"\2", stripped), bold
+    return _MARKDOWN_ESCAPE_RE.sub(r"\1", _MARKDOWN_EMPHASIS_RE.sub(r"\2", stripped)), bold
 
 
 def blocks_to_lines(blocks: list[dict[str, Any]]) -> list[PdfLine]:
