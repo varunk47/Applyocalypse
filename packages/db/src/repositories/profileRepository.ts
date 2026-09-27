@@ -50,6 +50,7 @@ type ProfileRow = {
   job_defaults_json: string;
   work_authorization_json: string;
   equal_employment_defaults_json: string;
+  references_json: string;
   created_at: string;
   updated_at: string;
 };
@@ -75,6 +76,7 @@ const mapProfileRow = (row: ProfileRow): Profile =>
     jobDefaults: parseJsonColumn(row.job_defaults_json, {}),
     workAuthorization: parseJsonColumn(row.work_authorization_json, {}),
     equalEmploymentDefaults: parseJsonColumn(row.equal_employment_defaults_json, {}),
+    references: parseJsonColumn(row.references_json, []),
     createdAt: row.created_at,
     updatedAt: row.updated_at
   });
@@ -132,14 +134,14 @@ export class ProfileRepository {
           address_json, linkedin_url, github_url, links_json,
           application_email, otp_provider_connection_id, otp_handling_enabled,
           job_defaults_json, work_authorization_json, equal_employment_defaults_json,
-          created_at, updated_at
+          references_json, created_at, updated_at
         )
         VALUES (
           @id, @displayName, @legalName, @firstName, @lastName, @email, @phone, @location,
           @addressJson, @linkedinUrl, @githubUrl, @linksJson,
           @applicationEmail, @otpProviderConnectionId, @otpHandlingEnabled,
           @jobDefaultsJson, @workAuthorizationJson, @equalEmploymentDefaultsJson,
-          @createdAt, @updatedAt
+          @referencesJson, @createdAt, @updatedAt
         )
         ON CONFLICT(id) DO UPDATE SET
           display_name = excluded.display_name,
@@ -159,6 +161,7 @@ export class ProfileRepository {
           job_defaults_json = excluded.job_defaults_json,
           work_authorization_json = excluded.work_authorization_json,
           equal_employment_defaults_json = excluded.equal_employment_defaults_json,
+          references_json = excluded.references_json,
           updated_at = excluded.updated_at
       `
       )
@@ -181,6 +184,7 @@ export class ProfileRepository {
         jobDefaultsJson: stringifyJsonColumn(parsed.jobDefaults),
         workAuthorizationJson: stringifyJsonColumn(parsed.workAuthorization),
         equalEmploymentDefaultsJson: stringifyJsonColumn(parsed.equalEmploymentDefaults),
+        referencesJson: stringifyJsonColumn(parsed.references),
         createdAt,
         updatedAt: now
       });
@@ -229,7 +233,7 @@ export class ProfileRepository {
     profileId: string,
     payload: {
       education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; gpa?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; details?: string[] }>;
-      experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[]; tools?: string[] }>;
+      experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[]; tools?: string[]; reasonForLeaving?: string | null | undefined }>;
       projects: Array<{ id?: string | null | undefined; name: string; role?: string | null | undefined; summary?: string | null | undefined; bullets?: string[]; tools?: string[]; links?: string[] }>;
       skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>;
     }
@@ -246,9 +250,9 @@ export class ProfileRepository {
         insEdu.run(e.id ?? randomUUID(), profileId, e.institution, e.degree ?? null, e.field ?? null, e.gpa?.trim() ? e.gpa : null, e.startDate ?? null, e.endDate ?? null, JSON.stringify(e.details ?? []), now, now);
       }
 
-      const insExp = this.db.prepare("INSERT INTO experience_entries (id, profile_id, company, title, location, start_date, end_date, bullets_json, tools_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?)");
+      const insExp = this.db.prepare("INSERT INTO experience_entries (id, profile_id, company, title, location, start_date, end_date, bullets_json, tools_json, reason_for_leaving, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?)");
       for (const e of payload.experience) {
-        insExp.run(e.id ?? randomUUID(), profileId, e.company, e.title, e.location ?? null, e.startDate ?? null, e.endDate ?? null, JSON.stringify(e.bullets ?? []), JSON.stringify(e.tools ?? []), now, now);
+        insExp.run(e.id ?? randomUUID(), profileId, e.company, e.title, e.location ?? null, e.startDate ?? null, e.endDate ?? null, JSON.stringify(e.bullets ?? []), JSON.stringify(e.tools ?? []), e.reasonForLeaving?.trim() || null, now, now);
       }
 
       const insProj = this.db.prepare("INSERT INTO project_entries (id, profile_id, name, role, summary, bullets_json, tools_json, links_json, source_confidence, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1.0, ?, ?)");
@@ -354,6 +358,7 @@ export class ProfileRepository {
       end_date: string | null;
       bullets_json: string;
       tools_json: string;
+      reason_for_leaving: string | null;
       source_confidence: number;
     }>).map((row) =>
       ExperienceEntrySchema.parse({
@@ -366,6 +371,7 @@ export class ProfileRepository {
         endDate: row.end_date,
         bullets: parseJsonColumn(row.bullets_json, []),
         tools: parseJsonColumn(row.tools_json, []),
+        reasonForLeaving: row.reason_for_leaving,
         confidence: row.source_confidence
       })
     );

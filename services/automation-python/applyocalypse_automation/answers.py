@@ -229,6 +229,38 @@ def _eeo(profile: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+_REFERENCE_NOT_A_PERSON: tuple[str, ...] = ("reference number", "reference no", "code", "id", "job", "requisition", "referral", "referrer")
+_REFERENCE_ORDINALS: dict[str, int] = {"1": 0, "first": 0, "2": 1, "second": 1, "3": 2, "third": 2}
+# Checked in order: "Reference phone number" is a phone, not a name.
+_REFERENCE_PARTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("email", "e mail"), "email"),
+    (("phone", "telephone", "mobile", "cell"), "phone"),
+    (("relationship", "relation", "how do you know"), "relationship"),
+    (("company", "organization", "organisation", "employer"), "company"),
+    (("title", "position", "job title"), "title"),
+    (("name",), "name"),
+)
+
+
+def _reference_answer(*, tokens: tuple[str, ...], profile: dict[str, Any]) -> str | None:
+    """The matching part of the matching reference.
+
+    ``None`` means the field is not about a reference at all. An empty string
+    means it is, but the user gave no such reference or part, so it stays empty.
+    """
+    if "reference" not in tokens or _matches_any(tokens, _REFERENCE_NOT_A_PERSON):
+        return None
+    part = next((key for aliases, key in _REFERENCE_PARTS if _matches_any(tokens, aliases)), None)
+    if part is None:
+        return None
+    index = next((_REFERENCE_ORDINALS[token] for token in tokens if token in _REFERENCE_ORDINALS), 0)
+    references = profile.get("references")
+    if not isinstance(references, list) or index >= len(references) or not isinstance(references[index], dict):
+        return ""
+    value = references[index].get(part)
+    return str(value).strip() if value else ""
+
+
 def _address(profile: dict[str, Any]) -> dict[str, Any]:
     value = profile.get("address")
     return value if isinstance(value, dict) else {}
@@ -383,7 +415,9 @@ _PREVIOUS_EMPLOYER_PHRASES: tuple[str, ...] = _PREVIOUS_EMPLOYER_YES_NO_PHRASES 
     "former supervisor",
     "previous manager",
     "reason for leaving",
+    "why did you leave",
 )
+_REASON_FOR_LEAVING_PHRASES: tuple[str, ...] = ("reason for leaving", "why did you leave")
 
 # "Do you consent to a background check?" must never be pre-answered "No":
 # declining is a materially different act from answering a history question.
@@ -466,16 +500,36 @@ def sensitive_review_category(field_label: str, *, field_name: str | None = None
     return None
 
 
-def _sensitive_history_answer(*, field_label: str, field_type: str, category: str) -> ProposedApplicationAnswer:
+def _reason_for_leaving(canonical_profile: dict[str, Any]) -> str | None:
+    """The reason the user gave for leaving their most recent former job."""
+    entries = canonical_profile.get("experience")
+    for entry in entries if isinstance(entries, list) else []:
+        reason = entry.get("reasonForLeaving") if isinstance(entry, dict) else None
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+    return None
+
+
+def _sensitive_history_answer(
+    *, field_label: str, field_type: str, category: str, canonical_profile: dict[str, Any]
+) -> ProposedApplicationAnswer:
     """Answer a criminal-history or previous-employer field.
 
-    Only a genuine yes/no screening question gets a proposed default ("No").
-    Detail fields ("Previous employer city", "Conviction details: name of court")
-    are left empty rather than filled from the profile, because the applicant's
-    own city or legal name is never the right answer there. Either way the
-    answer is review-gated.
+    A genuine yes/no screening question gets the user's stored answer, "No" when
+    they gave none. "Reason for leaving" gets the reason the user wrote for their
+    most recent former job. Other detail fields ("Previous employer city",
+    "Conviction details: name of court") are left empty rather than filled from
+    the profile, because the applicant's own city or legal name is never the
+    right answer there. Either way the answer is review-gated.
     """
     tokens = label_tokens(field_label)
+    if category == "PREVIOUS_EMPLOYER" and _matches_any(tokens, _REASON_FOR_LEAVING_PHRASES):
+        reason = _reason_for_leaving(canonical_profile)
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=reason,
+            confidence=0.80 if reason else 0.20, source="PROFILE" if reason else "UNKNOWN",
+            requires_review=True,
+        )
     yes_no_phrases = (
         _CRIMINAL_HISTORY_YES_NO_PHRASES if category == "CRIMINAL_HISTORY" else _PREVIOUS_EMPLOYER_YES_NO_PHRASES
     )
@@ -484,10 +538,13 @@ def _sensitive_history_answer(*, field_label: str, field_type: str, category: st
         and not _matches_any(tokens, _CONSENT_PHRASES)
         and (field_type in _CHOICE_FIELD_TYPES or _matches_any(tokens, _INTERROGATIVE_OPENERS))
     )
+    stored_key = "criminalRecordDefault" if category == "CRIMINAL_HISTORY" else "previouslyEmployedDefault"
+    stored = _eeo(_profile(canonical_profile)).get(stored_key)
+    yes_no = stored if stored in ("Yes", "No") else "No"
     return ProposedApplicationAnswer(
         field_label=field_label,
         field_type=field_type,
-        proposed_value="No" if is_yes_no_question else None,
+        proposed_value=yes_no if is_yes_no_question else None,
         confidence=0.90 if is_yes_no_question else 0.20,
         source="PROFILE" if is_yes_no_question else "UNKNOWN",
         requires_review=True,
@@ -544,7 +601,9 @@ def propose_answer_for_detected_field(
         autofill_approved_defaults=autofill_approved_defaults,
     )
     if answer is None and category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
-        return _sensitive_history_answer(field_label=field_label, field_type=field_type, category=category)
+        return _sensitive_history_answer(
+            field_label=field_label, field_type=field_type, category=category, canonical_profile=canonical_profile
+        )
 
     if answer is None:
         answer = _propose_answer(
@@ -572,6 +631,15 @@ def _propose_answer(
     tokens = label_tokens(field_label)
     # Fields about somebody else never receive the applicant's own details.
     foreign_subject = _matches_any(tokens, _FOREIGN_SUBJECT_QUALIFIERS)
+
+    # ── References: the user's own list, never the applicant's details ─────────
+    reference = _reference_answer(tokens=tokens, profile=profile)
+    if reference is not None:
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=reference or None,
+            confidence=0.90 if reference else 0.20, source="PROFILE" if reference else "UNKNOWN",
+            requires_review=not reference,
+        )
 
     # ── First / last name ──────────────────────────────────────────────────────
     if not foreign_subject and _matches_any(tokens, ("first name", "given name", "firstname")):

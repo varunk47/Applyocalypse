@@ -61,8 +61,19 @@ export const EqualEmploymentDefaultsSchema = z.object({
   race: z.string().nullable().default(null),
   hispanicOrLatino: z.enum(["Yes", "No"]).nullable().default(null),
   sexualOrientation: z.array(z.string()).nullable().default(null),
-  previouslyEmployedDefault: z.literal("No").default("No"),
-  criminalRecordDefault: z.literal("No").default("No")
+  previouslyEmployedDefault: z.enum(["Yes", "No"]).default("No"),
+  criminalRecordDefault: z.enum(["Yes", "No"]).default("No")
+});
+
+export const MAX_PROFILE_REFERENCES = 3;
+
+export const ProfileReferenceSchema = z.object({
+  name: z.string().trim().min(1),
+  relationship: z.string().nullable().default(null),
+  company: z.string().nullable().default(null),
+  title: z.string().nullable().default(null),
+  email: z.string().email().nullable().default(null),
+  phone: z.string().nullable().default(null)
 });
 
 export const ProfileSchema = z.object({
@@ -85,6 +96,7 @@ export const ProfileSchema = z.object({
   jobDefaults: JsonObjectSchema.default({}),
   workAuthorization: JsonObjectSchema.default({}),
   equalEmploymentDefaults: EqualEmploymentDefaultsSchema.default({}),
+  references: z.array(ProfileReferenceSchema).max(MAX_PROFILE_REFERENCES).default([]),
   createdAt: IsoDateTimeSchema,
   updatedAt: IsoDateTimeSchema
 });
@@ -112,6 +124,7 @@ export const ExperienceEntrySchema = z.object({
   endDate: z.string().nullable(),
   bullets: z.array(z.string()).default([]),
   tools: z.array(z.string()).default([]),
+  reasonForLeaving: z.string().nullable().default(null),
   confidence: z.number().min(0).max(1).default(1)
 });
 
