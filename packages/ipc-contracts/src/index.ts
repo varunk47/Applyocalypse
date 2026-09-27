@@ -79,6 +79,61 @@ export const PreferenceRuleSchema = z.object({
 });
 export type PreferenceRuleDto = z.infer<typeof PreferenceRuleSchema>;
 
+export const JobFilterKindSchema = z.enum(["skip_company", "skip_keyword", "min_salary", "work_arrangement", "place"]);
+export const JobFilterSchema = z.object({
+  id: IdSchema,
+  profileId: IdSchema,
+  kind: JobFilterKindSchema,
+  value: z.string(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type JobFilterDto = z.infer<typeof JobFilterSchema>;
+
+const AddressPartSchema = z.string().trim().max(200).default("");
+export const ProfileAddressSchema = z.object({
+  id: IdSchema,
+  profileId: IdSchema,
+  label: z.string(),
+  addressLine1: z.string(),
+  addressLine2: z.string(),
+  city: z.string(),
+  state: z.string(),
+  postalCode: z.string(),
+  country: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type ProfileAddressDto = z.infer<typeof ProfileAddressSchema>;
+
+export const PreferenceProposalSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("answer_rule"),
+    question: z.string().min(1).max(500),
+    answer: z.string().min(1).max(2000),
+    conditions: PreferenceRuleConditionsSchema
+  }),
+  z.object({ type: z.literal("job_filter"), kind: JobFilterKindSchema, value: z.string().min(1).max(200) }),
+  z.object({
+    type: z.literal("address"),
+    label: z.string().max(80),
+    addressLine1: z.string().max(200),
+    addressLine2: z.string().max(200),
+    city: z.string().min(1).max(200),
+    state: z.string().max(200),
+    postalCode: z.string().max(20),
+    country: z.string().max(200)
+  })
+]);
+export type PreferenceProposalDto = z.infer<typeof PreferenceProposalSchema>;
+export const PreferenceChatReplySchema = z.object({
+  reply: z.string(),
+  proposals: z.array(PreferenceProposalSchema),
+  source: z.enum(["model", "rules"])
+});
+export type PreferenceChatReplyDto = z.infer<typeof PreferenceChatReplySchema>;
+
 const RunControlResponseSchema = z.object({ accepted: z.boolean(), message: z.string().optional() });
 const RendererAnswerUpdateStatusSchema = z.enum(["EDITED", "REJECTED"]);
 
@@ -132,6 +187,13 @@ export const IpcChannels = {
   preferenceRulesList: "preference-rules:list",
   preferenceRulesUpsert: "preference-rules:upsert",
   preferenceRulesDelete: "preference-rules:delete",
+  jobFiltersList: "job-filters:list",
+  jobFiltersUpsert: "job-filters:upsert",
+  jobFiltersDelete: "job-filters:delete",
+  profileAddressesList: "profile-addresses:list",
+  profileAddressesUpsert: "profile-addresses:upsert",
+  profileAddressesDelete: "profile-addresses:delete",
+  preferenceChatSend: "preference-chat:send",
   gmailStartOAuth: "gmail:start-oauth",
   gmailGetOAuthStatus: "gmail:get-oauth-status",
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
@@ -421,6 +483,57 @@ export const IpcContracts = {
     IpcChannels.preferenceRulesDelete,
     z.object({ id: IdSchema }).strict(),
     z.object({ deleted: z.boolean() })
+  ),
+  jobFiltersList: contract(
+    IpcChannels.jobFiltersList,
+    z.object({ profileId: IdSchema }).strict(),
+    z.object({ items: z.array(JobFilterSchema) })
+  ),
+  jobFiltersUpsert: contract(
+    IpcChannels.jobFiltersUpsert,
+    z.object({
+      id: IdSchema.optional(),
+      profileId: IdSchema,
+      kind: JobFilterKindSchema,
+      value: z.string().trim().min(1).max(200),
+      enabled: z.boolean().default(true)
+    }).strict(),
+    JobFilterSchema
+  ),
+  jobFiltersDelete: contract(
+    IpcChannels.jobFiltersDelete,
+    z.object({ id: IdSchema }).strict(),
+    z.object({ deleted: z.boolean() })
+  ),
+  profileAddressesList: contract(
+    IpcChannels.profileAddressesList,
+    z.object({ profileId: IdSchema }).strict(),
+    z.object({ items: z.array(ProfileAddressSchema) })
+  ),
+  profileAddressesUpsert: contract(
+    IpcChannels.profileAddressesUpsert,
+    z.object({
+      id: IdSchema.optional(),
+      profileId: IdSchema,
+      label: z.string().trim().max(80).default(""),
+      addressLine1: AddressPartSchema,
+      addressLine2: AddressPartSchema,
+      city: z.string().trim().min(1).max(200),
+      state: AddressPartSchema,
+      postalCode: z.string().trim().max(20).default(""),
+      country: AddressPartSchema
+    }).strict(),
+    ProfileAddressSchema
+  ),
+  profileAddressesDelete: contract(
+    IpcChannels.profileAddressesDelete,
+    z.object({ id: IdSchema }).strict(),
+    z.object({ deleted: z.boolean() })
+  ),
+  preferenceChatSend: contract(
+    IpcChannels.preferenceChatSend,
+    z.object({ profileId: IdSchema, message: z.string().trim().min(1).max(4000) }).strict(),
+    PreferenceChatReplySchema
   ),
   gmailStartOAuth: contract(
     IpcChannels.gmailStartOAuth,

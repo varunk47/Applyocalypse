@@ -43,6 +43,7 @@ from .field_resolution import (
 )
 from .jev_run import JEV_GOAL, AdapterJevDriver, jev_ask, jev_ready, personal_values
 from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
+from .job_filters import evaluate_job_filters, with_job_address
 from .preference_rules import with_job_context
 from .secret_env import apply_provider_secrets_to_env
 from .submission_receipt import (
@@ -2877,7 +2878,7 @@ def _main_impl() -> None:
     job_metadata: dict[str, object] = {}
     if args.job_metadata_file:
         job_metadata = json.loads(Path(args.job_metadata_file).read_text(encoding="utf-8"))
-    canonical_profile = with_job_context(canonical_profile, job_metadata)
+    canonical_profile = with_job_address(with_job_context(canonical_profile, job_metadata), job_metadata)
 
     WorkerEvent(
         event_type=EventType.RUN_STARTED,
@@ -2954,6 +2955,20 @@ def _main_impl() -> None:
                 machine_state={"reason": control.reason},
                 ui_state={"cancelled": True},
                 payload={"code": "USER_CANCELLED"},
+            ).emit()
+            return
+
+        verdict = evaluate_job_filters(canonical_profile, job_metadata, job_text)
+        if not verdict.passed:
+            WorkerEvent(
+                event_type=EventType.FAILED,
+                run_id=args.run_id,
+                step_id=None,
+                severity=Severity.INFO,
+                message="Skipped by your job filters: " + " ".join(verdict.reasons),
+                machine_state={"reasons": list(verdict.reasons)},
+                ui_state={"filteredOut": True},
+                payload={"code": "FILTERED_OUT"},
             ).emit()
             return
 

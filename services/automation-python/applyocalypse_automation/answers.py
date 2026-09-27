@@ -35,8 +35,8 @@ def _salary_number(raw: str, k_scale: bool) -> int | None:
     return value
 
 
-def jd_salary_midpoint(jd_text: str | None) -> str | None:
-    """Midpoint of the salary range advertised in the JD, formatted for a form answer."""
+def _advertised_salary(jd_text: str | None) -> tuple[str, int, int] | None:
+    """Currency, low and high of the first salary range the JD advertises."""
     if not jd_text:
         return None
     for match in _SALARY_RANGE_PATTERN.finditer(jd_text):
@@ -49,9 +49,23 @@ def jd_salary_midpoint(jd_text: str | None) -> str | None:
         high = _salary_number(match.group("max"), k_scale)
         if low is None or high is None or not 10000 <= low <= high <= 2000000:
             continue
-        currency = match.group("cur") or match.group("cur2") or ""
-        return f"{currency}{round((low + high) / 2):,}"
+        return match.group("cur") or match.group("cur2") or "", low, high
     return None
+
+
+def jd_salary_range(jd_text: str | None) -> tuple[int, int] | None:
+    """Low and high of the salary range advertised in the JD."""
+    advertised = _advertised_salary(jd_text)
+    return None if advertised is None else (advertised[1], advertised[2])
+
+
+def jd_salary_midpoint(jd_text: str | None) -> str | None:
+    """Midpoint of the salary range advertised in the JD, formatted for a form answer."""
+    advertised = _advertised_salary(jd_text)
+    if advertised is None:
+        return None
+    currency, low, high = advertised
+    return f"{currency}{round((low + high) / 2):,}"
 
 
 def _highest_education_level(canonical_profile: dict[str, Any]) -> str | None:

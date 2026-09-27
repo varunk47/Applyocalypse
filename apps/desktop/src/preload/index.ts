@@ -1,6 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IpcChannels, IpcContracts, RendererEventSchemas } from "@applyocalypse/ipc-contracts";
-import type { PreferenceRuleDto } from "@applyocalypse/ipc-contracts";
+import type {
+  JobFilterDto,
+  PreferenceChatReplyDto,
+  PreferenceRuleDto,
+  ProfileAddressDto
+} from "@applyocalypse/ipc-contracts";
 import type {
   ApplicationAnswer,
   ApplicationRun,
@@ -220,6 +225,33 @@ const api = {
       enabled?: boolean;
     }) => invoke<typeof input, PreferenceRuleDto>(IpcContracts.preferenceRulesUpsert.channel, input),
     delete: (id: string) => invoke<{ id: string }, { deleted: boolean }>(IpcContracts.preferenceRulesDelete.channel, { id })
+  },
+  jobFilters: {
+    list: (profileId: string) =>
+      invoke<{ profileId: string }, { items: JobFilterDto[] }>(IpcContracts.jobFiltersList.channel, { profileId }),
+    upsert: (input: { id?: string; profileId: string; kind: JobFilterDto["kind"]; value: string; enabled?: boolean }) =>
+      invoke<typeof input, JobFilterDto>(IpcContracts.jobFiltersUpsert.channel, input),
+    delete: (id: string) => invoke<{ id: string }, { deleted: boolean }>(IpcContracts.jobFiltersDelete.channel, { id })
+  },
+  profileAddresses: {
+    list: (profileId: string) =>
+      invoke<{ profileId: string }, { items: ProfileAddressDto[] }>(IpcContracts.profileAddressesList.channel, { profileId }),
+    upsert: (input: {
+      id?: string;
+      profileId: string;
+      label?: string;
+      addressLine1?: string;
+      addressLine2?: string;
+      city: string;
+      state?: string;
+      postalCode?: string;
+      country?: string;
+    }) => invoke<typeof input, ProfileAddressDto>(IpcContracts.profileAddressesUpsert.channel, input),
+    delete: (id: string) => invoke<{ id: string }, { deleted: boolean }>(IpcContracts.profileAddressesDelete.channel, { id })
+  },
+  preferenceChat: {
+    send: (input: { profileId: string; message: string }) =>
+      invoke<typeof input, PreferenceChatReplyDto>(IpcContracts.preferenceChatSend.channel, input)
   },
   gmail: {
     startOAuth: (input: { clientId: string; clientSecret: string }) =>

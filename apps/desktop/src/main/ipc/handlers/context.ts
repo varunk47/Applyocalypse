@@ -11,6 +11,8 @@ import {
   AuditRepository,
   ParsedDocumentRepository,
   PreferenceRuleRepository,
+  JobFilterRepository,
+  ProfileAddressRepository,
   type ApplyocalypseDatabase,
   type QueueRepository,
   type SettingsRepository
@@ -74,6 +76,8 @@ export interface IpcHandlerContext {
   getMainWindow: () => BrowserWindow | null;
   chatRepository: ChatRepository;
   preferenceRuleRepository: PreferenceRuleRepository;
+  jobFilterRepository: JobFilterRepository;
+  profileAddressRepository: ProfileAddressRepository;
   profileRepository: ProfileRepository;
   jobRepository: JobRepository;
   uploadRepository: UploadRepository;
@@ -100,6 +104,8 @@ export const createIpcHandlerContext = ({
 }: RegisterIpcHandlersInput): IpcHandlerContext => {
   const chatRepository = new ChatRepository(db);
   const preferenceRuleRepository = new PreferenceRuleRepository(db);
+  const jobFilterRepository = new JobFilterRepository(db);
+  const profileAddressRepository = new ProfileAddressRepository(db);
   const profileRepository = new ProfileRepository(db);
   const jobRepository = new JobRepository(db);
   const uploadRepository = new UploadRepository(db);
@@ -167,6 +173,8 @@ export const createIpcHandlerContext = ({
     getMainWindow,
     chatRepository,
     preferenceRuleRepository,
+    jobFilterRepository,
+    profileAddressRepository,
     profileRepository,
     jobRepository,
     uploadRepository,

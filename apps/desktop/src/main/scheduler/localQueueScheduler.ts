@@ -8,6 +8,8 @@ import { getLatestCoverLetterText } from "../services/documentIngestionService";
 import {
   JobRepository,
   PreferenceRuleRepository,
+  JobFilterRepository,
+  ProfileAddressRepository,
   ProfileRepository,
   ProviderRepository,
   RunRepository,
@@ -124,7 +126,13 @@ export class LocalQueueScheduler {
       const profileJsonFile = canonicalProfile ? join(runWorkDir, "canonical-profile.json") : undefined;
       if (profileJsonFile && canonicalProfile) {
         const preferenceRules = new PreferenceRuleRepository(this.db).workerRules(item.profileId);
-        writeFileSync(profileJsonFile, JSON.stringify({ ...canonicalProfile, preferenceRules }, null, 2), "utf8");
+        const jobFilters = new JobFilterRepository(this.db).workerFilters(item.profileId);
+        const addresses = new ProfileAddressRepository(this.db).workerAddresses(item.profileId);
+        writeFileSync(
+          profileJsonFile,
+          JSON.stringify({ ...canonicalProfile, preferenceRules, jobFilters, addresses }, null, 2),
+          "utf8"
+        );
       }
       const jobTextFile = jobTarget.sourceKind === "TEXT" ? join(runWorkDir, "job-description.txt") : undefined;
       if (jobTextFile) {
