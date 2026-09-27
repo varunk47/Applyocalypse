@@ -17,6 +17,9 @@ pyinstaller>=6.15.0
 tzdata>=2025.2
 ruff>=0.8.0
 pypdf>=6.15.0  # PYSEC-2026-3655, PYSEC-2026-3656
+# Renders scanned PDF pages to images for the NVIDIA parser. No dependencies of
+# its own; ships the pdfium binary (Apache-2.0 / BSD-3).
+pypdfium2>=4.30.0
 
 # dev tooling (kept in the lock so maintainers can regenerate it)
 pip-tools>=7.6.1  # 7.5.3 cannot run under pip 26: it imports pip internals that were removed

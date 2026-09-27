@@ -114,7 +114,10 @@ export const createIpcHandlerContext = ({
   const runRepository = new RunRepository(db);
   const auditRepository = new AuditRepository(db);
   const secureSecretStore = new SecureSecretStore();
-  const documentIngestionService = new DocumentIngestionService(uploadRepository, parsedDocumentRepository);
+  const documentIngestionService = new DocumentIngestionService(uploadRepository, parsedDocumentRepository, null, () => {
+    const providerSecret = providerRepository.getFirstConnectedSecretReference();
+    return providerSecret?.provider === "nvidia_nim" ? secureSecretStore.decryptSecret(providerSecret.encryptedReference) : null;
+  });
 
   // `approvedPickedPaths` stays private to this module; approvePickedPath /
   // requirePickedPath are its only doors, preserving the security property that

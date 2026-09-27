@@ -17,6 +17,7 @@ to both.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -315,6 +316,20 @@ def write_candidate_docx(lines: tuple[PdfLine, ...], destination: Path) -> None:
     document.save(str(destination))
 
 
+def _read_scan(source_pdf: Path) -> tuple[PdfLine, ...]:
+    """Read a text-less PDF with nemotron-parse when an NVIDIA key is saved."""
+    from .nemotron_parse import nvidia_key, read_scanned_pdf_lines
+
+    api_key = nvidia_key()
+    if not api_key:
+        return ()
+    try:
+        return read_scanned_pdf_lines(source_pdf, api_key)
+    except Exception as error:  # noqa: BLE001 - any failure falls back to the scan message
+        print(f"nemotron-parse could not read the scan: {type(error).__name__}", file=sys.stderr)
+        return ()
+
+
 def convert_pdf_to_candidate_docx(source_pdf: Path, output_dir: Path) -> PdfIngestionResult:
     if source_pdf.suffix.lower() != ".pdf":
         raise ValueError("source_pdf must be a PDF")
@@ -326,11 +341,14 @@ def convert_pdf_to_candidate_docx(source_pdf: Path, output_dir: Path) -> PdfInge
 
     lines = read_pdf_lines(source_pdf)
     if not lines:
+        lines = _read_scan(source_pdf)
+    if not lines:
         # A scanned resume is a picture of text. Saying so beats handing back an
         # empty document the user has to open before discovering it is empty.
         raise RuntimeError(
             "This PDF has no selectable text, so it is most likely a scan or an image. "
-            "Upload the Word original, or a PDF exported from it, and we can tailor that."
+            "Upload the Word original, or a PDF exported from it, and we can tailor that. "
+            "With an NVIDIA NIM key saved in Settings, scans are read automatically."
         )
     write_candidate_docx(lines, candidate_path)
 
