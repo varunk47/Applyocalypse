@@ -1,9 +1,11 @@
-# Design: soft UI
+# Design: soft glass
 
-Applyocalypse uses light neumorphism. Every surface shares one soft grey. Elements
-are either pressed out of it (raised) or pressed into it (inset). Depth does the
-separating, so there are almost no borders and no decoration. Light is the main
-theme. Dark comes second and uses the same rules on a charcoal base.
+Applyocalypse sits between glassmorphism and neumorphism. Frosted, translucent
+panels float over a quiet backdrop with faint indigo, teal and lavender tints.
+Panels are lifted: translucent white, a bright top edge, a thin white rim and a
+soft shadow below. Anything that takes input sits in a shallow well. There are
+almost no borders and no decoration. Light is the main theme. Dark comes second
+and uses the same rules over a near-black backdrop.
 
 Tokens live at the top of `apps/desktop/src/renderer/styles/app.css`. Fonts are
 in `apps/desktop/src/renderer/fonts.css`.
@@ -22,7 +24,8 @@ in `apps/desktop/src/renderer/fonts.css`.
 
 | Token | Light | Use |
 |-------|-------|-----|
-| `--paper` = `--card` = `--chrome` | #e6eaf0 | the one surface |
+| `--backdrop` / `--paper` | tinted gradients over #eef1f6 | the app background; `--paper` is its solid base |
+| `--card` / `--chrome` | white at 62% / 38% | frosted panels / quieter rails and wells |
 | `--ink` / `--ink-2` / `--ink-3` | #232a36 / #465163 / #566174 | text, tuned for 4.5:1 on the surface |
 | `--wax` | #4353c9 | the accent: primary buttons, focus, active step, emphasis |
 | `--armed` | #6a45d6 | the submit gate, and nothing else |
@@ -33,8 +36,8 @@ Status shows as a soft pill, and the color always comes with the status word:
 
 ## Shape and depth
 
-- `--neu-raised` / `--neu-raised-sm`: a white shadow up-left and a cool grey one down-right. Used for cards, buttons and chips.
-- `--neu-inset` / `--neu-inset-sm`: the same shadows, inset. Used for inputs, drop zones, nav and segmented tracks, and pressed or picked states.
+- `--lift` / `--lift-sm`: an inset white top edge, a 1px white rim and a soft shadow below. Used for panels, buttons and chips. Panels on the backdrop also get `backdrop-filter: var(--blur)`.
+- `--well` / `--well-sm`: a faint inner shadow and a thin inner rim. Used for inputs, drop zones, segmented tracks and pressed or picked states.
 - State is shown with an inset 2px ring in the state colour (`inset 0 0 0 2px var(--wax)`), never a side stripe.
 - Radii: `--r-card` 16px for cards, `--r-sm` 11px for buttons and fields, pills for nav, chips and status.
 - The primary button is the only filled surface in view (indigo). The submit button is violet so it looks like no other button.
@@ -43,8 +46,8 @@ Status shows as a soft pill, and the color always comes with the status word:
 ## Layout
 
 - The titlebar is part of the surface: a small indigo mark, the name and the vault note.
-- Navigation is an inset pill track with the current screen raised inside it.
-- Onboarding is one column of raised cards; nested entries sit inset inside their card.
+- Navigation is a frosted pill with the current screen shown as solid white glass inside it.
+- Onboarding is one column of frosted panels; nested entries sit in wells inside their panel.
 
 ## Motion
 
