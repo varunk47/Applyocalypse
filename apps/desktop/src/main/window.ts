@@ -9,7 +9,7 @@ export const createMainWindow = (themeState: ThemeState): BrowserWindow => {
     minWidth: 1080,
     minHeight: 760,
     title: "Applyocalypse",
-    backgroundColor: themeState.activeTheme === "dark" ? "#0A0E15" : "#ECEFF4",
+    backgroundColor: themeState.activeTheme === "dark" ? "#111214" : "#F3F1EC",
     show: false,
     frame: false,
     webPreferences: {

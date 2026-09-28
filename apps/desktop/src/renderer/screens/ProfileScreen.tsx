@@ -1,6 +1,6 @@
 import { For, Show, createEffect, createSignal } from 'solid-js'
 import { createStore, produce } from 'solid-js/store'
-import { KeyRound, Minus, Plus, Save, Settings, ShieldCheck, X } from 'lucide-solid'
+import { KeyRound, Minus, Plus, Save, ShieldCheck, X } from 'lucide-solid'
 import {
   deriveWorkAuthorization,
   readWorkAuthorization,
@@ -176,9 +176,11 @@ export default function ProfileScreen() {
   }
 
   return (
-    <section class="settings-panel surface-panel surface-panel-active" data-gsap="panel" data-view-panel>
-      <Settings size={20} aria-hidden="true" />
-      <div class="panel-kicker">Profile workspace</div>
+    <section class="settings-panel surface-panel surface-panel-active profile-screen" data-gsap="panel" data-view-panel>
+      <div>
+        <h1 class="screen-headline" style={{ 'font-size': '30px' }}>Profile</h1>
+        <p class="screen-sub">The facts every application draws from. Tailoring rewrites the wording, never these.</p>
+      </div>
 
       <Show
         when={state.profile}

@@ -520,7 +520,7 @@ export default function SettingsScreen() {
           }
         >
           <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
-            <span style={{ color: 'var(--success)' }}>CONNECTED</span>
+            <span style={{ color: 'var(--success)' }}>Connected</span>
             <strong>{gmailStatus().email ?? 'Gmail account'}</strong>
             <button class="secondary-action" type="button" onClick={() => void disconnectGmail()}>
               Disconnect
@@ -569,7 +569,7 @@ export default function SettingsScreen() {
           }
         >
           <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
-            <span style={{ color: 'var(--success)' }}>CONFIGURED</span>
+            <span style={{ color: 'var(--success)' }}>Configured</span>
             <strong>Jev drives the browser</strong>
             <button class="secondary-action" type="button" onClick={() => void clearJevKey()}>
               Remove key

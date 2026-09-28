@@ -66,7 +66,7 @@ export const RememberedSettings = () => {
         <div class="settings-block-head">
           <div class="panel-kicker">Before anything is sent</div>
           <p class="settings-block-note">
-            <Lock size={13} aria-hidden="true" /> Review before submit is always on. Nothing here can submit an application for you.
+            <Lock size={13} aria-hidden="true" /> Filters and answers here never submit anything. Only your own click, or Submit automatically under Applying, does.
           </p>
         </div>
       </section>
