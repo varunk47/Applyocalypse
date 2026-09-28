@@ -63,6 +63,14 @@ const contract = <Request extends z.ZodTypeAny, Response extends z.ZodTypeAny>(
   response: Response
 ): IpcContract<Request, Response> => ({ channel, request, response });
 
+export const AccountStateSchema = z.object({ signedIn: z.boolean(), email: z.string().nullable() });
+export type AccountStateDto = z.infer<typeof AccountStateSchema>;
+export const AccountResultSchema = AccountStateSchema.extend({ ok: z.boolean(), message: z.string() });
+export type AccountResultDto = z.infer<typeof AccountResultSchema>;
+const AccountCredentialsSchema = z
+  .object({ email: z.string().trim().email().max(320), password: z.string().min(8).max(128) })
+  .strict();
+
 const RuleConditionValueSchema = z.string().trim().min(1).max(200);
 const PreferenceRuleConditionsSchema = z
   .object({ location: RuleConditionValueSchema.optional(), company: RuleConditionValueSchema.optional(), portal: RuleConditionValueSchema.optional() })
@@ -197,6 +205,11 @@ export const IpcChannels = {
   gmailStartOAuth: "gmail:start-oauth",
   gmailGetOAuthStatus: "gmail:get-oauth-status",
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
+  accountGetState: "account:get-state",
+  accountSignUp: "account:sign-up",
+  accountSignIn: "account:sign-in",
+  accountSignInWithGoogle: "account:sign-in-with-google",
+  accountSignOut: "account:sign-out",
   jevSaveKey: "jev:save-key",
   jevGetStatus: "jev:get-status",
   jevClearKey: "jev:clear-key",
@@ -550,6 +563,11 @@ export const IpcContracts = {
     EmptyRequestSchema,
     z.object({ ok: z.boolean() })
   ),
+  accountGetState: contract(IpcChannels.accountGetState, EmptyRequestSchema, AccountStateSchema),
+  accountSignUp: contract(IpcChannels.accountSignUp, AccountCredentialsSchema, AccountResultSchema),
+  accountSignIn: contract(IpcChannels.accountSignIn, AccountCredentialsSchema, AccountResultSchema),
+  accountSignInWithGoogle: contract(IpcChannels.accountSignInWithGoogle, EmptyRequestSchema, AccountResultSchema),
+  accountSignOut: contract(IpcChannels.accountSignOut, EmptyRequestSchema, AccountStateSchema),
   jevSaveKey: contract(
     IpcChannels.jevSaveKey,
     z.object({ key: z.string().trim().min(1).max(512) }).strict(),

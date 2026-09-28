@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import { IpcChannels, IpcContracts, RendererEventSchemas } from "@applyocalypse/ipc-contracts";
 import type {
+  AccountResultDto,
+  AccountStateDto,
   JobFilterDto,
   PreferenceChatReplyDto,
   PreferenceRuleDto,
@@ -266,6 +268,16 @@ const api = {
       ),
     disconnectOAuth: () =>
       invoke<Record<string, never>, { ok: boolean }>(IpcContracts.gmailDisconnectOAuth.channel, {})
+  },
+  account: {
+    getState: () => invoke<Record<string, never>, AccountStateDto>(IpcContracts.accountGetState.channel, {}),
+    signUp: (input: { email: string; password: string }) =>
+      invoke<typeof input, AccountResultDto>(IpcContracts.accountSignUp.channel, input),
+    signIn: (input: { email: string; password: string }) =>
+      invoke<typeof input, AccountResultDto>(IpcContracts.accountSignIn.channel, input),
+    signInWithGoogle: () =>
+      invoke<Record<string, never>, AccountResultDto>(IpcContracts.accountSignInWithGoogle.channel, {}),
+    signOut: () => invoke<Record<string, never>, AccountStateDto>(IpcContracts.accountSignOut.channel, {})
   },
   jev: {
     saveKey: (key: string) =>

@@ -3,10 +3,14 @@ import { IpcContracts } from "@applyocalypse/ipc-contracts";
 import { HARD_MAX_CONCURRENT_APPLICATIONS } from "@applyocalypse/config";
 import { handleContract, type IpcHandlerContext } from "./context";
 
+// Encrypted tokens and keys (Gmail, Jev, the account session) stay in main.
+export const rendererSafeSettings = (all: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(all).filter(([key]) => !/encrypted/i.test(key)));
+
 export const registerSettingsHandlers = (ctx: IpcHandlerContext): void => {
   const { settingsRepository, normalizeUserPath } = ctx;
 
-  handleContract(IpcContracts.settingsGet, () => settingsRepository.getAll());
+  handleContract(IpcContracts.settingsGet, () => rendererSafeSettings(settingsRepository.getAll()));
   handleContract(IpcContracts.settingsUpdate, ({ patch }) => {
     for (const [key, value] of Object.entries(patch)) {
       if (key === "automation.maxConcurrentApplications") {
@@ -42,6 +46,6 @@ export const registerSettingsHandlers = (ctx: IpcHandlerContext): void => {
       }
       settingsRepository.set(key, outputDir);
     }
-    return settingsRepository.getAll();
+    return rendererSafeSettings(settingsRepository.getAll());
   });
 };

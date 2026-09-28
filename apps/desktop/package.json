@@ -25,6 +25,7 @@
     "@applyocalypse/shared-types": "workspace:*",
     "@applyocalypse/validator": "workspace:*",
     "@solidjs/router": "^0.16.1",
+    "@supabase/supabase-js": "^2.117.2",
     "better-sqlite3": "^12.10.0",
     "bindings": "^1.5.0",
     "file-uri-to-path": "1.0.0",
