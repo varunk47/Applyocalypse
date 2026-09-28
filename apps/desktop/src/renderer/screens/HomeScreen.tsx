@@ -87,7 +87,9 @@ export default function HomeScreen() {
   const navigate = useNavigate()
 
   const [jobInput, setJobInput] = createSignal('')
-  const [autoSubmit, setAutoSubmit] = createSignal(false)
+  // Null until the user touches the checkbox; until then it follows the Settings default.
+  const [autoSubmitChoice, setAutoSubmit] = createSignal<boolean | null>(null)
+  const autoSubmit = () => autoSubmitChoice() ?? settingsState.settings['automation.autoSubmitByDefault'] === true
   const [error, setError] = createSignal<string | null>(null)
   const [isSubmitting, setIsSubmitting] = createSignal(false)
   const [nowKicker, setNowKicker] = createSignal(dateKicker())

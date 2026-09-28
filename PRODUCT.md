@@ -34,7 +34,7 @@ Local-first and human-controlled. Documents, profile and credentials stay on the
 - Secrets are encrypted at rest and never logged. Documents live on disk, never inside the database.
 - Generated text never contains em dashes or the banned-word list.
 - Fonts and assets are bundled; the renderer makes no network requests for them.
-- Open decision: the user wants an optional "submit automatically" mode. This conflicts with the current approval invariant and is not built until it is explicitly signed off, including how held-for-review answers behave under it.
+- "Submit automatically" (signed off 2026-09-27) is a per-run preapproval, with a Settings default that is off. Ticking it is the explicit approval: the run still stops to approve the documents and the answers, held-for-review answers still wait for the user, and only the final click is skipped. The worker withdraws the preapproval and asks again when a portal that always shows a review page did not show one, or when the posting published required questions the form never asked.
 
 ## Brand Commitments
 

@@ -45,6 +45,7 @@ export default function SettingsScreen() {
     setThemePreference,
     setMaxConcurrentApplications,
     setAutofillApprovedDefaults,
+    setAutoSubmitByDefault,
     chooseOutputDir,
     saveProviderApiKey,
   } = useSettingsStore()
@@ -86,6 +87,7 @@ export default function SettingsScreen() {
     state.settings['automation.maxConcurrentApplications'] ?? DEFAULT_MAX_CONCURRENT_APPLICATIONS
   )
   const autofillDefaults = () => state.settings['automation.autofillApprovedDefaults'] === true
+  const autoSubmitByDefault = () => state.settings['automation.autoSubmitByDefault'] === true
   const outputDir = () => (state.settings['files.outputDir'] as string | undefined) ?? ''
 
   type ConverterStatus = { available: boolean; version: string | null; path: string | null; installUrl: string }
@@ -347,6 +349,30 @@ export default function SettingsScreen() {
                 classList={{ active: autofillDefaults() === val }}
                 type="button"
                 onClick={() => void setAutofillApprovedDefaults(val)}
+              >
+                {val ? 'On' : 'Off'}
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
+
+      <section class="settings-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Submit automatically</div>
+          <p class="settings-block-note">
+            Ticks "Auto-submit after review" for every new job. Each run still stops for you to approve the
+            tailored documents and the answers, and EEO, criminal history and previous-employer questions always
+            wait for you. Once you approve, the application is submitted without a second click.
+          </p>
+        </div>
+        <div class="segmented-control" aria-label="Submit automatically">
+          <For each={TOGGLE_CHOICES}>
+            {(val) => (
+              <button
+                classList={{ active: autoSubmitByDefault() === val }}
+                type="button"
+                onClick={() => void setAutoSubmitByDefault(val)}
               >
                 {val ? 'On' : 'Off'}
               </button>

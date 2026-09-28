@@ -21,9 +21,9 @@ export const registerSettingsHandlers = (ctx: IpcHandlerContext): void => {
         settingsRepository.set(key, clamped);
         continue;
       }
-      if (key === "automation.autofillApprovedDefaults") {
+      if (key === "automation.autofillApprovedDefaults" || key === "automation.autoSubmitByDefault") {
         if (typeof value !== "boolean") {
-          throw new Error("autofillApprovedDefaults must be a boolean");
+          throw new Error(`${key.replace("automation.", "")} must be a boolean`);
         }
         settingsRepository.set(key, value);
         continue;
