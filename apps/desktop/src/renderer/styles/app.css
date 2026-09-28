@@ -1,82 +1,81 @@
 /* ═══════════════════════════════════════════════════════════════════════════
-   SOFT GLASS
-   Frosted panels over a quiet, faintly tinted backdrop. Surfaces are lifted
-   (translucent white, a bright top edge, a soft shadow below) and controls
-   that take input sit in shallow wells. Borders are avoided; light and depth
-   separate. Colour is kept for meaning: one indigo accent for actions and
-   focus, soft status washes that always carry their word, and violet only
-   for submitting. Text is tuned for 4.5:1 and focus is a solid ring.
+   PAPER AND SHEET
+   A warm paper desk with one white working sheet laid on it. The assistant
+   lives on the paper; the work happens on the sheet. Surfaces are flat and
+   separated by hairlines, with one soft shadow for anything that floats.
+   Nothing is pressed in and nothing is frosted. Headlines are set in
+   Fraunces, everything else in Onest. Colour carries meaning: cobalt for
+   actions and focus, tinted status tabs that always carry their word, and
+   violet only for submitting. Text is tuned for 4.5:1 and focus is a ring.
    ═══════════════════════════════════════════════════════════════════════════ */
 
 /* ── Tokens ────────────────────────────────────────────────────────────────── */
 :root {
-  --paper: #eef1f6;
-  --backdrop:
-    radial-gradient(1100px 680px at 6% -12%, #dde5ff 0%, transparent 62%),
-    radial-gradient(900px 620px at 104% 8%, #dff0f3 0%, transparent 58%),
-    radial-gradient(1000px 760px at 62% 118%, #ebe5fa 0%, transparent 60%),
-    #eef1f6;
-  --chrome: rgba(255, 255, 255, 0.38);
-  --card: rgba(255, 255, 255, 0.62);
-  --ink: #232a36;
-  --ink-2: #465163;
-  --ink-3: #566174;
-  --glass-edge: rgba(255, 255, 255, 0.95);
-  --glass-rim: rgba(255, 255, 255, 0.72);
-  --shade: rgba(30, 41, 70, 0.16);
-  --shade-soft: rgba(30, 41, 70, 0.06);
-  --shade-in: rgba(30, 41, 70, 0.12);
-  --rim-in: rgba(30, 41, 70, 0.13);
-  --hairline: rgba(120, 134, 158, 0.16);
-  --hairline-strong: rgba(120, 134, 158, 0.3);
-  --hairline-soft: rgba(120, 134, 158, 0.1);
-  --rule-blue: rgba(120, 134, 158, 0.16);
-  --rule-red: rgba(120, 134, 158, 0.16);
+  --paper: #f3f1ec;
+  --backdrop: #f3f1ec;
+  --chrome: #ffffff;
+  --card: #ffffff;
+  --sunk: #f7f6f2;
+  --ink: #15171c;
+  --ink-2: #474c57;
+  --ink-3: #5f6472;
+  --glass-edge: #ffffff;
+  --glass-rim: #e6e3db;
+  --shade: rgba(21, 23, 28, 0.14);
+  --shade-soft: rgba(21, 23, 28, 0.05);
+  --shade-in: rgba(21, 23, 28, 0.08);
+  --rim-in: #d9d5ca;
+  --hairline: #e6e3db;
+  --hairline-strong: #d4cfc3;
+  --hairline-soft: #efece6;
+  --rule-blue: #e6e3db;
+  --rule-red: #e6e3db;
 
-  --wax: #4353c9;
-  --wax-sweep: #8d98e6;
+  --wax: #2a45d8;
+  --wax-sweep: #8f9ff0;
   --on-wax: #ffffff;
-  --wax-wash: rgba(67, 83, 201, 0.1);
-  --wax-border: rgba(67, 83, 201, 0.4);
-  --wax-shadow: rgba(67, 83, 201, 0.45);
-  --live: #1d7454;
-  --live-bright: #1d7454;
-  --edited: #845a05;
-  --danger: #b4322a;
-  --danger-wash: rgba(180, 50, 42, 0.1);
+  --wax-wash: rgba(42, 69, 216, 0.07);
+  --wax-border: rgba(42, 69, 216, 0.38);
+  --wax-shadow: rgba(42, 69, 216, 0.28);
+  --live: #177049;
+  --live-bright: #177049;
+  --edited: #8a5a00;
+  --danger: #b3261e;
+  --danger-wash: rgba(179, 38, 30, 0.08);
 
   /* Violet is kept for the one irreversible act: submitting. */
-  --armed: #6a45d6;
-  --armed-fill: #6a45d6;
+  --armed: #6641d4;
+  --armed-fill: #6641d4;
   --on-armed: #ffffff;
-  --armed-wash: rgba(106, 69, 214, 0.1);
-  --live-wash: rgba(29, 116, 84, 0.1);
-  --edited-wash: rgba(132, 90, 5, 0.1);
+  --armed-wash: rgba(102, 65, 212, 0.08);
+  --live-wash: rgba(23, 112, 73, 0.08);
+  --edited-wash: rgba(138, 90, 0, 0.08);
 
-  /* Status washes. Always paired with a word. */
-  --tab-queued: #ece3c8;
-  --tab-needs: #f5d8c9;
-  --tab-running: #d3def4;
-  --tab-done: #cdeadb;
-  --tab-failed: #d9dde4;
-  --on-tab: #232a36;
+  /* Status tabs. Always paired with a word. */
+  --tab-queued: #f1ead3;
+  --tab-needs: #fbe2d3;
+  --tab-running: #dfe5fb;
+  --tab-done: #d9f0e3;
+  --tab-failed: #e9e7e2;
+  --on-tab: #15171c;
 
-  --viewport-hatch-a: #eef1f6;
-  --viewport-hatch-b: #e9edf3;
+  --viewport-hatch-a: #f7f6f2;
+  --viewport-hatch-b: #f1efe9;
 
-  --lift: inset 0 1px 0 var(--glass-edge), 0 0 0 1px var(--glass-rim), 0 12px 32px -14px var(--shade), 0 2px 6px -2px var(--shade-soft);
-  --lift-sm: inset 0 1px 0 var(--glass-edge), 0 0 0 1px var(--glass-rim), 0 4px 12px -5px var(--shade);
-  --well: inset 0 1px 3px var(--shade-in), inset 0 0 0 1px var(--rim-in);
-  --well-sm: inset 0 1px 2px var(--shade-in), inset 0 0 0 1px var(--rim-in);
-  --blur: blur(18px) saturate(160%);
+  /* Lifted: a hairline and one soft shadow. Wells: a hairline, no inner shade. */
+  --lift: 0 0 0 1px var(--hairline), 0 1px 2px var(--shade-soft), 0 12px 32px -20px var(--shade);
+  --lift-sm: 0 0 0 1px var(--hairline), 0 1px 2px var(--shade-soft);
+  --well: inset 0 0 0 1px var(--hairline-strong);
+  --well-sm: inset 0 0 0 1px var(--hairline);
+  --blur: none;
   --card-shadow: var(--lift);
   --gate-shadow: var(--lift);
 
-  --r-card: 16px;
-  --r-sm: 11px;
+  --r-card: 14px;
+  --r-sm: 9px;
   --r-tab: 999px;
 
-  --display: 'Onest', system-ui, sans-serif;
+  --display: 'Fraunces', Georgia, serif;
   --sans: 'Onest', system-ui, sans-serif;
   --mono: ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
@@ -85,34 +84,31 @@
 
 :root[data-theme='dark'] {
   color-scheme: dark;
-  --paper: #14171d;
-  --backdrop:
-    radial-gradient(1100px 680px at 6% -12%, #1d2442 0%, transparent 62%),
-    radial-gradient(900px 620px at 104% 8%, #13292d 0%, transparent 58%),
-    radial-gradient(1000px 760px at 62% 118%, #221a36 0%, transparent 60%),
-    #14171d;
-  --chrome: rgba(255, 255, 255, 0.03);
-  --card: rgba(255, 255, 255, 0.055);
-  --ink: #e8ebf0;
-  --ink-2: #bcc3ce;
-  --ink-3: #9ea7b5;
-  --glass-edge: rgba(255, 255, 255, 0.1);
-  --glass-rim: rgba(255, 255, 255, 0.07);
-  --shade: rgba(0, 0, 0, 0.6);
+  --paper: #111214;
+  --backdrop: #111214;
+  --chrome: #191a1e;
+  --card: #1e1f24;
+  --sunk: #16171a;
+  --ink: #ecebe7;
+  --ink-2: #bdbcb6;
+  --ink-3: #9d9c96;
+  --glass-edge: #26272d;
+  --glass-rim: #2b2c32;
+  --shade: rgba(0, 0, 0, 0.55);
   --shade-soft: rgba(0, 0, 0, 0.3);
-  --shade-in: rgba(0, 0, 0, 0.4);
-  --rim-in: rgba(255, 255, 255, 0.05);
-  --hairline: rgba(255, 255, 255, 0.07);
-  --hairline-strong: rgba(255, 255, 255, 0.14);
-  --hairline-soft: rgba(255, 255, 255, 0.04);
-  --rule-blue: rgba(255, 255, 255, 0.07);
-  --rule-red: rgba(255, 255, 255, 0.07);
-  --wax: #8f9cf5;
-  --wax-sweep: #c0c8fa;
-  --on-wax: #151a3a;
-  --wax-wash: rgba(143, 156, 245, 0.14);
-  --wax-border: rgba(143, 156, 245, 0.4);
-  --wax-shadow: rgba(0, 0, 0, 0.55);
+  --shade-in: rgba(0, 0, 0, 0.3);
+  --rim-in: #34353c;
+  --hairline: #2b2c32;
+  --hairline-strong: #3a3b42;
+  --hairline-soft: #222328;
+  --rule-blue: #2b2c32;
+  --rule-red: #2b2c32;
+  --wax: #93a4ff;
+  --wax-sweep: #c3ccff;
+  --on-wax: #10163d;
+  --wax-wash: rgba(147, 164, 255, 0.12);
+  --wax-border: rgba(147, 164, 255, 0.4);
+  --wax-shadow: rgba(0, 0, 0, 0.5);
   --live: #7fd1ad;
   --live-bright: #a4e0c4;
   --edited: #e6c16a;
@@ -124,14 +120,14 @@
   --armed-wash: rgba(185, 164, 246, 0.14);
   --live-wash: rgba(127, 209, 173, 0.12);
   --edited-wash: rgba(230, 193, 106, 0.12);
-  --tab-queued: #4b4533;
-  --tab-needs: #5a3b31;
-  --tab-running: #2f3f5c;
-  --tab-done: #2b4a3c;
-  --tab-failed: #3a3f48;
-  --on-tab: #e8ebf0;
-  --viewport-hatch-a: #14171d;
-  --viewport-hatch-b: #181b22;
+  --tab-queued: #3f3a2a;
+  --tab-needs: #4d3228;
+  --tab-running: #28324f;
+  --tab-done: #243f33;
+  --tab-failed: #313238;
+  --on-tab: #ecebe7;
+  --viewport-hatch-a: #16171a;
+  --viewport-hatch-b: #1a1b1f;
 }
 
 /* ── Motion ────────────────────────────────────────────────────────────────── */
@@ -244,7 +240,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .serif-title {
-  font: 700 16px/1.3 var(--display);
+  font: 560 16px/1.3 var(--display);
   color: var(--ink);
 }
 
@@ -602,7 +598,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .screen-headline {
-  font: 700 30px/1.15 var(--display);
+  font: 560 30px/1.15 var(--display);
   letter-spacing: -0.01em;
   margin: 4px 0 6px;
 }
@@ -842,7 +838,7 @@ h1, h2, h3 { text-wrap: balance; }
   box-shadow: var(--lift-sm);
   display: grid;
   place-items: center;
-  font: 650 13px var(--display);
+  font: 650 13px var(--sans);
   letter-spacing: 0.01em;
   flex: none;
 }
@@ -967,7 +963,7 @@ h1, h2, h3 { text-wrap: balance; }
   color: var(--on-armed);
 }
 
-.rail-card .rail-title { font: 650 14.5px/1.3 var(--display); letter-spacing: -0.011em; }
+.rail-card .rail-title { font: 650 14.5px/1.3 var(--sans); letter-spacing: -0.011em; }
 
 .rail-card .rail-sub {
   font-size: 12px;
@@ -1012,7 +1008,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .console-header .console-title {
-  font: 650 15.5px var(--display);
+  font: 650 15.5px var(--sans);
   letter-spacing: -0.014em;
   min-width: 0;
   overflow: hidden;
@@ -1452,7 +1448,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .receipt-row .receipt-title {
-  font: 600 13.5px var(--display);
+  font: 600 13.5px var(--sans);
   letter-spacing: -0.008em;
   flex: 1;
   min-width: 0;
@@ -1679,7 +1675,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .section-header h2 {
-  font: 700 25px/1.1 var(--display);
+  font: 560 25px/1.1 var(--display);
   letter-spacing: -0.025em;
   margin-top: 2px;
 }
@@ -1764,7 +1760,7 @@ h1, h2, h3 { text-wrap: balance; }
 .structured-entry-header input { flex: 1; }
 .bullet-row input { flex: 1; }
 
-.entry-title-input { font: 600 14px var(--display) !important; letter-spacing: -0.008em; }
+.entry-title-input { font: 600 14px var(--sans) !important; letter-spacing: -0.008em; }
 .entry-sub-input, .entry-date-input { font-size: 12px !important; }
 
 .chip-input {
@@ -2123,7 +2119,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .ob-hero-title {
-  font: 650 clamp(1.9rem, 1.2rem + 2.4vw, 2.7rem) / 1.1 var(--display);
+  font: 560 clamp(1.9rem, 1.2rem + 2.4vw, 2.7rem) / 1.1 var(--display);
   letter-spacing: -0.02em;
   color: var(--ink);
   margin: 0;
@@ -2248,7 +2244,7 @@ h1, h2, h3 { text-wrap: balance; }
 }
 
 .ob-count strong {
-  font: 800 44px/1 var(--display);
+  font: 560 44px/1 var(--display);
   letter-spacing: -0.04em;
   color: var(--ink);
 }
@@ -2439,7 +2435,7 @@ h1, h2, h3 { text-wrap: balance; }
 
 .ob-tail-title {
   margin: 0 0 6px;
-  font: 650 clamp(1.4rem, 1.1rem + 1.2vw, 1.8rem) / 1.15 var(--display);
+  font: 560 clamp(1.4rem, 1.1rem + 1.2vw, 1.8rem) / 1.15 var(--display);
   letter-spacing: -0.028em;
 }
 
@@ -2845,3 +2841,289 @@ h1, h2, h3 { text-wrap: balance; }
   .settings-layout { grid-template-columns: 1fr; }
   .settings-subnav { position: static; flex-direction: row; flex-wrap: wrap; }
 }
+
+/* ── Paper and sheet: the shell ────────────────────────────────────────────── */
+/* The assistant sits on the paper; the routed work sits on one white sheet. */
+.app-shell { background: var(--paper); }
+
+.shell-body { grid-row: 3; padding: 0 10px 10px 0; gap: 10px; }
+.shell-body > .workspace:first-child { grid-column: 1 / -1; margin-left: 10px; }
+
+.workspace {
+  background: var(--chrome);
+  border-radius: var(--r-card);
+  box-shadow: var(--lift);
+}
+
+.nav-rail {
+  align-items: stretch;
+  gap: 16px;
+  height: 52px;
+  padding: 0 20px 0 12px;
+  box-shadow: 0 1px 0 var(--hairline);
+}
+
+.nav-list {
+  gap: 2px;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+
+/* Tabs, underlined in ink when current. */
+.nav-item {
+  height: 100%;
+  padding: 0 12px;
+  border-radius: 0;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  transition: color 0.16s ease, box-shadow 0.2s ease;
+}
+.nav-item:not(.active):hover { color: var(--ink); box-shadow: inset 0 -2px 0 var(--hairline-strong); }
+.nav-item.active {
+  background: none;
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: inset 0 -2px 0 var(--ink);
+}
+
+.engine-card { align-self: center; }
+
+.titlebar .brand-seal {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 7px;
+  background: var(--ink);
+  color: var(--paper);
+  box-shadow: none;
+  font: 600 13px/1 var(--display);
+}
+.titlebar .brand-word { font: 600 15px/1.2 var(--display); letter-spacing: -0.01em; }
+
+.system-health-banner { margin: 0 10px 10px; box-shadow: var(--lift-sm); }
+
+.screen-headline { letter-spacing: -0.02em; }
+
+/* Flat buttons: a filled action and hairline secondaries. */
+.btn-wax { box-shadow: none; font-weight: 600; }
+.btn-wax:hover:not(:disabled) { filter: brightness(1.1); }
+.btn-outline-wax,
+.btn-quiet,
+.btn-mono { background: var(--card); }
+.btn-outline-wax:hover:not(:disabled),
+.btn-quiet:hover:not(:disabled),
+.btn-mono:hover:not(:disabled) { background: var(--sunk); box-shadow: 0 0 0 1px var(--hairline-strong); }
+
+:is(input, textarea, select):focus-visible { outline: 2px solid var(--wax); outline-offset: 1px; }
+
+/* ── Paper and sheet: the assistant column ─────────────────────────────────── */
+.pref-chat {
+  width: 340px;
+  margin: 0 0 0 10px;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.pref-chat-head { padding: 6px 6px 12px 8px; box-shadow: none; }
+.pref-chat-title strong { font: 560 17px/1.2 var(--display); letter-spacing: -0.01em; }
+.pref-chat-tab { margin: 8px 0 0 10px; background: var(--card); }
+.pref-chat-log { padding: 8px 8px 14px; }
+
+.pref-chat-example {
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: var(--card);
+  color: var(--ink);
+}
+.pref-chat-example:hover:not(:disabled) { color: var(--ink); box-shadow: 0 0 0 1px var(--hairline-strong), 0 1px 2px var(--shade-soft); }
+
+/* The assistant speaks as plain text; the user's turns are bubbles. */
+.pref-turn.assistant .pref-bubble { max-width: 100%; padding: 0 2px; background: none; box-shadow: none; font-size: 13.5px; }
+.pref-turn.user .pref-bubble { background: var(--ink); color: var(--paper); }
+.pref-proposal { box-shadow: var(--lift-sm); }
+
+.pref-chat-composer {
+  margin: 0 0 0 0;
+  padding: 10px;
+  border-radius: var(--r-card);
+  background: var(--card);
+  box-shadow: var(--lift);
+}
+.pref-chat-composer textarea { padding: 6px 4px; background: none; box-shadow: none; font-size: 13.5px; }
+.pref-chat-composer textarea:focus-visible { outline: none; }
+.pref-chat-composer:focus-within { box-shadow: 0 0 0 2px var(--wax-border), 0 12px 32px -20px var(--shade); }
+.pref-send { width: 32px; height: 32px; background: var(--ink); color: var(--paper); box-shadow: none; }
+
+/* ── Paper and sheet: settings sub-nav as a quiet list ─────────────────────── */
+.settings-subnav { padding: 0; background: none; box-shadow: none; }
+.settings-subnav button.active { background: var(--sunk); color: var(--ink); box-shadow: 0 0 0 1px var(--hairline); }
+.settings-subnav button:not(.active):hover { background: var(--hairline-soft); }
+
+/* ── Paper and sheet: sign in ──────────────────────────────────────────────── */
+/* The promise on the paper, the form on the sheet. */
+.auth-screen {
+  grid-row: 2 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(360px, 440px);
+  gap: 10px;
+  min-height: 0;
+  padding: 0 10px 10px;
+  overflow-y: auto;
+  user-select: none;
+}
+
+.auth-story {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 36px;
+  padding: 48px clamp(24px, 6vw, 88px);
+}
+
+.auth-mark {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  background: var(--ink);
+  color: var(--paper);
+  font: 560 24px/1 var(--display);
+}
+
+.auth-title {
+  margin: 0;
+  max-width: 13ch;
+  font: 500 clamp(2.4rem, 1.4rem + 3.2vw, 4rem) / 1.02 var(--display);
+  letter-spacing: -0.03em;
+  color: var(--ink);
+}
+.auth-title em { font-style: normal; color: var(--wax); }
+
+.auth-promises {
+  list-style: none;
+  counter-reset: promise;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 18px;
+  max-width: 440px;
+}
+.auth-promises li {
+  counter-increment: promise;
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  column-gap: 12px;
+  row-gap: 2px;
+}
+.auth-promises li::before {
+  content: counter(promise, decimal-leading-zero);
+  grid-row: span 2;
+  padding-top: 2px;
+  font: 500 12px/1.4 var(--mono);
+  color: var(--ink-3);
+}
+.auth-promises strong { font-size: 14.5px; font-weight: 600; color: var(--ink); }
+.auth-promises span { font-size: 13.5px; color: var(--ink-2); }
+
+.auth-sheet {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 18px;
+  padding: 40px clamp(28px, 4vw, 48px);
+  border-radius: var(--r-card);
+  background: var(--chrome);
+  box-shadow: var(--lift);
+}
+
+.auth-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--sunk);
+  box-shadow: var(--well-sm);
+}
+.auth-switch button {
+  padding: 8px 0;
+  border-radius: 8px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--ink-3);
+  transition: color 0.16s ease, background 0.16s ease;
+}
+.auth-switch button:hover { color: var(--ink); }
+.auth-switch button[aria-selected='true'] {
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 600;
+  box-shadow: var(--lift-sm);
+}
+
+.auth-google {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 11px 16px;
+  border-radius: var(--r-sm);
+  background: var(--card);
+  box-shadow: 0 0 0 1px var(--hairline-strong);
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--ink);
+  transition: background 0.16s ease;
+}
+.auth-google:hover:not(:disabled) { background: var(--sunk); }
+.auth-google:disabled { opacity: 0.6; cursor: default; }
+
+.auth-or {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.auth-or::before,
+.auth-or::after { content: ''; flex: 1; height: 1px; background: var(--hairline); }
+
+.auth-form { display: flex; flex-direction: column; gap: 14px; }
+.auth-form label { display: flex; flex-direction: column; gap: 6px; }
+.auth-form label > span { font-size: 13px; font-weight: 600; color: var(--ink); }
+.auth-form small { font-size: 12px; color: var(--ink-3); }
+.auth-form input {
+  padding: 10px 12px;
+  border: none;
+  border-radius: var(--r-sm);
+  background: var(--card);
+  font-size: 14px;
+  box-shadow: var(--well);
+}
+
+.auth-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--r-sm);
+  background: var(--wax-wash);
+  color: var(--ink);
+  font-size: 13px;
+}
+.auth-notice.error { background: var(--danger-wash); color: var(--danger); }
+
+.auth-submit { margin-top: 4px; padding: 11px 18px; }
+
+@media (max-width: 860px) {
+  .auth-screen { grid-template-columns: 1fr; }
+  .auth-story { padding: 32px 24px; gap: 24px; }
+}
+
+.account-block { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.account-block strong { color: var(--ink); user-select: text; }
+.auth-sheet-head h2 { margin: 0 0 4px; font: 560 26px/1.15 var(--display); letter-spacing: -0.02em; color: var(--ink); }
+.auth-sheet-head p { margin: 0; font-size: 13.5px; color: var(--ink-2); }

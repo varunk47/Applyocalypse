@@ -9,6 +9,7 @@ import { useSettingsStore } from '../contexts/SettingsStore'
 import type { ThemePreference } from '@applyocalypse/shared-types'
 import { PROVIDER_OPTIONS, type ProviderOptionValue } from '../utils/providerOptions'
 import { RememberedSettings } from '../features/preferences/RememberedSettings'
+import { account, signOut } from '../features/account/accountState'
 
 const providerOptions = PROVIDER_OPTIONS
 
@@ -432,6 +433,18 @@ export default function SettingsScreen() {
 
       </Show>
       <Show when={pane() === 'accounts'}>
+      <section class="settings-block account-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Applyocalypse account</div>
+          <p class="settings-block-note">
+            Signed in as <strong>{account()?.email ?? 'your account'}</strong>. The account only signs you in; your
+            profile, documents and history stay on this computer.
+          </p>
+        </div>
+        <button type="button" class="btn-quiet" onClick={() => void signOut()}>
+          Sign out
+        </button>
+      </section>
       {/* Section 5: Gmail OTP via OAuth */}
       <div style={{ 'margin-top': '2rem' }}>
         <div class="section-header">

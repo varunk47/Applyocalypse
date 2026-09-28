@@ -4,6 +4,8 @@ import { dropCardBack, pullCardForward } from './animations/screenTransition'
 import { AppProviders } from './contexts/AppProviders'
 import { useProfileStore } from './contexts/ProfileStore'
 import { AppRouter } from './router'
+import { AuthScreen } from './features/account/AuthScreen'
+import { account, loadAccount } from './features/account/accountState'
 import { NavRail } from './components/NavRail'
 import { PreferenceChat } from './features/preferences/PreferenceChat'
 import { SystemHealthBanner } from './components/SystemHealthBanner'
@@ -25,6 +27,7 @@ export const AppShell = (props: ParentProps) => {
   })
 
   onMount(() => {
+    void loadAccount()
     // Wire keyboard shortcuts from Electron Main → renderer navigation
     const unsubNav = window.applyocalypse.navigation.subscribe((msg) => {
       if (msg.type === 'navigate' && msg.route) navigate(msg.route)
@@ -35,16 +38,22 @@ export const AppShell = (props: ParentProps) => {
   return (
     <div class="app-shell">
       <Titlebar />
-      <SystemHealthBanner />
-      <div class="shell-body">
-        <Show when={profileState.profile}>
-          <PreferenceChat />
-        </Show>
-        <div class="workspace">
-          <NavRail />
-          <main>{props.children}</main>
-        </div>
-      </div>
+      <Show when={account()}>
+        {(current) => (
+          <Show when={current().signedIn} fallback={<AuthScreen />}>
+            <SystemHealthBanner />
+            <div class="shell-body">
+              <Show when={profileState.profile}>
+                <PreferenceChat />
+              </Show>
+              <div class="workspace">
+                <NavRail />
+                <main>{props.children}</main>
+              </div>
+            </div>
+          </Show>
+        )}
+      </Show>
     </div>
   )
 }
