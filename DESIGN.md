@@ -1,68 +1,81 @@
-# Design: paper and sheet
+# Design: Jewel
 
-Applyocalypse looks like a sheet of good paper on a desk. The window is warm
-paper; the working area is a single white sheet laid on it; everything inside
-the sheet is separated by hairlines, not boxes or shadows. One ink colour does
-the pointing. Violet is kept for the one irreversible act, submitting. Light is
-the main theme. Dark follows the same rules on near-black.
+Applyocalypse is a warm ivory desk with white cards on it. A floating sidebar
+sits on the left, the routed page on the ivory beside it, and the assistant in
+a drawer that slides in from the right. Everything is flat: no gradients, no
+glass, no glow, no shine. Ink carries everything neutral, and colour appears
+only when it means something. Light is the main theme; dark follows the same
+rules on warm near-black.
 
-Tokens live at the top of `apps/desktop/src/renderer/styles/app.css`. Fonts are
-in `apps/desktop/src/renderer/fonts.css`.
+Tokens live at the top of `apps/desktop/src/renderer/styles/app.css`. The font
+is bundled in `apps/desktop/src/renderer/fonts.css`.
 
 ## Type
 
 | Role | Face | Where |
 |------|------|-------|
-| Display | Fraunces (`--display`), bundled locally | screen headlines, onboarding headlines, card titles |
-| Everything else | Onest (`--sans`), bundled locally | UI, labels, body copy |
-| File paths only | system monospace (`--mono`) | settings paths, run ids |
+| Everything | Figtree (`--sans`, `--display`), bundled locally | UI, headings, numbers |
+| Paths only | system monospace (`--mono`) | settings paths |
 
-- Screen headlines are Fraunces at 30px, 560 weight. Emphasis inside a headline takes the accent colour, never italics.
-- Labels are sentence case. No uppercase micro-labels, no letter-spaced kickers. Acronyms (DOCX, OTP, EEO) stay as they are.
+- Page titles are 28px, weight 700, tracking -0.025em. Card titles are 14px, weight 700.
+- Labels are sentence case. No uppercase micro-labels.
+- Big numbers (stat tiles) use proportional figures; table columns and chart ticks use tabular figures.
 - Nothing is smaller than 12px.
 
 ## Colour
 
-| Token | Light | Dark | Use |
-|-------|-------|------|-----|
-| `--paper` / `--backdrop` | #f3f1ec | #111214 | the desk behind the sheet |
-| `--card` / `--chrome` | #ffffff | #1e1f24 / #191a1e | the sheet, and cards on it |
-| `--ink` / `--ink-2` / `--ink-3` | #15171c / #474c57 / #5f6472 | #ecebe7 / #bdbcb6 / #9d9c96 | text, each 4.5:1 or better on its surface |
-| `--hairline` / `-strong` / `-soft` | #e6e3db / #d4cfc3 / #efece6 | #2b2c32 / #3a3b42 / #222328 | every divider and field edge |
-| `--wax` | #0e6570 | #74c6cc | the accent, "bottle ink": primary buttons, focus, active step, emphasis |
-| `--armed` | #6641d4 | #b9a4f6 | the submit gate, and nothing else |
-| `--danger` | #b3261e | #f29a90 | errors and failures; never the accent |
-| `--live` | #177049 | #7fd1ad | running and submitted |
+One palette, used the same way on every screen and in every chart.
 
-The accent is a deep teal so it reads as ink on paper rather than as a UI blue
-(6.7:1 on white, 6.0:1 on paper). Status shows as a soft pill and the colour
-always comes with the status word: `--tab-queued`, `--tab-needs`,
-`--tab-running`, `--tab-done`, `--tab-failed`.
+| Meaning | Tile fill | Text / marks | Light | Dark |
+|---------|-----------|--------------|-------|------|
+| Neutral (working, queued) | white card | ink | `#121214` on `#ffffff` | `#f2efe7` on `#1c1b19` |
+| Your turn to sign | honey gold | gold ink | `--gold #e9b44c`, `--gold-ink #4a3000` | same fill |
+| Needs you, or failed | garnet | white | `--garnet #b5452b` | same fill |
+| Sent | emerald tint | emerald | `--emerald-tint #d5ebde`, `--emerald #0e7a4e` | `#17342a`, `#58a872` |
+
+- Base: `--paper #f2efe7` (ivory) behind white `--card`s, `--sunk #eae6dc` for wells and the active nav item.
+- Ink ramp: `--ink #121214`, `--ink-2 #4e4b45`, `--ink-3 #66635c`, all 4.5:1 or better on ivory and white.
+- The action colour (`--wax`) is ink: primary buttons, focus rings, the stage track.
+- Signing is the one irreversible act, so "Review & sign" is the only ink-and-gold button (`--armed-fill`, `--on-armed`). In dark it inverts to gold with ink.
+- There is no forest green, no indigo and no violet anywhere.
+
+## Charts
+
+Charts use the same colours as the tiles, so "sent" is the same emerald on
+Missions and on every chart.
+
+- Single series (sent per day, week or month): emerald columns, 4px rounded tops, at most 24px wide, hairline grid, the peak labelled.
+- Outcomes: emerald sent, garnet failed (`--garnet-mark`), grey withdrawn (`--withdrawn`), each with an icon and a word, never colour alone.
+- Calendar: one emerald ramp, `--heat-0` to `--heat-6`, darker for more.
+- Every chart has a hover and keyboard tooltip, and the main chart has a table view.
+- Chart colours were checked with the dataviz palette validator in both themes.
 
 ## Shape and depth
 
-- `--lift` / `--lift-sm`: a 1px hairline ring plus one soft shadow. Used for the sheet, cards and buttons.
-- `--well` / `--well-sm`: an inset hairline, no inner shade. Used for inputs, drop zones and segmented tracks.
-- There is no blur and no glass. `--blur` is `none`.
-- State is an inset 2px ring in the state colour (`inset 0 0 0 2px var(--wax)`), never a side stripe.
-- Radii: `--r-card` 14px for cards, `--r-sm` 9px for buttons and fields, pills for nav, chips and status.
-- The primary button is the only filled surface in view (ink). The submit button is violet so it looks like no other button.
-- Save buttons sit under the fields they save, at their own width, never stretched across a card.
-- Focus is a solid 2px accent outline.
+- Cards and tiles: `--r-card` 18px, a hairline ring (`--lift`), no shadow.
+- Floating layers (the drawer, tooltips): `--float`, one soft shadow.
+- Hover on a clickable tile: rises 3px with `--hover-lift`.
+- Buttons and fields: `--r-sm` 10px. Focus is a solid 2px ink ring.
 
 ## Layout
 
-- The titlebar sits on the paper: a small ink mark, the name and the vault note.
-- The preference chat is a column on the paper to the left of the sheet.
-- Navigation is a row of text tabs across the top of the sheet; the current one is underlined.
-- Content screens (Documents, Profile, History) open with a Fraunces headline and one line of plain copy.
-- Profile forms are a two-column grid, capped at 800px, one column below 620px.
-- Signed out, the app shows the sign-in screen: the promise on the paper at left, the form on a sheet at right.
+- Titlebar: the vault note and window controls only.
+- Sidebar (216px, white, 20px radius): the mark and name, six destinations with icons (Missions, Stats, Documents, Profile, History, Settings), then "Ask anything" and the engine status at the foot.
+- Pages share one header: an optional kicker, the page title, one line of plain copy.
+- Missions: the intake card, then "Your queue" as tiles. The first tile is doubled in size when it is ready to sign. Each tile shows the run's five stages (Read, Tailor, Fill, Sign, Sent).
+- Stats: the six-month calendar with streaks, a per day / per week / per month switch, four stat tiles, the main chart, then outcomes and portals.
+- Ask anything: a 380px drawer from the right with a scrim; Esc, the close button or a click outside closes it.
 
 ## Motion
 
-- A new screen rises 10px with a fade.
-- Only transform, opacity and shadows animate.
+Smooth and quick, never bouncy. Only transform, opacity, colour and shadows animate.
+
+- Screens rise 16px and fade in over 0.55s (expo out); the old screen lifts 6px and fades in 0.16s.
+- Tiles rise in a stagger; a tile whose run changes state changes colour in place (0.6s).
+- The current stage of a working run fills on a loop; finished stages fill once.
+- The sidebar highlight and every segmented switch slide to the new choice.
+- Stat numbers count up; chart columns grow from the baseline; calendar cells pop in a diagonal wave.
+- The drawer slides in over 0.55s with a fading scrim.
 - Everything respects `prefers-reduced-motion`.
 
 ## Onboarding order

@@ -9,6 +9,7 @@ const ProfileScreen     = lazy(() => import('./screens/ProfileScreen'))
 const RunConsoleScreen  = lazy(() => import('./screens/RunConsoleScreen'))
 const DocumentsScreen   = lazy(() => import('./screens/DocumentsScreen'))
 const HistoryScreen     = lazy(() => import('./screens/HistoryScreen'))
+const StatsScreen       = lazy(() => import('./screens/StatsScreen'))
 const SettingsScreen    = lazy(() => import('./screens/SettingsScreen'))
 
 const ScreenFault = (props: { error: unknown; reset: () => void }) => (
@@ -40,6 +41,7 @@ export const AppRouter = () => (
     <Route path="/run/:runId?" component={RunConsoleScreen} />
     <Route path="/documents"   component={DocumentsScreen} />
     <Route path="/profile"     component={ProfileScreen} />
+    <Route path="/stats"       component={StatsScreen} />
     <Route path="/history"     component={HistoryScreen} />
     <Route path="/settings"    component={SettingsScreen} />
   </MemoryRouter>

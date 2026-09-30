@@ -178,8 +178,8 @@ export default function ProfileScreen() {
   return (
     <section class="settings-panel surface-panel surface-panel-active profile-screen" data-gsap="panel" data-view-panel>
       <div>
-        <h1 class="screen-headline" style={{ 'font-size': '30px' }}>Profile</h1>
-        <p class="screen-sub">The facts every application draws from. Tailoring rewrites the wording, never these.</p>
+        <h1 class="page-title">Profile</h1>
+        <p class="page-sub">The facts every application draws from. Tailoring rewrites the wording, never these.</p>
       </div>
 
       <Show

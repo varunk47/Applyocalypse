@@ -31,8 +31,8 @@ export default function HistoryScreen() {
   return (
     <section class="screen screen-scroll" data-gsap="panel" data-view-panel>
       <div class="screen-pad">
-        <h1 class="screen-headline" style={{ 'font-size': '30px' }}>History</h1>
-        <p class="screen-sub">Every action, receipted. Append-only, local, exportable.</p>
+        <h1 class="page-title">History</h1>
+        <p class="page-sub">Every action, receipted. Append-only, local, exportable.</p>
 
         <div class="rule-row" style={{ 'margin-bottom': '10px' }}>
           <span class="kicker">Every run</span>

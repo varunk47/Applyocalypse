@@ -53,8 +53,8 @@ export default function DocumentsScreen() {
   return (
     <section class="screen screen-scroll" data-gsap="panel" data-view-panel>
       <div class="screen-pad">
-        <h1 class="screen-headline" style={{ 'font-size': '30px' }}>Documents</h1>
-        <p class="screen-sub">Masters stay yours, byte for byte. Tailored copies do the traveling.</p>
+        <h1 class="page-title">Documents</h1>
+        <p class="page-sub">Masters stay yours, byte for byte. Tailored copies do the traveling.</p>
 
         <div class="docs-grid">
           {/* Left: master sources */}

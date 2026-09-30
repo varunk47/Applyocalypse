@@ -43,13 +43,11 @@ export const AppShell = (props: ParentProps) => {
           <Show when={current().signedIn} fallback={<AuthScreen />}>
             <SystemHealthBanner />
             <div class="shell-body">
+              <NavRail />
+              <main class="workspace">{props.children}</main>
               <Show when={profileState.profile}>
                 <PreferenceChat />
               </Show>
-              <div class="workspace">
-                <NavRail />
-                <main>{props.children}</main>
-              </div>
             </div>
           </Show>
         )}

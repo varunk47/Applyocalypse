@@ -5,10 +5,6 @@ export const Titlebar = () => {
 
   return (
     <header class="titlebar" data-gsap="panel">
-      <div class="brand-seal" data-gsap="nav-item" aria-hidden="true">
-        A
-      </div>
-      <span class="brand-word">Applyocalypse</span>
       <span class="vault-note">Local vault, encrypted</span>
       <div class="window-controls">
         <button type="button" aria-label="Minimize window" onClick={() => control('minimize')}>

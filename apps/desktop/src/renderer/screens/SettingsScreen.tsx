@@ -186,7 +186,11 @@ export default function SettingsScreen() {
   }
 
   return (
-    <section class="surface-panel surface-panel-active" data-gsap="panel" data-view-panel>
+    <section class="surface-panel surface-panel-active settings-screen" data-gsap="panel" data-view-panel>
+      <header class="page-head">
+        <h1 class="page-title">Settings</h1>
+        <p class="page-sub">How it applies, which model it uses, and the accounts it signs in with.</p>
+      </header>
       <div class="settings-layout">
       <nav class="settings-subnav" aria-label="Settings sections">
         <For each={SETTINGS_PANES}>
@@ -361,7 +365,7 @@ export default function SettingsScreen() {
         <div class="settings-block-head">
           <div class="panel-kicker">Submit automatically</div>
           <p class="settings-block-note">
-            Ticks "Auto-submit after review" for every new job. Each run still stops for you to approve the
+            Ticks "Submit on its own after I approve" for every new job. Each run still stops for you to approve the
             tailored documents and the answers, and EEO, criminal history and previous-employer questions always
             wait for you. Once you approve, the application is submitted without a second click.
           </p>

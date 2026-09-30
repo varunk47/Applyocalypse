@@ -1,5 +1,5 @@
-import { For, Show, createEffect, createSignal, on } from 'solid-js'
-import { MessageSquareText, PanelLeftClose, PanelLeftOpen, SendHorizontal } from 'lucide-solid'
+import { For, Show, createEffect, createSignal, on, onCleanup, onMount } from 'solid-js'
+import { SendHorizontal, X } from 'lucide-solid'
 import { useProfileStore } from '../../contexts/ProfileStore'
 import {
   chatTurns,
@@ -9,6 +9,7 @@ import {
   sendChatMessage,
   undoProposal,
 } from '../../contexts/PreferenceStore'
+import { chatOpen, setChatOpen } from './chatDrawer'
 import { describeProposal } from './preferenceText'
 
 const EXAMPLES = [
@@ -18,16 +19,16 @@ const EXAMPLES = [
 ]
 
 /**
- * A side panel for telling the app how you apply. Every message comes back as
+ * A drawer for telling the app how you apply. Every message comes back as
  * proposals; nothing is remembered until you keep it, and everything kept can
  * be edited later in Settings, under Remembered.
  */
 export const PreferenceChat = () => {
   const { state: profileState } = useProfileStore()
-  const [open, setOpen] = createSignal(true)
   const [draft, setDraft] = createSignal('')
   const [pendingKey, setPendingKey] = createSignal<string | null>(null)
   let log: HTMLOListElement | undefined
+  let composer: HTMLTextAreaElement | undefined
 
   const profileId = () => profileState.profile?.id ?? null
 
@@ -43,6 +44,20 @@ export const PreferenceChat = () => {
       () => log?.scrollTo({ top: log.scrollHeight, behavior: 'smooth' })
     )
   )
+
+  createEffect(
+    on(chatOpen, (open) => {
+      if (open) requestAnimationFrame(() => composer?.focus())
+    })
+  )
+
+  onMount(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && chatOpen()) setChatOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    onCleanup(() => window.removeEventListener('keydown', onKey))
+  })
 
   const send = (text = draft()) => {
     const id = profileId()
@@ -62,23 +77,16 @@ export const PreferenceChat = () => {
   }
 
   return (
-    <Show
-      when={open()}
-      fallback={
-        <button class="pref-chat-tab" type="button" onClick={() => setOpen(true)} aria-label="Open the preference chat">
-          <PanelLeftOpen size={16} aria-hidden="true" />
-        </button>
-      }
-    >
-      <aside class="pref-chat" aria-label="Preference chat">
+    <>
+      <div class="pref-scrim" classList={{ open: chatOpen() }} onClick={() => setChatOpen(false)} aria-hidden="true" />
+      <aside class="pref-chat" classList={{ open: chatOpen() }} aria-label="Ask anything" aria-hidden={!chatOpen()} inert={!chatOpen()}>
         <header class="pref-chat-head">
-          <MessageSquareText size={16} aria-hidden="true" />
           <div class="pref-chat-title">
-            <strong>Tell it how you apply</strong>
+            <strong>Ask anything</strong>
             <span>Kept answers and filters apply to every run</span>
           </div>
-          <button class="pref-chat-icon" type="button" onClick={() => setOpen(false)} aria-label="Close the preference chat">
-            <PanelLeftClose size={16} aria-hidden="true" />
+          <button class="pref-chat-icon" type="button" onClick={() => setChatOpen(false)} aria-label="Close">
+            <X size={16} aria-hidden="true" />
           </button>
         </header>
 
@@ -151,6 +159,7 @@ export const PreferenceChat = () => {
           }}
         >
           <textarea
+            ref={composer}
             rows={2}
             maxLength={4000}
             placeholder={profileId() ? 'Skip staffing agencies…' : 'Finish onboarding to start'}
@@ -170,6 +179,6 @@ export const PreferenceChat = () => {
           </button>
         </form>
       </aside>
-    </Show>
+    </>
   )
 }

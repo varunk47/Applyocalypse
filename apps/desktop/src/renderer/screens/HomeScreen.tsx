@@ -1,9 +1,10 @@
 import { createMemo, createSignal, For, onCleanup, Show } from 'solid-js'
 import { DEFAULT_MAX_CONCURRENT_APPLICATIONS } from '@applyocalypse/config'
 import { useNavigate } from '@solidjs/router'
-import type { ApplicationRun, JobTarget } from '@applyocalypse/shared-types'
+import type { ApplicationRun } from '@applyocalypse/shared-types'
 import { useProfileStore } from '../contexts/ProfileStore'
 import { jobLabel, useQueueStore } from '../contexts/QueueStore'
+import { MissionTile } from '../features/missions/MissionTile'
 import { useRunStore } from '../contexts/RunStore'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import { parseJobIntake } from '../features/intake/parseJobIntake'
@@ -29,48 +30,6 @@ const NEEDS_SIGNATURE_STATUSES = new Set([
   'WAITING_FOR_USER_EDIT',
   'READY_TO_SUBMIT',
 ])
-
-const WORKING_LABELS: Record<string, { label: string; width: string }> = {
-  CLAIMED: { label: 'Preparing the dossier', width: '8%' },
-  PREPARING: { label: 'Preparing the dossier', width: '12%' },
-  PARSING_JD: { label: 'Reading the posting', width: '22%' },
-  ANALYZING: { label: 'Analyzing fit', width: '38%' },
-  TAILORING_RESUME: { label: 'Tailoring résumé', width: '58%' },
-  GENERATING_COVER_LETTER: { label: 'Writing cover letter, in your voice', width: '74%' },
-  RUNNING_AUTOMATION: { label: 'Filling portal', width: '86%' },
-}
-
-type RailCopy = { sub: string; action: string; kind: 'ready' | 'outline' | 'mono' }
-
-const DEFAULT_RAIL_COPY: RailCopy = {
-  sub: 'Something needs your hand before this can continue.',
-  action: 'Open run',
-  kind: 'outline',
-}
-
-const RAIL_COPY: Record<string, RailCopy> = {
-  READY_TO_SUBMIT: { sub: 'Filled and verified. One last look, then it ships.', action: 'Final review → Submit', kind: 'ready' },
-  BLOCKED_OTP: { sub: 'Portal wants an email code. We paused and stepped back.', action: 'Enter the code', kind: 'mono' },
-  BLOCKED_CAPTCHA: { sub: 'Portal raised a human check. We paused and stepped back.', action: 'Open portal', kind: 'mono' },
-  BLOCKED_MFA: { sub: 'Portal wants a sign-in approval. We paused and stepped back.', action: 'Open portal', kind: 'mono' },
-  BLOCKED_AMBIGUOUS_QUESTION: { sub: 'A question needs a human answer before we continue.', action: 'Review question', kind: 'outline' },
-  READY_FOR_REVIEW: { sub: 'Résumé + cover letter drafted. Flagged items need a human.', action: 'Review documents', kind: 'outline' },
-  WAITING_FOR_USER_EDIT: { sub: 'Something needs your hand before this can continue.', action: 'Review documents', kind: 'outline' },
-  PAUSED: { sub: 'Paused mid-run and parked safely. Pick it back up any time.', action: 'Open run', kind: 'outline' },
-}
-
-const portalChip = (target: JobTarget | undefined): string | null => {
-  if (!target) return null
-  if (target.portal) return target.portal
-  if (target.sourceKind === 'URL') {
-    try {
-      return new URL(target.sourceValue).hostname.replace(/^www\./, '')
-    } catch {
-      return null
-    }
-  }
-  return null
-}
 
 const dateKicker = (): string => {
   const now = new Date()
@@ -122,13 +81,27 @@ export default function HomeScreen() {
 
   const headline = createMemo(() => {
     const waiting = signatureRuns().length
-    if (waiting > 0) {
-      const noun = waiting === 1 ? 'application awaits' : 'applications await'
-      return { lead: `${waiting === 1 ? 'One' : String(waiting)} ${noun} `, em: 'your signature.' }
-    }
-    if (workingRuns().length > 0) return { lead: 'The machines are ', em: 'hard at work.' }
-    return { lead: 'Paste a link. We do ', em: 'the drudgery.' }
+    if (waiting === 1) return 'One application is waiting for you.'
+    if (waiting > 1) return `${waiting} applications are waiting for you.`
+    if (workingRuns().length > 0) return 'The machines are hard at work.'
+    return 'Paste a link. We do the drudgery.'
   })
+
+  const recentSent = createMemo(() => {
+    const cutoff = Date.now() - 24 * 60 * 60 * 1000
+    return queueState.applicationRuns
+      .filter(
+        (run) =>
+          (run.status === 'SUBMITTED' || run.status === 'COMPLETED') &&
+          run.completedAt !== null &&
+          Date.parse(run.completedAt) >= cutoff
+      )
+      .slice(0, 4)
+  })
+
+  const TILE_LIMIT = 12
+  const activeRuns = createMemo(() => [...signatureRuns(), ...workingRuns()])
+  const hasPaused = createMemo(() => signatureRuns().some((run) => run.status === 'PAUSED'))
 
   const intakeCount = createMemo(() => parseJobIntake(jobInput()).length)
   const hasIntake = createMemo(() => intakeCount() > 0)
@@ -184,38 +157,30 @@ export default function HomeScreen() {
   }
 
   return (
-    <section class="screen" data-gsap="panel" data-view-panel>
-      <div class="home-grid">
-        <div class="home-main">
-          <div class="kicker">{nowKicker()}</div>
-          <h1 class="screen-headline">
-            <span class="headline-rise">
-              <span>
-                {headline().lead}
-                <em>{headline().em}</em>
-              </span>
-            </span>
-          </h1>
-          <p class="screen-sub">
-            Everything tailored, filled in, and parked at the submit button. Nothing ships without you.
-          </p>
+    <section class="screen missions" data-gsap="panel" data-view-panel>
+      <div class="page-scroll">
+        <header class="page-head">
+          <div class="page-kicker">{nowKicker()}</div>
+          <h1 class="page-title">{headline()}</h1>
+        </header>
 
-          <div class="paper-card intake-card">
-            <Show when={!readiness().isReady}>
-              <div class="setup-gaps" role="status">
-                <div class="setup-gaps-head">Before this can apply for you</div>
-                <For each={readiness().gaps}>
-                  {(gap) => (
-                    <button class="setup-gap" type="button" onClick={() => navigate(gap.route)}>
-                      <strong>{gap.label}</strong>
-                      <span>{gap.fix}</span>
-                    </button>
-                  )}
-                </For>
-              </div>
-            </Show>
+        <div class="card intake-card">
+          <Show when={!readiness().isReady}>
+            <div class="setup-gaps" role="status">
+              <div class="setup-gaps-head">Before this can apply for you</div>
+              <For each={readiness().gaps}>
+                {(gap) => (
+                  <button class="setup-gap" type="button" onClick={() => navigate(gap.route)}>
+                    <strong>{gap.label}</strong>
+                    <span>{gap.fix}</span>
+                  </button>
+                )}
+              </For>
+            </div>
+          </Show>
+          <div class="intake-row">
             <textarea
-              rows={2}
+              rows={1}
               spellcheck={false}
               value={jobInput()}
               onInput={(e) => setJobInput(e.currentTarget.value)}
@@ -228,170 +193,110 @@ export default function HomeScreen() {
               placeholder="Paste job links, one or five at a time…"
               aria-label="Job intake"
             />
-            <div class="intake-foot">
-              <span class="intake-portals">greenhouse · lever · ashby · workday · icims · taleo</span>
-              <button
-                class="btn-wax"
-                type="button"
-                disabled={!hasIntake() || !readiness().isReady || isSubmitting()}
-                onClick={() => void handleSubmit()}
-              >
-                Prepare applications <span class="return-hint">↵</span>
-              </button>
-            </div>
-            <Show when={intakeCount() > concurrencyCap()}>
-              <p class="intake-pace" role="status">
-                {intakeCount()} links. {concurrencyCap()} run at a time; the rest wait their turn.
-                <button type="button" onClick={() => navigate('/settings')}>
-                  Change the pace
-                </button>
-              </p>
-            </Show>
+            <button
+              class="btn-wax"
+              type="button"
+              disabled={!hasIntake() || !readiness().isReady || isSubmitting()}
+              onClick={() => void handleSubmit()}
+            >
+              {isSubmitting() ? 'Preparing…' : 'Prepare'}
+            </button>
+          </div>
+          <div class="intake-foot">
             <label class="automation-option">
               <input type="checkbox" checked={autoSubmit()} onChange={(e) => setAutoSubmit(e.currentTarget.checked)} />
               <span>
-                <strong>Auto-submit after review</strong>
-                You still review and approve the tailored documents. After that approval, this run
-                submits on its own: no second confirmation click.
+                <strong>Submit on its own after I approve</strong>
+                You still review the tailored documents and any held answers. After that, this run sends itself
+                with no second click.
               </span>
             </label>
-            <Show when={error() ?? queueState.error}>
-              {(message) => <div class="error-box" style={{ 'margin-top': '10px' }}>{message()}</div>}
-            </Show>
+            <span class="intake-portals">Greenhouse, Lever, Ashby, Workday, iCIMS, Taleo</span>
           </div>
-
-          <div class="rule-row ledger-head">
-            <span class="kicker">In flight</span>
-            <span class="rule" />
-            <span class="ledger-count">{workingRuns().length} working</span>
-          </div>
-
-          <div class="ledger">
-            <For each={workingRuns()}>
-              {(run, index) => {
-                const target = () => targetFor(run)
-                const stage = () => WORKING_LABELS[run.status] ?? { label: 'Working', width: '30%' }
-                const live = () => run.status === 'RUNNING_AUTOMATION'
-                return (
-                  <button
-                    class="ledger-row"
-                    type="button"
-                    style={{ 'animation-delay': `${index() * 0.12}s` }}
-                    onClick={() => void openRun(run)}
-                  >
-                    <span class="row-initial">{jobLabel(target(), run.id).charAt(0).toUpperCase()}</span>
-                    <span class="row-body">
-                      <span class="row-title-line">
-                        <span class="serif-title">{jobLabel(target(), run.id)}</span>
-                        <Show when={portalChip(target())}>{(chip) => <span class="mono-chip">{chip()}</span>}</Show>
-                      </span>
-                      <span class="row-status-line">
-                        <span class="row-status" classList={{ live: live() }}>
-                          {stage().label}
-                        </span>
-                        <span class="progress-track">
-                          <span
-                            class="progress-fill"
-                            classList={{ sweep: !live(), live: live() }}
-                            style={{ display: 'block', width: stage().width }}
-                          />
-                        </span>
-                        <Show when={live()}>
-                          <span class="row-metric live">Live</span>
-                        </Show>
-                      </span>
-                    </span>
-                    <span class="pulse-dot" classList={{ live: live() }} />
-                  </button>
-                )
-              }}
-            </For>
-            <For each={queuedItems()}>
-              {(item) => {
-                const target = () => queueState.jobTargetMap[item.jobTargetId]
-                return (
-                  <div class="ledger-row">
-                    <span class="row-initial">{jobLabel(target(), item.id).charAt(0).toUpperCase()}</span>
-                    <span class="row-body">
-                      <span class="row-title-line">
-                        <span class="serif-title">{jobLabel(target(), item.id)}</span>
-                        <Show when={portalChip(target())}>{(chip) => <span class="mono-chip">{chip()}</span>}</Show>
-                      </span>
-                      <span class="row-status-line">
-                        <span class="row-status muted">Queued · starts when a worker frees up</span>
-                      </span>
-                    </span>
-                    <span class="pulse-dot idle" />
-                  </div>
-                )
-              }}
-            </For>
-            <Show when={!queueState.isLoading && workingRuns().length === 0 && queuedItems().length === 0}>
-              <div class="empty-state">
-                <span>Nothing in flight. Paste a job link above and the machines get to work.</span>
-              </div>
-            </Show>
-          </div>
-
-          <div class="home-foot">
-            <span>Encrypted on this computer. Nothing leaves it.</span>
-            <span class="foot-right">{submittedThisWeek()} submitted this week</span>
-          </div>
+          <Show when={intakeCount() > concurrencyCap()}>
+            <p class="intake-pace" role="status">
+              {intakeCount()} links. {concurrencyCap()} run at a time; the rest wait their turn.
+              <button type="button" onClick={() => navigate('/settings')}>
+                Change the pace
+              </button>
+            </p>
+          </Show>
+          <Show when={error() ?? queueState.error}>
+            {(message) => <div class="error-box">{message()}</div>}
+          </Show>
         </div>
 
-        <aside class="signature-rail" aria-label="Awaiting your signature">
-          <div class="rail-head">
-            <span class="kicker kicker-wax">Waiting for you</span>
-            <Show when={signatureRuns().length > 0}>
-              <span class="rail-count">{signatureRuns().length}</span>
-              <button
-                class="btn-mono"
-                type="button"
-                style={{ 'margin-left': 'auto' }}
-                title="Cancel all paused runs"
-                onClick={() => void cancelPausedRuns()}
-              >
-                Clear paused
-              </button>
-            </Show>
-          </div>
-          <For each={signatureRuns().slice(0, 8)}>
-            {(run, index) => {
-              const copy = () => RAIL_COPY[run.status] ?? DEFAULT_RAIL_COPY
-              return (
-                <div class="rail-card" classList={{ ready: copy().kind === 'ready' }} style={{ 'animation-delay': `${Math.min(0.3 + index() * 0.12, 1)}s` }}>
-                  <Show when={copy().kind === 'ready'}>
-                    <span class="ready-stamp">Ready</span>
-                  </Show>
-                  <div class="rail-title">{jobLabel(targetFor(run), run.id)}</div>
-                  <div class="rail-sub">{copy().sub}</div>
-                  <button
-                    type="button"
-                    class="rail-action"
-                    classList={{
-                      'btn-wax': copy().kind === 'ready',
-                      'btn-outline-wax': copy().kind === 'outline',
-                      'btn-quiet': copy().kind === 'mono',
-                    }}
-                    onClick={() => void openRun(run)}
-                  >
-                    {copy().action}
-                  </button>
-                </div>
-              )
-            }}
-          </For>
-          <Show when={signatureRuns().length > 8}>
-            <button class="btn-mono" type="button" onClick={() => navigate('/history')}>
-              +{signatureRuns().length - 8} more in History
+        <div class="section-head">
+          <h2>Your queue</h2>
+          <span class="section-count">{activeRuns().length + queuedItems().length}</span>
+          <Show when={hasPaused()}>
+            <button class="btn-quiet" type="button" title="Cancel all paused runs" onClick={() => void cancelPausedRuns()}>
+              Clear paused
             </button>
           </Show>
-          <Show when={!queueState.isLoading && signatureRuns().length === 0}>
-            <div class="empty-state">
-              <span>Nothing needs you right now.</span>
-            </div>
+        </div>
+
+        <Show
+          when={activeRuns().length + queuedItems().length + recentSent().length > 0}
+          fallback={
+            <Show when={!queueState.isLoading}>
+              <div class="card empty-card">
+                <strong>Nothing in the queue</strong>
+                <span>
+                  Paste a job link above. It gets read, tailored and filled here, and waits for you before anything is
+                  sent.
+                </span>
+              </div>
+            </Show>
+          }
+        >
+          <div class="tiles">
+            <For each={activeRuns().slice(0, TILE_LIMIT)}>
+              {(run, index) => (
+                <MissionTile
+                  status={run.status}
+                  target={targetFor(run)}
+                  fallbackName={jobLabel(targetFor(run), run.id)}
+                  hero={index() === 0 && run.status === 'READY_TO_SUBMIT'}
+                  delay={Math.min(index() * 60, 480)}
+                  onOpen={() => void openRun(run)}
+                />
+              )}
+            </For>
+            <For each={queuedItems().slice(0, Math.max(0, TILE_LIMIT - activeRuns().length))}>
+              {(item, index) => (
+                <MissionTile
+                  status="PENDING"
+                  target={queueState.jobTargetMap[item.jobTargetId]}
+                  fallbackName={jobLabel(queueState.jobTargetMap[item.jobTargetId], item.id)}
+                  delay={Math.min((activeRuns().length + index()) * 60, 480)}
+                />
+              )}
+            </For>
+            <For each={recentSent()}>
+              {(run, index) => (
+                <MissionTile
+                  status={run.status}
+                  target={targetFor(run)}
+                  fallbackName={jobLabel(targetFor(run), run.id)}
+                  completedAt={run.completedAt}
+                  delay={Math.min((activeRuns().length + index()) * 60 + 60, 540)}
+                  onOpen={() => navigate('/history')}
+                />
+              )}
+            </For>
+          </div>
+          <Show when={activeRuns().length + queuedItems().length > TILE_LIMIT}>
+            <button class="link-button" type="button" onClick={() => navigate('/history')}>
+              {activeRuns().length + queuedItems().length - TILE_LIMIT} more in History
+            </button>
           </Show>
-        </aside>
+        </Show>
+
+        <footer class="page-foot">
+          <span>Everything stays encrypted on this computer.</span>
+          <span>{submittedThisWeek()} sent this week</span>
+        </footer>
       </div>
     </section>
   )

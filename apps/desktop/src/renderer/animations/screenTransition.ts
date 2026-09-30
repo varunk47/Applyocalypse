@@ -10,15 +10,15 @@ const settle = (el: Element, done: () => void, props: Record<string, unknown>) =
 export const pullCardForward = (el: Element, done: () => void) => {
   if (prefersReducedMotion()) return settle(el, done, { y: 0, opacity: 1 })
   gsap.fromTo(el,
-    { y: 10, opacity: 0 },
-    { y: 0, opacity: 1, duration: dur.normal, ease: ease.out, onComplete: done }
+    { y: 16, opacity: 0 },
+    { y: 0, opacity: 1, duration: dur.slow, ease: ease.out, clearProps: 'transform', onComplete: done }
   )
 }
 
 export const dropCardBack = (el: Element, done: () => void) => {
   if (prefersReducedMotion()) return done()
   gsap.to(el,
-    { y: 6, opacity: 0, duration: dur.fast, ease: ease.in, onComplete: done }
+    { y: -6, opacity: 0, duration: 0.16, ease: 'power2.in', onComplete: done }
   )
 }
 
