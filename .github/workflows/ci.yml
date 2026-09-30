@@ -49,11 +49,9 @@ jobs:
       - name: Verify
         run: pnpm verify:functional
 
-      # Known-red: transitive advisories via the dev toolchain (see CLAUDE.md gotchas).
-      # Non-blocking so it cannot mask the functional gates, Coverage, or Preflight.
-      - name: Dependency audit (non-blocking)
+      # Blocking, like python:audit. Transitive fixes go in pnpm.overrides (see CLAUDE.md).
+      - name: Dependency audit
         run: pnpm audit --audit-level high
-        continue-on-error: true
 
       - name: Coverage
         run: pnpm test:coverage

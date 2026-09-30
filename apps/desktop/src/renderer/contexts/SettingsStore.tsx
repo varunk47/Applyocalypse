@@ -16,6 +16,7 @@ type SettingsStoreValue = {
   setThemePreference: (preference: ThemePreference) => Promise<void>
   setMaxConcurrentApplications: (value: number) => Promise<void>
   setAutofillApprovedDefaults: (value: boolean) => Promise<void>
+  setAutoSubmitByDefault: (value: boolean) => Promise<void>
   chooseOutputDir: () => Promise<void>
   saveProviderApiKey: (input: {
     provider: ProviderConnection['provider']
@@ -138,6 +139,21 @@ export const SettingsStoreProvider = (props: ParentProps) => {
     }
   }
 
+  const setAutoSubmitByDefault = async (value: boolean): Promise<void> => {
+    setState('isLoading', true)
+    try {
+      const settings = await window.applyocalypse.settings.update({ 'automation.autoSubmitByDefault': value })
+      setState('settings', settings)
+      setState('error', null)
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'Unable to update auto-submit setting'
+      setState('error', msg)
+      toast.error(msg)
+    } finally {
+      setState('isLoading', false)
+    }
+  }
+
   const saveProviderApiKey = async (input: {
     provider: ProviderConnection['provider']
     displayName: string
@@ -172,7 +188,7 @@ export const SettingsStoreProvider = (props: ParentProps) => {
   }
 
   return (
-    <SettingsContext.Provider value={{ state, setThemePreference, setMaxConcurrentApplications, setAutofillApprovedDefaults, chooseOutputDir, saveProviderApiKey }}>
+    <SettingsContext.Provider value={{ state, setThemePreference, setMaxConcurrentApplications, setAutofillApprovedDefaults, setAutoSubmitByDefault, chooseOutputDir, saveProviderApiKey }}>
       {props.children}
     </SettingsContext.Provider>
   )

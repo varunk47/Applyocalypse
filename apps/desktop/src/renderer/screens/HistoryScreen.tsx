@@ -4,10 +4,11 @@ import { useQueueStore, jobLabel } from '../contexts/QueueStore'
 import { useRunStore } from '../contexts/RunStore'
 
 const receiptState = (status: string): { text: string; kind: 'submitted' | 'failed' | 'neutral' } => {
-  if (status === 'SUBMITTED' || status === 'COMPLETED') return { text: 'SUBMITTED ✓', kind: 'submitted' }
-  if (status === 'FAILED') return { text: 'FAILED', kind: 'failed' }
-  if (status === 'CANCELLED') return { text: 'WITHDRAWN', kind: 'neutral' }
-  return { text: status.replace(/_/g, ' '), kind: 'neutral' }
+  if (status === 'SUBMITTED' || status === 'COMPLETED') return { text: 'Submitted ✓', kind: 'submitted' }
+  if (status === 'FAILED') return { text: 'Failed', kind: 'failed' }
+  if (status === 'CANCELLED') return { text: 'Withdrawn', kind: 'neutral' }
+  const words = status.replace(/_/g, ' ').toLowerCase()
+  return { text: words.charAt(0).toUpperCase() + words.slice(1), kind: 'neutral' }
 }
 
 const receiptTime = (iso: string | null): string => {
@@ -34,16 +35,16 @@ export default function HistoryScreen() {
         <p class="screen-sub">Every action, receipted. Append-only, local, exportable.</p>
 
         <div class="rule-row" style={{ 'margin-bottom': '10px' }}>
-          <span class="kicker">RUN LEDGER</span>
+          <span class="kicker">Every run</span>
           <span class="rule" />
-          <span class="kicker">{queueState.runsTotal} TOTAL</span>
+          <span class="kicker">{queueState.runsTotal} total</span>
         </div>
 
         <Show
           when={queueState.applicationRuns.length > 0}
           fallback={
             <div class="empty-state">
-              <span>{queueState.isLoading ? 'Loading the run ledger...' : 'No runs yet. The ledger starts with your first mission.'}</span>
+              <span>{queueState.isLoading ? 'Loading the run ledger…' : 'No runs yet. The ledger starts with your first mission.'}</span>
             </div>
           }
         >
@@ -53,7 +54,7 @@ export default function HistoryScreen() {
                 <button class="receipt-row" type="button" style={{ width: '100%' }} onClick={() => void handleRowClick(run.id)}>
                   <span class="receipt-time">{receiptTime(run.completedAt ?? run.startedAt ?? run.createdAt)}</span>
                   <span class="receipt-title">{jobLabel(queueState.jobTargetMap[run.jobTargetId], run.id)}</span>
-                  <span class="mono-chip">RUN {run.id.slice(0, 6).toUpperCase()}</span>
+                  <span class="mono-chip">Run {run.id.slice(0, 6)}</span>
                   <span class="receipt-state" classList={{
                     submitted: receiptState(run.status).kind === 'submitted',
                     failed: receiptState(run.status).kind === 'failed',
@@ -68,7 +69,7 @@ export default function HistoryScreen() {
         </Show>
 
         <div class="validators-note" style={{ 'margin-top': '16px' }}>
-          EVERY RUN IS AUDIT-LOGGED AND ARCHIVED ON THIS MACHINE / NOTHING LEAVES IT
+          Every run is logged and archived on this computer. None of it leaves.
         </div>
       </div>
     </section>

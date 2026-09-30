@@ -392,6 +392,8 @@ def test_docx_pdf_export_reports_missing_local_exporter(monkeypatch, tmp_path: P
     document.save(source)
 
     monkeypatch.setattr("shutil.which", lambda _command: None)
+    # Word is found by path, not PATH, so a machine with Word installed would still export.
+    monkeypatch.setattr("applyocalypse_automation.documents.pdf_export._word_command", lambda *_args: None)
 
     result = export_docx_to_pdf(source, tmp_path / "out")
 

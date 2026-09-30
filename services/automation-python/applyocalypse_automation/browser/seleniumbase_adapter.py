@@ -372,12 +372,12 @@ class SeleniumBaseBrowserAdapter(BrowserAdapter):
             return BrowserStepResult(False, "field value application failed", {"field_id": field.field_id, "error": str(exc)})
         return parse_apply_field_result(raw_result, field)
 
-    async def click_by_text(self, labels: list[str]) -> BrowserStepResult:
+    async def click_by_text(self, labels: list[str], *, after_selector: str | None = None) -> BrowserStepResult:
         if self._driver is None:
             return BrowserStepResult(False, "browser is not launched")
         baseline = await self._probe_page_fingerprint()
         try:
-            raw_result = await self._evaluate(build_click_by_text_script(labels))
+            raw_result = await self._evaluate(build_click_by_text_script(labels, after_selector=after_selector))
         except Exception as exc:
             return BrowserStepResult(False, "portal action click failed", {"error": str(exc)})
         result = parse_click_by_text_result(raw_result)

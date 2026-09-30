@@ -95,7 +95,7 @@ def test_docx_failure_blocking_code_falls_back_when_result_code_missing(
     tmp_path: Path, captured_events: list[WorkerEvent]
 ) -> None:
     source, _ = _make_files(tmp_path, "resume.docx")
-    result = SimpleNamespace(ok=False, pdf_path=None, exporter="docx2pdf", code=None, stdout="", stderr="")
+    result = SimpleNamespace(ok=False, pdf_path=None, exporter="word", code=None, stdout="", stderr="")
 
     run_resume_render_tail(
         run_id="run-1",

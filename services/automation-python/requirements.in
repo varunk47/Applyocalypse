@@ -17,6 +17,9 @@ pyinstaller>=6.15.0
 tzdata>=2025.2
 ruff>=0.8.0
 pypdf>=6.15.0  # PYSEC-2026-3655, PYSEC-2026-3656
+# Renders scanned PDF pages to images for the NVIDIA parser. No dependencies of
+# its own; ships the pdfium binary (Apache-2.0 / BSD-3).
+pypdfium2>=4.30.0
 
 # dev tooling (kept in the lock so maintainers can regenerate it)
 pip-tools>=7.6.1  # 7.5.3 cannot run under pip 26: it imports pip internals that were removed
@@ -29,5 +32,8 @@ httplib2>=0.32.0  # via google-api-python-client. PYSEC-2026-3444
 pyasn1>=0.6.4  # via google-auth. PYSEC-2026-3455, PYSEC-2026-3456, PYSEC-2026-3457
 aiohttp>=3.14.3  # via litellm. PYSEC-2026-3545, PYSEC-2026-3546, PYSEC-2026-3547
 cryptography>=50.0.0  # via google-auth. PYSEC-2026-3552
+anyio>=4.14.2  # via httpx, openai. CVE-2026-63374, CVE-2026-64847, CVE-2026-63349
+soupsieve>=2.9.0  # via beautifulsoup4, seleniumbase. CVE-2026-85999, CVE-2026-86000
+oauthlib>=4.0.0  # via requests-oauthlib, google-auth-oauthlib. CVE-2026-49265
 
 # tectonic>=0.15.0 is a binary tool, not a PyPI package — bundled via PyInstaller build script

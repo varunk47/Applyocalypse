@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Used only for Developer ID builds, which run under the hardened runtime; see
+  scripts/build/mac-signing.mjs. The app and everything nested in it, the
+  PyInstaller worker included, is signed with this one file.
+-->
+<plist version="1.0">
+  <dict>
+    <!-- V8 compiles JavaScript at run time. -->
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <!-- Electron and the embedded Python interpreter (ctypes, libffi) both need it. -->
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <true/>
+    <!-- The worker loads the dylibs and .so modules PyInstaller bundled. -->
+    <key>com.apple.security.cs.disable-library-validation</key>
+    <true/>
+    <!-- PDF export drives Microsoft Word through osascript (pdf_export.py). -->
+    <key>com.apple.security.automation.apple-events</key>
+    <true/>
+  </dict>
+</plist>

@@ -87,7 +87,7 @@ export function ResumeDrop(props: Props) {
 
   return (
     <div class="ob-hero">
-      <p class="eyebrow">Step one of four</p>
+      <p class="eyebrow">First, your resume</p>
       <h1 class="ob-hero-title">
         Hand us your resume.
         <br />

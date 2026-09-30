@@ -112,14 +112,23 @@ jobs:
       - name: Rebuild native modules
         run: pnpm native:rebuild
 
-      # No Apple Developer ID is configured, so the app is ad-hoc signed on
-      # arm64 and unsigned on Intel, and nothing is notarized. See the mac
-      # section of apps/desktop/electron-builder/electron-builder.yml.
+      # Until the MAC_CSC_* secrets exist the app is ad-hoc signed on arm64,
+      # unsigned on Intel, and not notarized. Setting them signs with the
+      # Developer ID under the hardened runtime (scripts/build/mac-signing.mjs);
+      # the APPLE_* secrets add notarization. See docs/release-readiness.md.
       - name: Package and run packaged smoke suites
         run: pnpm verify:packaged
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CSC_KEY_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
 
       - name: Release preflight report
         run: pnpm release:preflight
+        env:
+          CSC_LINK: ${{ secrets.MAC_CSC_LINK }}
 
       - name: Upload Mac artifacts
         uses: actions/upload-artifact@v4

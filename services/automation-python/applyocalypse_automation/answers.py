@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, replace
+from datetime import date
 from typing import Any
 
 # Standard "highest level of education" ladder; matched against resume degree text.
@@ -34,8 +35,8 @@ def _salary_number(raw: str, k_scale: bool) -> int | None:
     return value
 
 
-def jd_salary_midpoint(jd_text: str | None) -> str | None:
-    """Midpoint of the salary range advertised in the JD, formatted for a form answer."""
+def _advertised_salary(jd_text: str | None) -> tuple[str, int, int] | None:
+    """Currency, low and high of the first salary range the JD advertises."""
     if not jd_text:
         return None
     for match in _SALARY_RANGE_PATTERN.finditer(jd_text):
@@ -48,9 +49,23 @@ def jd_salary_midpoint(jd_text: str | None) -> str | None:
         high = _salary_number(match.group("max"), k_scale)
         if low is None or high is None or not 10000 <= low <= high <= 2000000:
             continue
-        currency = match.group("cur") or match.group("cur2") or ""
-        return f"{currency}{round((low + high) / 2):,}"
+        return match.group("cur") or match.group("cur2") or "", low, high
     return None
+
+
+def jd_salary_range(jd_text: str | None) -> tuple[int, int] | None:
+    """Low and high of the salary range advertised in the JD."""
+    advertised = _advertised_salary(jd_text)
+    return None if advertised is None else (advertised[1], advertised[2])
+
+
+def jd_salary_midpoint(jd_text: str | None) -> str | None:
+    """Midpoint of the salary range advertised in the JD, formatted for a form answer."""
+    advertised = _advertised_salary(jd_text)
+    if advertised is None:
+        return None
+    currency, low, high = advertised
+    return f"{currency}{round((low + high) / 2):,}"
 
 
 def _highest_education_level(canonical_profile: dict[str, Any]) -> str | None:
@@ -229,6 +244,38 @@ def _eeo(profile: dict[str, Any]) -> dict[str, Any]:
     return value if isinstance(value, dict) else {}
 
 
+_REFERENCE_NOT_A_PERSON: tuple[str, ...] = ("reference number", "reference no", "code", "id", "job", "requisition", "referral", "referrer")
+_REFERENCE_ORDINALS: dict[str, int] = {"1": 0, "first": 0, "2": 1, "second": 1, "3": 2, "third": 2}
+# Checked in order: "Reference phone number" is a phone, not a name.
+_REFERENCE_PARTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("email", "e mail"), "email"),
+    (("phone", "telephone", "mobile", "cell"), "phone"),
+    (("relationship", "relation", "how do you know"), "relationship"),
+    (("company", "organization", "organisation", "employer"), "company"),
+    (("title", "position", "job title"), "title"),
+    (("name",), "name"),
+)
+
+
+def _reference_answer(*, tokens: tuple[str, ...], profile: dict[str, Any]) -> str | None:
+    """The matching part of the matching reference.
+
+    ``None`` means the field is not about a reference at all. An empty string
+    means it is, but the user gave no such reference or part, so it stays empty.
+    """
+    if "reference" not in tokens or _matches_any(tokens, _REFERENCE_NOT_A_PERSON):
+        return None
+    part = next((key for aliases, key in _REFERENCE_PARTS if _matches_any(tokens, aliases)), None)
+    if part is None:
+        return None
+    index = next((_REFERENCE_ORDINALS[token] for token in tokens if token in _REFERENCE_ORDINALS), 0)
+    references = profile.get("references")
+    if not isinstance(references, list) or index >= len(references) or not isinstance(references[index], dict):
+        return ""
+    value = references[index].get(part)
+    return str(value).strip() if value else ""
+
+
 def _address(profile: dict[str, Any]) -> dict[str, Any]:
     value = profile.get("address")
     return value if isinstance(value, dict) else {}
@@ -383,7 +430,9 @@ _PREVIOUS_EMPLOYER_PHRASES: tuple[str, ...] = _PREVIOUS_EMPLOYER_YES_NO_PHRASES 
     "former supervisor",
     "previous manager",
     "reason for leaving",
+    "why did you leave",
 )
+_REASON_FOR_LEAVING_PHRASES: tuple[str, ...] = ("reason for leaving", "why did you leave")
 
 # "Do you consent to a background check?" must never be pre-answered "No":
 # declining is a materially different act from answering a history question.
@@ -466,16 +515,36 @@ def sensitive_review_category(field_label: str, *, field_name: str | None = None
     return None
 
 
-def _sensitive_history_answer(*, field_label: str, field_type: str, category: str) -> ProposedApplicationAnswer:
+def _reason_for_leaving(canonical_profile: dict[str, Any]) -> str | None:
+    """The reason the user gave for leaving their most recent former job."""
+    entries = canonical_profile.get("experience")
+    for entry in entries if isinstance(entries, list) else []:
+        reason = entry.get("reasonForLeaving") if isinstance(entry, dict) else None
+        if isinstance(reason, str) and reason.strip():
+            return reason.strip()
+    return None
+
+
+def _sensitive_history_answer(
+    *, field_label: str, field_type: str, category: str, canonical_profile: dict[str, Any]
+) -> ProposedApplicationAnswer:
     """Answer a criminal-history or previous-employer field.
 
-    Only a genuine yes/no screening question gets a proposed default ("No").
-    Detail fields ("Previous employer city", "Conviction details: name of court")
-    are left empty rather than filled from the profile, because the applicant's
-    own city or legal name is never the right answer there. Either way the
-    answer is review-gated.
+    A genuine yes/no screening question gets the user's stored answer, "No" when
+    they gave none. "Reason for leaving" gets the reason the user wrote for their
+    most recent former job. Other detail fields ("Previous employer city",
+    "Conviction details: name of court") are left empty rather than filled from
+    the profile, because the applicant's own city or legal name is never the
+    right answer there. Either way the answer is review-gated.
     """
     tokens = label_tokens(field_label)
+    if category == "PREVIOUS_EMPLOYER" and _matches_any(tokens, _REASON_FOR_LEAVING_PHRASES):
+        reason = _reason_for_leaving(canonical_profile)
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=reason,
+            confidence=0.80 if reason else 0.20, source="PROFILE" if reason else "UNKNOWN",
+            requires_review=True,
+        )
     yes_no_phrases = (
         _CRIMINAL_HISTORY_YES_NO_PHRASES if category == "CRIMINAL_HISTORY" else _PREVIOUS_EMPLOYER_YES_NO_PHRASES
     )
@@ -484,13 +553,76 @@ def _sensitive_history_answer(*, field_label: str, field_type: str, category: st
         and not _matches_any(tokens, _CONSENT_PHRASES)
         and (field_type in _CHOICE_FIELD_TYPES or _matches_any(tokens, _INTERROGATIVE_OPENERS))
     )
+    stored_key = "criminalRecordDefault" if category == "CRIMINAL_HISTORY" else "previouslyEmployedDefault"
+    stored = _eeo(_profile(canonical_profile)).get(stored_key)
+    yes_no = stored if stored in ("Yes", "No") else "No"
     return ProposedApplicationAnswer(
         field_label=field_label,
         field_type=field_type,
-        proposed_value="No" if is_yes_no_question else None,
+        proposed_value=yes_no if is_yes_no_question else None,
         confidence=0.90 if is_yes_no_question else 0.20,
         source="PROFILE" if is_yes_no_question else "UNKNOWN",
         requires_review=True,
+    )
+
+
+_SIGNATURE_DATE_PHRASES: tuple[str, ...] = ("signature date", "date of signature", "date signed", "today's date")
+_SIGNATURE_PHRASES: tuple[str, ...] = ("signature", "e-signature", "esignature", "sign your name", "type your full name")
+
+
+def _signature_answer(
+    *, field_label: str, field_type: str, tokens: tuple[str, ...], profile: dict[str, Any]
+) -> ProposedApplicationAnswer | None:
+    """Sign with the legal name and today's date, or None when the field is no signature.
+
+    Signing is a legal act, so the answer is always held for the user to read
+    before submit. A checkbox or radio ("I agree that typing my name is my
+    signature") gets no value: a name typed there is never right.
+    """
+    if _matches_any(tokens, _SIGNATURE_DATE_PHRASES):
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=date.today().strftime("%m/%d/%Y"),
+            confidence=0.90, source="PROFILE", requires_review=True,
+        )
+    if not _matches_any(tokens, _SIGNATURE_PHRASES):
+        return None
+    legal_name = profile.get("legalName") if field_type not in _CHOICE_FIELD_TYPES else None
+    value = str(legal_name).strip() if legal_name else None
+    return ProposedApplicationAnswer(
+        field_label=field_label, field_type=field_type, proposed_value=value or None,
+        confidence=0.90 if value else 0.20, source="PROFILE" if value else "UNKNOWN", requires_review=True,
+    )
+
+
+def _preference_rule_answer(
+    *,
+    field_label: str,
+    field_type: str,
+    canonical_profile: dict[str, Any],
+    autofill_approved_defaults: bool,
+) -> ProposedApplicationAnswer | None:
+    """The user's own rule for this question on this job, ahead of any profile rule.
+
+    None when no rule covers the question. Two equally specific rules that
+    disagree produce an empty, review-gated answer rather than falling through to
+    the profile, because the user has said the profile value is not the answer.
+    """
+    # Imported here because preference_rules builds on this module's label matching.
+    from .preference_rules import resolve_preference_rule
+
+    outcome = resolve_preference_rule(
+        field_label, canonical_profile.get("preferenceRules"), canonical_profile.get("jobContext")
+    )
+    if outcome.ambiguous:
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=None,
+            confidence=0.20, source="UNKNOWN", requires_review=True,
+        )
+    if outcome.answer is None:
+        return None
+    return ProposedApplicationAnswer(
+        field_label=field_label, field_type=field_type, proposed_value=outcome.answer,
+        confidence=0.95, source="PROFILE", requires_review=not autofill_approved_defaults,
     )
 
 
@@ -505,16 +637,25 @@ def propose_answer_for_detected_field(
 ) -> ProposedApplicationAnswer:
     """Propose an answer for a detected field, enforcing the always-review gate."""
     category = sensitive_review_category(field_label, field_name=field_name)
-    if category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
-        return _sensitive_history_answer(field_label=field_label, field_type=field_type, category=category)
-
-    answer = _propose_answer(
+    answer = _preference_rule_answer(
         field_label=field_label,
         field_type=field_type,
         canonical_profile=canonical_profile,
         autofill_approved_defaults=autofill_approved_defaults,
-        jd_text=jd_text,
     )
+    if answer is None and category in ("CRIMINAL_HISTORY", "PREVIOUS_EMPLOYER"):
+        return _sensitive_history_answer(
+            field_label=field_label, field_type=field_type, category=category, canonical_profile=canonical_profile
+        )
+
+    if answer is None:
+        answer = _propose_answer(
+            field_label=field_label,
+            field_type=field_type,
+            canonical_profile=canonical_profile,
+            autofill_approved_defaults=autofill_approved_defaults,
+            jd_text=jd_text,
+        )
     if category is None:
         return answer
     # Defence in depth: whichever rule produced the answer, the gate still holds.
@@ -533,6 +674,20 @@ def _propose_answer(
     tokens = label_tokens(field_label)
     # Fields about somebody else never receive the applicant's own details.
     foreign_subject = _matches_any(tokens, _FOREIGN_SUBJECT_QUALIFIERS)
+
+    # ── Signature: ahead of the name rules, which would answer it unreviewed ──
+    signature = _signature_answer(field_label=field_label, field_type=field_type, tokens=tokens, profile=profile)
+    if signature is not None:
+        return signature
+
+    # ── References: the user's own list, never the applicant's details ─────────
+    reference = _reference_answer(tokens=tokens, profile=profile)
+    if reference is not None:
+        return ProposedApplicationAnswer(
+            field_label=field_label, field_type=field_type, proposed_value=reference or None,
+            confidence=0.90 if reference else 0.20, source="PROFILE" if reference else "UNKNOWN",
+            requires_review=not reference,
+        )
 
     # ── First / last name ──────────────────────────────────────────────────────
     if not foreign_subject and _matches_any(tokens, ("first name", "given name", "firstname")):

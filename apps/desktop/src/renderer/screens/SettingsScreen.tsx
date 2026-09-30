@@ -4,10 +4,12 @@ import {
   HARD_MAX_CONCURRENT_APPLICATIONS,
 } from '@applyocalypse/config'
 import { createStore } from 'solid-js/store'
-import { ShieldCheck, Mail, Wrench } from 'lucide-solid'
+import { ShieldCheck, Mail, Wrench, KeyRound } from 'lucide-solid'
 import { useSettingsStore } from '../contexts/SettingsStore'
 import type { ThemePreference } from '@applyocalypse/shared-types'
 import { PROVIDER_OPTIONS, type ProviderOptionValue } from '../utils/providerOptions'
+import { RememberedSettings } from '../features/preferences/RememberedSettings'
+import { account, signOut } from '../features/account/accountState'
 
 const providerOptions = PROVIDER_OPTIONS
 
@@ -23,6 +25,13 @@ const CONCURRENCY_CHOICES = Array.from(
   (_, index) => index + 1
 )
 const TOGGLE_CHOICES = [false, true]
+const SETTINGS_PANES = [
+  { id: 'remembered', label: 'Remembered' },
+  { id: 'model', label: 'Model' },
+  { id: 'applying', label: 'Applying' },
+  { id: 'accounts', label: 'Accounts' },
+] as const
+type SettingsPane = (typeof SETTINGS_PANES)[number]['id']
 const CONVERTER_KEYS = ['libreoffice', 'word', 'tectonic'] as const
 const CONVERTER_LABELS: Record<(typeof CONVERTER_KEYS)[number], string> = {
   libreoffice: 'LibreOffice',
@@ -36,9 +45,11 @@ export default function SettingsScreen() {
     setThemePreference,
     setMaxConcurrentApplications,
     setAutofillApprovedDefaults,
+    setAutoSubmitByDefault,
     chooseOutputDir,
     saveProviderApiKey,
   } = useSettingsStore()
+  const [pane, setPane] = createSignal<SettingsPane>('remembered')
 
   const [form, setForm] = createStore({
     provider: 'openai' as ProviderValue,
@@ -76,6 +87,7 @@ export default function SettingsScreen() {
     state.settings['automation.maxConcurrentApplications'] ?? DEFAULT_MAX_CONCURRENT_APPLICATIONS
   )
   const autofillDefaults = () => state.settings['automation.autofillApprovedDefaults'] === true
+  const autoSubmitByDefault = () => state.settings['automation.autoSubmitByDefault'] === true
   const outputDir = () => (state.settings['files.outputDir'] as string | undefined) ?? ''
 
   type ConverterStatus = { available: boolean; version: string | null; path: string | null; installUrl: string }
@@ -139,8 +151,57 @@ export default function SettingsScreen() {
     setGmailStatus({ connected: false, email: null })
   }
 
+  const [jevConfigured, setJevConfigured] = createSignal(false)
+  const [jevKeyInput, setJevKeyInput] = createSignal('')
+  const [jevSaving, setJevSaving] = createSignal(false)
+  const [jevError, setJevError] = createSignal<string | null>(null)
+
+  onMount(async () => {
+    const status = await window.applyocalypse.jev.getStatus()
+    setJevConfigured(status.configured)
+  })
+
+  const saveJevKey = async () => {
+    const key = jevKeyInput().trim()
+    if (!key) {
+      setJevError('Enter your Vercel AI Gateway key.')
+      return
+    }
+    setJevError(null)
+    setJevSaving(true)
+    try {
+      const status = await window.applyocalypse.jev.saveKey(key)
+      setJevConfigured(status.configured)
+      setJevKeyInput('')
+    } catch {
+      setJevError('The key could not be saved.')
+    } finally {
+      setJevSaving(false)
+    }
+  }
+
+  const clearJevKey = async () => {
+    const status = await window.applyocalypse.jev.clearKey()
+    setJevConfigured(status.configured)
+  }
+
   return (
     <section class="surface-panel surface-panel-active" data-gsap="panel" data-view-panel>
+      <div class="settings-layout">
+      <nav class="settings-subnav" aria-label="Settings sections">
+        <For each={SETTINGS_PANES}>
+          {(item) => (
+            <button type="button" classList={{ active: pane() === item.id }} aria-current={pane() === item.id ? 'page' : undefined} onClick={() => setPane(item.id)}>
+              {item.label}
+            </button>
+          )}
+        </For>
+      </nav>
+      <div class="settings-pane">
+      <Show when={pane() === 'remembered'}>
+        <RememberedSettings />
+      </Show>
+      <Show when={pane() === 'model'}>
       {/* Section 1: LLM Providers */}
       <div class="section-header">
         <div>
@@ -213,7 +274,7 @@ export default function SettingsScreen() {
         </Show>
         <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProviderKey}>
           <ShieldCheck size={17} aria-hidden="true" />
-          <span>{state.isLoading ? 'Saving...' : 'Save key reference'}</span>
+          <span>{state.isLoading ? 'Saving…' : 'Save key reference'}</span>
         </button>
       </div>
 
@@ -228,6 +289,8 @@ export default function SettingsScreen() {
         </For>
       </div>
 
+      </Show>
+      <Show when={pane() === 'applying'}>
       {/* Section 2: Theme */}
       <section class="settings-block">
         <div class="settings-block-head">
@@ -294,6 +357,30 @@ export default function SettingsScreen() {
         </div>
       </section>
 
+      <section class="settings-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Submit automatically</div>
+          <p class="settings-block-note">
+            Ticks "Auto-submit after review" for every new job. Each run still stops for you to approve the
+            tailored documents and the answers, and EEO, criminal history and previous-employer questions always
+            wait for you. Once you approve, the application is submitted without a second click.
+          </p>
+        </div>
+        <div class="segmented-control" aria-label="Submit automatically">
+          <For each={TOGGLE_CHOICES}>
+            {(val) => (
+              <button
+                classList={{ active: autoSubmitByDefault() === val }}
+                type="button"
+                onClick={() => void setAutoSubmitByDefault(val)}
+              >
+                {val ? 'On' : 'Off'}
+              </button>
+            )}
+          </For>
+        </div>
+      </section>
+
       {/* Section 4: Output dir */}
       <section class="settings-block">
         <div class="settings-block-head">
@@ -327,7 +414,7 @@ export default function SettingsScreen() {
               onClick={() => void checkConverters()}
             >
               <Wrench size={17} aria-hidden="true" />
-              <span>{convertersLoading() ? 'Checking...' : 'Check converters'}</span>
+              <span>{convertersLoading() ? 'Checking…' : 'Check converters'}</span>
             </button>
           }
         >
@@ -341,7 +428,7 @@ export default function SettingsScreen() {
                   </span>
                   <strong>{CONVERTER_LABELS[key]}</strong>
                   <Show when={status().available && status().version}>
-                    <span style={{ color: 'var(--text-secondary)', 'font-size': '0.78rem' }}>{status().version}</span>
+                    <span style={{ color: 'var(--ink-3)', 'font-size': '12px' }}>{status().version}</span>
                   </Show>
                   <Show when={!status().available}>
                     <a
@@ -365,11 +452,25 @@ export default function SettingsScreen() {
             disabled={convertersLoading()}
             onClick={() => void checkConverters()}
           >
-            <span>{convertersLoading() ? 'Checking...' : 'Re-check'}</span>
+            <span>{convertersLoading() ? 'Checking…' : 'Re-check'}</span>
           </button>
         </Show>
       </div>
 
+      </Show>
+      <Show when={pane() === 'accounts'}>
+      <section class="settings-block account-block">
+        <div class="settings-block-head">
+          <div class="panel-kicker">Applyocalypse account</div>
+          <p class="settings-block-note">
+            Signed in as <strong>{account()?.email ?? 'your account'}</strong>. The account only signs you in; your
+            profile, documents and history stay on this computer.
+          </p>
+        </div>
+        <button type="button" class="btn-quiet" onClick={() => void signOut()}>
+          Sign out
+        </button>
+      </section>
       {/* Section 5: Gmail OTP via OAuth */}
       <div style={{ 'margin-top': '2rem' }}>
         <div class="section-header">
@@ -379,7 +480,7 @@ export default function SettingsScreen() {
           </div>
           <Mail size={20} aria-hidden="true" />
         </div>
-        <Show when={!gmailStatusLoading()} fallback={<p class="fine-print" style={{ 'margin-top': '0.5rem' }}>Checking Gmail connection...</p>}>
+        <Show when={!gmailStatusLoading()} fallback={<p class="fine-print" style={{ 'margin-top': '0.5rem' }}>Checking Gmail connection…</p>}>
         <Show
           when={gmailStatus().connected}
           fallback={
@@ -413,13 +514,13 @@ export default function SettingsScreen() {
                 onClick={() => void connectGmail()}
               >
                 <Mail size={17} aria-hidden="true" />
-                <span>{gmailConnecting() ? 'Connecting...' : 'Connect Gmail'}</span>
+                <span>{gmailConnecting() ? 'Connecting…' : 'Connect Gmail'}</span>
               </button>
             </div>
           }
         >
           <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
-            <span style={{ color: 'var(--success)' }}>CONNECTED</span>
+            <span style={{ color: 'var(--success)' }}>Connected</span>
             <strong>{gmailStatus().email ?? 'Gmail account'}</strong>
             <button class="secondary-action" type="button" onClick={() => void disconnectGmail()}>
               Disconnect
@@ -427,6 +528,57 @@ export default function SettingsScreen() {
           </div>
         </Show>
         </Show>
+      </div>
+
+      {/* Section 6: Jev browser driver */}
+      <div style={{ 'margin-top': '2rem' }}>
+        <div class="section-header">
+          <div>
+            <div class="panel-kicker">Browser driver</div>
+            <h3>Jev (Vercel AI Gateway)</h3>
+          </div>
+          <KeyRound size={20} aria-hidden="true" />
+        </div>
+        <Show
+          when={jevConfigured()}
+          fallback={
+            <div class="starter-profile">
+              <p class="fine-print">With a key saved, Jev chooses each click on every portal. Your answers are still typed by the app, personal details are hidden from Jev, and it never submits.</p>
+              <label>
+                <span>AI Gateway API key</span>
+                <input
+                  type="password"
+                  value={jevKeyInput()}
+                  onInput={(e) => setJevKeyInput(e.currentTarget.value)}
+                  autocomplete="off"
+                />
+              </label>
+              <Show when={jevError()}>
+                <p class="fine-print" style={{ color: 'var(--danger)' }}>{jevError()}</p>
+              </Show>
+              <button
+                class="secondary-action"
+                type="button"
+                disabled={jevSaving()}
+                onClick={() => void saveJevKey()}
+              >
+                <KeyRound size={17} aria-hidden="true" />
+                <span>{jevSaving() ? 'Saving…' : 'Save key'}</span>
+              </button>
+            </div>
+          }
+        >
+          <div class="queue-row static-row" style={{ 'margin-top': '0.5rem' }}>
+            <span style={{ color: 'var(--success)' }}>Configured</span>
+            <strong>Jev drives the browser</strong>
+            <button class="secondary-action" type="button" onClick={() => void clearJevKey()}>
+              Remove key
+            </button>
+          </div>
+        </Show>
+      </div>
+      </Show>
+      </div>
       </div>
     </section>
   )

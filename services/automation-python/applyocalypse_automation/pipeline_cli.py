@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 from pathlib import Path
 from typing import Any
@@ -11,6 +12,7 @@ from .documents.file_generation import GeneratedNameInput, build_generated_filen
 from .documents.tex_mutation import TexBlockMutation, compile_tex_with_tectonic, mutate_tex_regions
 from .jd_analysis import JobDescriptionAnalyzer
 from .parsing.document_parser import parse_document
+from .preference_chat import chat_preferences
 from .validation import TextArtifactValidator
 
 
@@ -28,6 +30,11 @@ def _print_json(value: Any) -> None:
 def analyze_jd(args: argparse.Namespace) -> None:
     text = Path(args.source_text_file).read_text(encoding="utf-8")
     _print_json(JobDescriptionAnalyzer().analyze(text).to_dict())
+
+
+def chat_preferences_command(args: argparse.Namespace) -> None:
+    request = json.loads(Path(args.input_file).read_text(encoding="utf-8"))
+    _print_json(asyncio.run(chat_preferences(str(request.get("message", "")), request.get("known") or {})))
 
 
 def validate_text(args: argparse.Namespace) -> None:
@@ -150,6 +157,10 @@ def build_parser() -> argparse.ArgumentParser:
     parse.add_argument("--source", required=True)
     parse.add_argument("--document-kind", choices=["RESUME", "COVER_LETTER", "SUPPORTING_DETAILS", "OTHER"], required=True)
     parse.set_defaults(func=parse_source)
+
+    chat = subparsers.add_parser("chat-preferences")
+    chat.add_argument("--input-file", required=True)
+    chat.set_defaults(func=chat_preferences_command)
 
     return parser
 

@@ -17,14 +17,16 @@ export const buildControlDocumentFiles = ({
   generatedFiles: GeneratedFile[];
   uploadedFiles: UploadedFile[];
 }): ControlDocumentFile[] => {
-  const generated = generatedFiles.map((file) => ({
-    id: file.id,
-    fileKind: file.fileKind,
-    format: file.format,
-    filename: file.filename,
-    localPath: file.localPath,
-    uploadStatus: file.uploadStatus,
-    source: "GENERATED_FILE" as const
+  const generated = generatedFiles
+    .filter((file) => !file.doNotUpload)
+    .map((file) => ({
+      id: file.id,
+      fileKind: file.fileKind,
+      format: file.format,
+      filename: file.filename,
+      localPath: file.localPath,
+      uploadStatus: file.uploadStatus,
+      source: "GENERATED_FILE" as const
   }));
 
   const reviewedCoverLetterUploads = uploadedFiles

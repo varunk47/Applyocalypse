@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 from docx import Document  # type: ignore
+from docx.enum.text import WD_TAB_ALIGNMENT  # type: ignore
 
 from applyocalypse_automation.documents.pdf_ingestion import (
     PdfLine,
@@ -177,3 +178,54 @@ def test_a_document_of_headings_does_not_elect_a_heading_as_its_body(tmp_path: P
     paragraphs = {p.text.strip(): p for p in Document(str(destination)).paragraphs if p.text.strip()}
     assert all(run.bold for run in paragraphs["SECTION"].runs)
     assert not any(run.bold for run in paragraphs["A long paragraph of ordinary body copy."].runs)
+
+
+def test_a_right_aligned_date_stays_its_own_column(tmp_path: Path) -> None:
+    """Resumes push the dates and city to the right margin. Run together with the
+    company they read as one name, so the gap becomes a right-aligned tab."""
+    pdf = _write_pdf(
+        tmp_path / "columns.pdf",
+        [(72, 700, 10, True, "Acme Corp"), (480, 700, 10, False, "Jan 2024 - Present")],
+    )
+    (line,) = read_pdf_lines(pdf)
+    assert line.text.replace(" ", "") == "AcmeCorp\tJan2024-Present"
+
+    result = convert_pdf_to_candidate_docx(pdf, tmp_path / "out")
+    (paragraph,) = [p for p in Document(str(result.candidate_docx_path)).paragraphs if p.text.strip()]
+    assert "\t" in paragraph.text
+    assert [stop.alignment for stop in paragraph.paragraph_format.tab_stops] == [WD_TAB_ALIGNMENT.RIGHT]
+
+
+# (the PDF's lines, what the converter should read back)
+WRAP_CASES: tuple[tuple[str, list[tuple[float, float, float, bool, str]], list[str]], ...] = (
+    (
+        "a bullet wrapped onto a hanging indent is one bullet",
+        [
+            (72, 700, 10, False, "- "),
+            (84, 700, 10, False, "Owned the billing service and"),
+            (84, 688, 10, False, "the ledger it writes to"),
+        ],
+        ["Owned the billing service and the ledger it writes to"],
+    ),
+    (
+        "a word hyphenated across the break is one word",
+        [(72, 700, 10, False, "Skills: Python, Fine-"), (72, 688, 10, False, "Tuning, SQL")],
+        ["Skills: Python, Fine-Tuning, SQL"],
+    ),
+    (
+        "two rows at the margin stay two rows",
+        [(72, 700, 10, False, "Languages: Python, SQL"), (72, 688, 10, False, "Cloud: AWS, Azure")],
+        ["Languages: Python, SQL", "Cloud: AWS, Azure"],
+    ),
+)
+
+
+@pytest.mark.parametrize("description,drawn,expected", WRAP_CASES, ids=[case[0] for case in WRAP_CASES])
+def test_lines_the_page_wrapped_are_joined_back(
+    tmp_path: Path, description: str, drawn: list[tuple[float, float, float, bool, str]], expected: list[str]
+) -> None:
+    """A tailoring run rewrites whole bullets, so a bullet split across two
+    paragraphs gets half of it rewritten and the other half orphaned."""
+    result = convert_pdf_to_candidate_docx(_write_pdf(tmp_path / "wrap.pdf", drawn), tmp_path / "out")
+    paragraphs = [" ".join(p.text.split()) for p in Document(str(result.candidate_docx_path)).paragraphs if p.text.strip()]
+    assert paragraphs == expected, description

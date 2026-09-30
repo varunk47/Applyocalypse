@@ -29,7 +29,7 @@ const YES_NO_PREFER = ['Yes', 'No', 'Prefer not to say']
  * are the answers most worth being able to read back at a glance later, and a
  * closed dropdown hides the one thing the user came here to check.
  */
-const Choice = (props: {
+export const Choice = (props: {
   label: string
   hint?: string
   options: string[]

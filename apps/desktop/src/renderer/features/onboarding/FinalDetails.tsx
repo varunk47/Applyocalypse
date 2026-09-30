@@ -1,7 +1,6 @@
 import { For, Show } from 'solid-js'
 import { KeyRound, ShieldCheck, Sparkles } from 'lucide-solid'
 import { PROVIDER_OPTIONS } from '../../utils/providerOptions'
-import { EqualEmploymentStep, type EeoFields } from './EqualEmploymentStep'
 import { deriveWorkAuthorization } from '@applyocalypse/shared-types'
 import { WorkAuthorizationFields, type WorkAuthFields } from '../profile/WorkAuthorizationFields'
 
@@ -22,8 +21,6 @@ type Props = {
   workAuth: WorkAuthFields
   setWorkAuthStatus: (value: WorkAuthFields['workAuthStatus']) => void
   setWorkAuthSponsorship: (value: WorkAuthFields['workAuthSponsorship']) => void
-  eeo: EeoFields
-  setEeoField: <K extends keyof EeoFields>(key: K, value: EeoFields[K]) => void
   credentials: CredentialFields
   setCredential: <K extends keyof CredentialFields>(key: K, value: CredentialFields[K]) => void
   passwordIsValid: boolean
@@ -56,11 +53,11 @@ export function FinalDetails(props: Props) {
   return (
     <div class="ob-tail">
       <header>
-        <h2 class="ob-tail-title">Three things your resume cannot say</h2>
+        <h2 class="ob-tail-title">Last, how to reach the portals</h2>
         <p class="ob-hero-sub">Then you are done. All of it stays encrypted on this machine.</p>
       </header>
 
-      {/* ── Work authorization + EEO defaults ──────────────────────────────── */}
+      {/* ── Work authorization ─────────────────────────────────────────────── */}
       <section class="ob-detail-card">
         <h3 class="ob-group-head">
           <ShieldCheck size={14} aria-hidden="true" />
@@ -71,15 +68,6 @@ export function FinalDetails(props: Props) {
           setStatus={props.setWorkAuthStatus}
           setSponsorship={props.setWorkAuthSponsorship}
         />
-
-        <details class="ob-disclosure">
-          <summary>Equal employment defaults</summary>
-          <p class="review-always">
-            These are defaults, not answers. EEO, criminal-history and previous-employer questions
-            are always held for your review before anything is submitted.
-          </p>
-          <EqualEmploymentStep fields={props.eeo} setField={props.setEeoField} />
-        </details>
       </section>
 
       {/* ── Portal credentials ─────────────────────────────────────────────── */}

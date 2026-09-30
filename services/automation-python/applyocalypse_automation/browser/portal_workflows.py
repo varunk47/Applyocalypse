@@ -19,6 +19,8 @@ class PortalWorkflow:
     expected_steps: tuple[str, ...]
     review_checkpoints: tuple[str, ...]
     notes: tuple[str, ...]
+    # Clicked once after the entry action, for portals whose Apply opens a chooser.
+    entry_followup_labels: tuple[str, ...] = ()
 
     def to_event_payload(self) -> dict[str, object]:
         return {
@@ -66,6 +68,12 @@ ATS_ENTRY_ACTIONS: dict[str, tuple[str, ...]] = {
     "paycom": ("Apply Now", "Apply"),
     "avature": ("Apply Now", "Apply"),
     "bullhorn": ("Apply Now", "Apply"),
+}
+
+# Workday's Apply opens a chooser. "Autofill with Resume" would upload a file the
+# user has not reviewed for this job, so the run always takes the manual path.
+ATS_ENTRY_FOLLOWUPS: dict[str, tuple[str, ...]] = {
+    "workday": ("Apply Manually",),
 }
 
 # ATSes that put an account or sign-in wall between the apply click and the form.
@@ -162,6 +170,7 @@ def workflow_for_portal(portal: PortalDefinition | None) -> PortalWorkflow:
                 "Pause on login, CAPTCHA, MFA, OTP, ambiguous questions, and final submit.",
                 *quirk_notes,
             ),
+            entry_followup_labels=ATS_ENTRY_FOLLOWUPS.get(portal.portal_id, ()),
         )
 
     return PortalWorkflow(

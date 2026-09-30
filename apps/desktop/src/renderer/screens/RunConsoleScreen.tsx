@@ -148,7 +148,7 @@ export default function RunConsoleScreen() {
 
   const statusPill = createMemo(() => {
     const detail = run()
-    if (!detail) return { text: 'WAITING FOR QUEUE', kind: 'terminal' as const }
+    if (!detail) return { text: 'Waiting in the queue', kind: 'terminal' as const }
     if (NEEDS_YOU_STATUSES.has(detail.status)) return { text: 'PAUSED / NEEDS YOU', kind: 'paused' as const }
     if (TERMINAL_STATUSES.has(detail.status)) return { text: detail.status, kind: 'terminal' as const }
     return { text: detail.status.replace(/_/g, ' '), kind: 'working' as const }
@@ -179,13 +179,13 @@ export default function RunConsoleScreen() {
   return (
     <section class="screen run-console" data-gsap="panel" data-view-panel>
       <div class="console-header">
-        <button class="btn-mono" type="button" onClick={() => navigate('/')}>← MISSIONS</button>
+        <button class="btn-mono" type="button" onClick={() => navigate('/')}>← Missions</button>
         <span class="console-title">{jobTitle()}</span>
         <Show when={run()}>
           {(detail) => (
             <span class="console-runid">
-              RUN {detail().id.slice(0, 6).toUpperCase()}
-              {portalWorkflow()?.displayName ? ` · ${portalWorkflow()!.displayName.toUpperCase()}` : ''}
+              Run {detail().id.slice(0, 6)}
+              {portalWorkflow()?.displayName ? ` · ${portalWorkflow()!.displayName}` : ''}
             </span>
           )}
         </Show>
@@ -197,18 +197,18 @@ export default function RunConsoleScreen() {
           }}>
             {statusPill().text}
           </span>
-          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(pauseActiveRun)}>PAUSE</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(resumeActiveRun)}>RESUME</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(retryCurrentStep)}>RETRY</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(skipCurrentStep)}>SKIP</button>
-          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(cancelActiveRun)}>CANCEL</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(pauseActiveRun)}>Pause</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(resumeActiveRun)}>Resume</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(retryCurrentStep)}>Retry</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(skipCurrentStep)}>Skip</button>
+          <button class="btn-mono" type="button" disabled={!state.runDetail || controlBusy()} onClick={() => runControl(cancelActiveRun)}>Cancel</button>
         </div>
       </div>
 
       <div class="console-grid">
         {/* Left: run steps */}
         <div class="steps-rail">
-          <div class="kicker">RUN STEPS</div>
+          <div class="kicker">Steps</div>
           <Show
             when={(state.runDetail?.steps.length ?? 0) > 0}
             fallback={<div class="empty-state"><span>No steps yet.</span></div>}
@@ -236,7 +236,7 @@ export default function RunConsoleScreen() {
             </div>
           </Show>
           <div class="worker-note">
-            <div class="kicker">WHAT THE WORKER MAY DO NEXT</div>
+            <div class="kicker">What happens next</div>
             <div class="note-body">
               <Show when={nextPendingStep()} fallback={<>Nothing yet. This run is waiting on you or finished.</>}>
                 {(step) => <><strong>{prettyStep(step().stepType)}</strong>. Nothing submit-shaped. Ever.</>}
@@ -253,13 +253,13 @@ export default function RunConsoleScreen() {
               <span class="browser-dot" />
               <span class="address-bar">{addressBarText()}</span>
               <Show when={run()?.status === 'RUNNING_AUTOMATION'}>
-                <span class="watch-tag"><span class="dot" />WATCHING</span>
+                <span class="watch-tag"><span class="dot" />Watching</span>
               </Show>
             </div>
             <div class="viewport-body">
               <Show
                 when={latestScreenshot()}
-                fallback={<span>[ LIVE PORTAL VIEWPORT ]<br />SCREENSHOTS APPEAR AS THE WORKER MOVES</span>}
+                fallback={<span>The portal view<br />Screenshots appear as the run moves</span>}
               >
                 {(shot) => <img src={artifactUrlForPath(shot().localPath)} alt="Latest browser screenshot" />}
               </Show>
@@ -267,9 +267,9 @@ export default function RunConsoleScreen() {
           </div>
 
           <div class="rule-row ledger-title-row">
-            <span class="kicker">EVENT LEDGER</span>
+            <span class="kicker">What happened</span>
             <span class="rule" />
-            <span class="kicker">{events().length} EVENTS</span>
+            <span class="kicker">{events().length} events</span>
           </div>
           <div class="event-ledger">
             <For each={events()}>
@@ -296,7 +296,7 @@ export default function RunConsoleScreen() {
         <div class="gate-rail">
           <div class="rail-head">
             <span class="kicker kicker-wax">
-              THE GATE{openReviews().length > 0 ? ` / ${openReviews().length} OPEN` : ''}
+              Your review{openReviews().length > 0 ? ` · ${openReviews().length} open` : ''}
             </span>
           </div>
 
@@ -306,7 +306,7 @@ export default function RunConsoleScreen() {
                 <div class="gate-question">
                   "{request.prompt}" <span class="quiet">({request.reviewType.replace(/_/g, ' ').toLowerCase()})</span>
                 </div>
-                <div class="house-rule">HOUSE RULE: SENSITIVE ANSWERS ARE NEVER AUTO-FILLED</div>
+                <div class="house-rule">Sensitive answers are never filled without you.</div>
                 <Show when={reviewBlockingDetail(request)}>
                   {(detail) => <div class="gate-blocker">{detail()}</div>}
                 </Show>
@@ -362,7 +362,7 @@ export default function RunConsoleScreen() {
           <Show when={run()?.status === 'READY_TO_SUBMIT'}>
             <div class="gate-card armed">
               <div class="gate-question">Ready to submit. <span class="quiet">One last look, then it ships.</span></div>
-              <div class="house-rule">NOTHING SHIPS WITHOUT YOUR SIGNATURE</div>
+              <div class="house-rule">Nothing is sent without your yes.</div>
               <div class="gate-actions">
                 <button
                   class="btn-wax"
@@ -374,7 +374,7 @@ export default function RunConsoleScreen() {
                     void approveFinalSubmit().finally(() => setGateBusy(false))
                   }}
                 >
-                  {gateBusy() ? 'Working...' : 'Approve final submit'}
+                  {gateBusy() ? 'Working…' : 'Approve final submit'}
                 </button>
                 <button
                   class="btn-quiet"
@@ -393,7 +393,7 @@ export default function RunConsoleScreen() {
           </Show>
 
           <div class="rule-row">
-            <span class="kicker">DETECTED FIELDS</span>
+            <span class="kicker">Fields on the form</span>
             <span class="rule" />
           </div>
           <Show
@@ -429,7 +429,7 @@ export default function RunConsoleScreen() {
 
           <Show when={(state.runDetail?.generatedFiles.length ?? 0) > 0}>
             <div style={{ 'margin-top': 'auto', display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
-              <div class="kicker">ARTIFACTS</div>
+              <div class="kicker">Files</div>
               <For each={state.runDetail?.generatedFiles ?? []}>
                 {(file) => (
                   <button class="artifact-row" type="button" onClick={() => void openLocalPath(file.localPath)}>
@@ -446,7 +446,7 @@ export default function RunConsoleScreen() {
 
       <div class="console-foot">
         <span>Nothing is sent until you say go.</span>
-        <span class="foot-note">EVERY ACTION AUDIT LOGGED · RUN ARCHIVED LOCALLY</span>
+        <span class="foot-note">Every action is logged. The run is archived on this computer.</span>
       </div>
     </section>
   )

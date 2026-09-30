@@ -86,7 +86,7 @@ pnpm release:preflight
 - Picked source files are copied into Applyocalypse-managed local custody before registration, so later parsing, PDF conversion, and automation do not depend on the user's original picked path remaining in place.
 - DOCX and TEX mutation utilities use explicit Applyocalypse anchors/placeholders and preserve source structure as much as parser confidence allows.
 - TEX output attempts a Tectonic PDF compile and emits a reviewable validation failure when the compiler is unavailable or the source fails.
-- DOCX output now attempts local PDF export through LibreOffice or Word/docx2pdf when available and emits a reviewable validation warning when no local exporter exists.
+- DOCX output now attempts local PDF export through LibreOffice or Microsoft Word when available and emits a reviewable validation warning when no local exporter exists.
 - Post-review browser automation applies only explicitly approved field answers and upload-eligible documents. Required unanswered fields create `ANSWER` review requests and pause the live worker before any fill or final-submit attempt.
 - Runtime control polling now peeks at future `RESUME` controls instead of consuming them outside the intended gate, preventing answer, document, and final-submit approvals from being lost between steps.
 - Final submission now has a distinct approval path: portal entry actions refuse submit-like controls, while approved final submit clicks only exact final-submit labels and only records `SUBMITTED` when confirmation text is detected.

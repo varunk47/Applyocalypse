@@ -78,7 +78,7 @@ class BrowserAdapter(Protocol):
     async def apply_field_value(self, field: BrowserField, value: str) -> BrowserStepResult:
         ...
 
-    async def click_by_text(self, labels: list[str]) -> BrowserStepResult:
+    async def click_by_text(self, labels: list[str], *, after_selector: str | None = None) -> BrowserStepResult:
         ...
 
     async def click_final_submit(self, labels: list[str]) -> BrowserStepResult:

@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import subprocess
+import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -106,9 +109,116 @@ def test_export_reports_missing_converters_when_nothing_is_installed(
     docx_path.write_text("", encoding="utf-8")
 
     monkeypatch.setattr(pdf_export, "_find_soffice", lambda: None)
-    monkeypatch.setattr(pdf_export, "_export_with_docx2pdf", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(pdf_export, "_export_with_word", lambda *_args, **_kwargs: None)
 
     result = pdf_export.export_docx_to_pdf(docx_path, tmp_path)
 
     assert result.ok is False
     assert result.code == "DOCX_PDF_EXPORTER_UNAVAILABLE"
+
+
+def test_word_command_drives_word_over_com_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pdf_export.sys, "platform", "win32")
+    docx_path, pdf_path = tmp_path / "it's a resume.docx", tmp_path / "out.pdf"
+
+    word = pdf_export._word_command(docx_path, pdf_path)
+
+    assert word is not None
+    command, env = word
+    assert command[0] == "powershell"
+    # Paths ride in env vars so a quote in a file name cannot reach the script text.
+    assert str(docx_path) not in " ".join(command)
+    assert env["APPLYO_DOCX_PATH"] == str(docx_path)
+    assert env["APPLYO_PDF_PATH"] == str(pdf_path)
+
+
+def test_word_command_uses_applescript_on_a_mac_with_word(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pdf_export.sys, "platform", "darwin")
+    monkeypatch.setattr(pdf_export.Path, "exists", lambda self: self == pdf_export._MAC_WORD_APP)
+
+    word = pdf_export._word_command(tmp_path / "a.docx", tmp_path / "a.pdf")
+
+    assert word is not None
+    command, _env = word
+    assert command[0] == "osascript"
+    assert command[-2:] == [str(tmp_path / "a.docx"), str(tmp_path / "a.pdf")]
+
+
+@pytest.mark.parametrize("platform", ["darwin", "linux"])
+def test_word_command_is_none_without_word(platform: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(pdf_export.sys, "platform", platform)
+    monkeypatch.setattr(pdf_export.Path, "exists", lambda self: False)
+
+    assert pdf_export._word_command(tmp_path / "a.docx", tmp_path / "a.pdf") is None
+
+
+def _fake_word(monkeypatch: pytest.MonkeyPatch, *, returncode: int, writes_pdf: bool) -> None:
+    def run(command: list[str], **kwargs: object) -> SimpleNamespace:
+        env = kwargs["env"]
+        assert isinstance(env, dict)
+        if writes_pdf:
+            Path(env["APPLYO_PDF_PATH"]).write_bytes(b"%PDF-1.7")
+        return SimpleNamespace(returncode=returncode, stdout="", stderr="")
+
+    monkeypatch.setattr(pdf_export.sys, "platform", "win32")
+    monkeypatch.setattr(pdf_export, "_find_soffice", lambda: None)
+    monkeypatch.setattr(pdf_export.subprocess, "run", run)
+
+
+@pytest.mark.parametrize(
+    ("returncode", "writes_pdf", "ok", "code"),
+    [
+        (0, True, True, None),
+        (1, False, False, "DOCX_PDF_EXPORT_FAILED"),
+        (0, False, False, "DOCX_PDF_EXPORT_FAILED"),
+        (3, False, False, "DOCX_PDF_EXPORTER_UNAVAILABLE"),
+    ],
+)
+def test_export_through_word(
+    returncode: int, writes_pdf: bool, ok: bool, code: str | None, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    docx_path = tmp_path / "resume.docx"
+    docx_path.write_text("", encoding="utf-8")
+    _fake_word(monkeypatch, returncode=returncode, writes_pdf=writes_pdf)
+
+    result = pdf_export.export_docx_to_pdf(docx_path, tmp_path / "out")
+
+    assert (result.ok, result.code) == (ok, code)
+    if ok:
+        assert result.exporter == "word"
+        assert result.pdf_path == tmp_path / "out" / "resume.pdf"
+        assert result.pdf_path.read_bytes() == b"%PDF-1.7"
+
+
+def test_export_reports_a_word_that_hangs_as_a_timeout(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    docx_path = tmp_path / "resume.docx"
+    docx_path.write_text("", encoding="utf-8")
+
+    def hang(command: list[str], **kwargs: object) -> None:
+        raise subprocess.TimeoutExpired(command, 5)
+
+    monkeypatch.setattr(pdf_export.sys, "platform", "win32")
+    monkeypatch.setattr(pdf_export, "_find_soffice", lambda: None)
+    monkeypatch.setattr(pdf_export.subprocess, "run", hang)
+
+    result = pdf_export.export_docx_to_pdf(docx_path, tmp_path, timeout_seconds=5)
+
+    assert (result.ok, result.exporter, result.code) == (False, "word", "DOCX_PDF_EXPORT_TIMEOUT")
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="drives the real Word over COM")
+def test_real_word_exports_a_pdf_when_installed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    docx = pytest.importorskip("docx")
+    document = docx.Document()
+    document.add_paragraph("Ada Lovelace")
+    docx_path = tmp_path / "it's a resume.docx"
+    document.save(str(docx_path))
+    monkeypatch.setattr(pdf_export, "_find_soffice", lambda: None)
+
+    result = pdf_export.export_docx_to_pdf(docx_path, tmp_path / "out", timeout_seconds=120)
+
+    if result.code == "DOCX_PDF_EXPORTER_UNAVAILABLE":
+        pytest.skip("Microsoft Word is not installed")
+    assert result.ok, result.stderr
+    assert result.pdf_path is not None
+    assert result.pdf_path.read_bytes().startswith(b"%PDF")

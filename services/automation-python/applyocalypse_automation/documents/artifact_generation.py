@@ -21,6 +21,8 @@ class ArtifactMetadata:
     retention_policy: str
     delete_after: str
     review_only: bool
+    # Never attached to an application; review_only files still can be.
+    do_not_upload: bool = False
 
     def to_payload(self) -> dict[str, Any]:
         return asdict(self)
@@ -335,7 +337,9 @@ def write_text_artifact(
     )
 
 
-def metadata_for_existing_file(*, path: Path, file_kind: str, format_name: str, review_only: bool) -> ArtifactMetadata:
+def metadata_for_existing_file(
+    *, path: Path, file_kind: str, format_name: str, review_only: bool, do_not_upload: bool = False
+) -> ArtifactMetadata:
     raw = path.read_bytes()
     delete_after = datetime.now(UTC) + timedelta(days=14)
     return ArtifactMetadata(
@@ -348,4 +352,5 @@ def metadata_for_existing_file(*, path: Path, file_kind: str, format_name: str, 
         retention_policy="DELETE_AFTER_RETENTION",
         delete_after=delete_after.isoformat().replace("+00:00", "Z"),
         review_only=review_only,
+        do_not_upload=do_not_upload,
     )

@@ -10,6 +10,9 @@ import {
   UploadRepository,
   AuditRepository,
   ParsedDocumentRepository,
+  PreferenceRuleRepository,
+  JobFilterRepository,
+  ProfileAddressRepository,
   type ApplyocalypseDatabase,
   type QueueRepository,
   type SettingsRepository
@@ -72,6 +75,9 @@ export interface IpcHandlerContext {
   workerSupervisor: PythonWorkerSupervisor;
   getMainWindow: () => BrowserWindow | null;
   chatRepository: ChatRepository;
+  preferenceRuleRepository: PreferenceRuleRepository;
+  jobFilterRepository: JobFilterRepository;
+  profileAddressRepository: ProfileAddressRepository;
   profileRepository: ProfileRepository;
   jobRepository: JobRepository;
   uploadRepository: UploadRepository;
@@ -97,6 +103,9 @@ export const createIpcHandlerContext = ({
   initialApprovedPaths = []
 }: RegisterIpcHandlersInput): IpcHandlerContext => {
   const chatRepository = new ChatRepository(db);
+  const preferenceRuleRepository = new PreferenceRuleRepository(db);
+  const jobFilterRepository = new JobFilterRepository(db);
+  const profileAddressRepository = new ProfileAddressRepository(db);
   const profileRepository = new ProfileRepository(db);
   const jobRepository = new JobRepository(db);
   const uploadRepository = new UploadRepository(db);
@@ -105,7 +114,10 @@ export const createIpcHandlerContext = ({
   const runRepository = new RunRepository(db);
   const auditRepository = new AuditRepository(db);
   const secureSecretStore = new SecureSecretStore();
-  const documentIngestionService = new DocumentIngestionService(uploadRepository, parsedDocumentRepository);
+  const documentIngestionService = new DocumentIngestionService(uploadRepository, parsedDocumentRepository, null, () => {
+    const providerSecret = providerRepository.getFirstConnectedSecretReference();
+    return providerSecret?.provider === "nvidia_nim" ? secureSecretStore.decryptSecret(providerSecret.encryptedReference) : null;
+  });
 
   // `approvedPickedPaths` stays private to this module; approvePickedPath /
   // requirePickedPath are its only doors, preserving the security property that
@@ -163,6 +175,9 @@ export const createIpcHandlerContext = ({
     workerSupervisor,
     getMainWindow,
     chatRepository,
+    preferenceRuleRepository,
+    jobFilterRepository,
+    profileAddressRepository,
     profileRepository,
     jobRepository,
     uploadRepository,

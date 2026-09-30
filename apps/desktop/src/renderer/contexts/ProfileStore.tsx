@@ -46,7 +46,7 @@ type ProfileStoreValue = {
   saveStructuredSections: (input: {
     profileId: string
     education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; gpa?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; details?: string[] }>
-    experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[]; tools?: string[] }>
+    experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[]; tools?: string[]; reasonForLeaving?: string | null | undefined }>
     projects: Array<{ id?: string | null | undefined; name: string; role?: string | null | undefined; summary?: string | null | undefined; bullets?: string[]; tools?: string[]; links?: string[] }>
     skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>
   }) => Promise<void>
@@ -171,7 +171,7 @@ export const ProfileStoreProvider = (props: ParentProps) => {
   const saveStructuredSections = async (input: {
     profileId: string
     education: Array<{ id?: string | null | undefined; institution: string; degree?: string | null | undefined; field?: string | null | undefined; gpa?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; details?: string[] }>
-    experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[]; tools?: string[] }>
+    experience: Array<{ id?: string | null | undefined; company: string; title: string; location?: string | null | undefined; startDate?: string | null | undefined; endDate?: string | null | undefined; bullets?: string[]; tools?: string[]; reasonForLeaving?: string | null | undefined }>
     projects: Array<{ id?: string | null | undefined; name: string; role?: string | null | undefined; summary?: string | null | undefined; bullets?: string[]; tools?: string[]; links?: string[] }>
     skillGroups: Array<{ id?: string | null | undefined; label: string; skills?: string[] }>
   }): Promise<void> => {

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { copyFileSync, mkdirSync, statSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { basename, extname, join } from "node:path";
 import { app } from "electron";
 import { ParsedDocumentRepository, type ApplyocalypseDatabase, type ParsedDocumentMergeSummary, type UploadRepository, type UploadedFile } from "@applyocalypse/db";
@@ -62,14 +63,37 @@ export type EditableMasterAnchorRepairResult = {
   userMessage: string;
 };
 
-const runPdfConversion = async (sourcePath: string, outputDir: string): Promise<PdfConversionResult> => {
+/**
+ * A scanned PDF has no text layer, so the worker sends its pages to NVIDIA's
+ * nemotron-parse when an NVIDIA NIM key is saved. The key reaches the worker
+ * through a 0600 file that is removed as soon as the worker exits.
+ */
+const runPdfConversion = async (sourcePath: string, outputDir: string, nvidiaKey: string | null): Promise<PdfConversionResult> => {
+  if (!nvidiaKey) {
+    return spawnPdfConversion(sourcePath, outputDir, process.env);
+  }
+  const scratchDir = mkdtempSync(join(tmpdir(), "applyo-pdf-"));
+  try {
+    const secretsFile = join(scratchDir, "worker-secrets.json");
+    writeFileSync(secretsFile, JSON.stringify({ NVIDIA_NIM_API_KEY: nvidiaKey }), { encoding: "utf8", mode: 0o600 });
+    return await spawnPdfConversion(sourcePath, outputDir, { ...process.env, APPLYO_SECRETS_FILE: secretsFile });
+  } finally {
+    rmSync(scratchDir, { recursive: true, force: true });
+  }
+};
+
+const spawnPdfConversion = (
+  sourcePath: string,
+  outputDir: string,
+  env: Record<string, string | undefined>
+): Promise<PdfConversionResult> => {
   const launch = resolvePythonWorkerLaunch();
   const args = [...launch.baseArgs, "pdf-ingestion", "--source", sourcePath, "--output-dir", outputDir];
 
   return new Promise((resolve, reject) => {
     const child = spawn(launch.executable, args, {
       cwd: launch.cwd,
-      env: process.env,
+      env,
       shell: false,
       windowsHide: true
     });
@@ -218,7 +242,8 @@ export class DocumentIngestionService {
   constructor(
     private readonly uploads: UploadRepository,
     private readonly parsedDocuments: ParsedDocumentRepository,
-    private readonly sourceCustodyRoot: string | null = null
+    private readonly sourceCustodyRoot: string | null = null,
+    private readonly readNvidiaKey: () => string | null = () => null
   ) {}
 
   private custodyRoot(): string {
@@ -295,7 +320,7 @@ export class DocumentIngestionService {
 
     const outputDir = join(app.getPath("userData"), "editable-masters", input.profileId ?? "unassigned", sourceFile.id);
     mkdirSync(outputDir, { recursive: true });
-    const conversion = await runPdfConversion(custodyPath, outputDir);
+    const conversion = await runPdfConversion(custodyPath, outputDir, this.readNvidiaKey());
     const editableMasterCandidate = this.uploads.registerLocalFile({
       profileId: input.profileId,
       localPath: conversion.candidate_docx_path,

@@ -1,6 +1,8 @@
 import { ipcMain } from "electron";
 import { IpcChannels, IpcContracts } from "@applyocalypse/ipc-contracts";
 import { GmailOAuthService } from "../../services/gmailOAuthService";
+import { JevKeyService } from "../../services/jevKeyService";
+import { AccountAuthService } from "../../services/accountAuthService";
 import { checkConverters } from "../../services/converterDiagnostics";
 import { checkStartupHealth } from "../../services/startupHealth";
 import { handleContract, type IpcHandlerContext } from "./context";
@@ -23,6 +25,24 @@ export const registerSystemHandlers = (ctx: IpcHandlerContext): void => {
   handleContract(IpcContracts.gmailDisconnectOAuth, () => {
     gmailOAuthService.disconnect();
     return { ok: true };
+  });
+
+  const accountAuthService = new AccountAuthService(settingsRepository);
+  handleContract(IpcContracts.accountGetState, () => accountAuthService.getState());
+  handleContract(IpcContracts.accountSignUp, ({ email, password }) => accountAuthService.signUp(email, password));
+  handleContract(IpcContracts.accountSignIn, ({ email, password }) => accountAuthService.signIn(email, password));
+  handleContract(IpcContracts.accountSignInWithGoogle, () => accountAuthService.signInWithGoogle());
+  handleContract(IpcContracts.accountSignOut, () => accountAuthService.signOut());
+
+  const jevKeyService = new JevKeyService(settingsRepository);
+  handleContract(IpcContracts.jevSaveKey, ({ key }) => {
+    jevKeyService.save(key);
+    return jevKeyService.getStatus();
+  });
+  handleContract(IpcContracts.jevGetStatus, () => jevKeyService.getStatus());
+  handleContract(IpcContracts.jevClearKey, () => {
+    jevKeyService.clear();
+    return jevKeyService.getStatus();
   });
 
   handleContract(IpcContracts.systemCheckConverters, () => ({

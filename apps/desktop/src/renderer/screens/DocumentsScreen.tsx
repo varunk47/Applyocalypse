@@ -60,29 +60,29 @@ export default function DocumentsScreen() {
           {/* Left: master sources */}
           <div class="docs-col">
             <div class="rule-row">
-              <span class="kicker">MASTER SOURCES</span>
+              <span class="kicker">Master sources</span>
               <span class="rule" />
-              <button class="btn-mono" type="button" onClick={() => void pickAndRegisterResume()}>+ RESUME</button>
-              <button class="btn-mono" type="button" onClick={() => void pickAndRegisterSupportingDetails()}>+ DETAILS</button>
-              <button class="btn-mono" type="button" onClick={() => void pickAndRegisterCoverLetter()}>+ COVER SAMPLE</button>
+              <button class="btn-mono" type="button" onClick={() => void pickAndRegisterResume()}>+ Resume</button>
+              <button class="btn-mono" type="button" onClick={() => void pickAndRegisterSupportingDetails()}>+ Details</button>
+              <button class="btn-mono" type="button" onClick={() => void pickAndRegisterCoverLetter()}>+ Cover sample</button>
             </div>
 
             <Show when={mergeReport()}>
               {(report) => (
                 <div class="paper-card section-card" role="status">
                   <div style={{ display: 'flex', 'align-items': 'center', gap: '10px' }}>
-                    <span class="kicker">PARSE CHECK</span>
+                    <span class="kicker">Parse check</span>
                     <span class="rule" />
                     <span class="field-state" classList={{ yours: report().lostWork, applied: !report().lostWork }}>
-                      {report().lostWork ? 'NEEDS YOU' : 'CLEAN'}
+                      {report().lostWork ? 'Needs you' : 'Clean'}
                     </span>
-                    <button class="btn-mono" type="button" onClick={dismissMergeReceipt}>DISMISS</button>
+                    <button class="btn-mono" type="button" onClick={dismissMergeReceipt}>Dismiss</button>
                   </div>
 
                   <div style={{ font: '500 12px var(--sans)' }}>{report().headline}</div>
 
                   <Show when={report().notImported.length > 0}>
-                    <div class="kicker">NOT IMPORTED</div>
+                    <div class="kicker">Not imported</div>
                     <For each={report().notImported}>
                       {(entry) => (
                         <div style={{ display: 'flex', gap: '8px', 'align-items': 'baseline', 'flex-wrap': 'wrap' }}>
@@ -109,7 +109,7 @@ export default function DocumentsScreen() {
                   </Show>
 
                   <Show when={report().warnings.length > 0}>
-                    <div class="kicker">PARSER NOTES</div>
+                    <div class="kicker">Parser notes</div>
                     <For each={report().warnings}>
                       {(warning) => (
                         <div style={{ 'font-size': '10.5px', color: 'var(--ink-3)' }}>{warning}</div>
@@ -152,7 +152,7 @@ export default function DocumentsScreen() {
                           style={{ 'margin-left': 'auto' }}
                         >
                           <Show when={parsed()} fallback={statusTag(file.status).text}>
-                            {(doc) => `PARSED · ${Math.round(doc().confidence * 100)}% CONF`}
+                            {(doc) => `Parsed · ${Math.round(doc().confidence * 100)}% confidence`}
                           </Show>
                         </span>
                       </div>
@@ -163,7 +163,7 @@ export default function DocumentsScreen() {
                           const repairModel = () => buildAnchorRepairEditorModel(doc())
                           return (
                             <>
-                              <div class="kicker">ANCHOR MAP</div>
+                              <div class="kicker">Anchor map</div>
                               <div class="anchor-map">
                                 <For each={repairModel().zones.slice(0, 5)}>
                                   {(zone) => (
@@ -183,9 +183,9 @@ export default function DocumentsScreen() {
                                 </For>
                               </div>
                               <div class="anchor-legend">
-                                <span><span class="legend-swatch ready" />READY</span>
-                                <span><span class="legend-swatch repairable" />REPAIRABLE</span>
-                                <span><span class="legend-swatch review" />REVIEW-ONLY</span>
+                                <span><span class="legend-swatch ready" />Ready</span>
+                                <span><span class="legend-swatch repairable" />Repairable</span>
+                                <span><span class="legend-swatch review" />Review only</span>
                               </div>
                               <div style={{ 'font-size': '11px', color: 'var(--ink-2)' }}>{diagnostics().summary}</div>
                               <div style={{ display: 'flex', gap: '8px', 'align-items': 'center', 'flex-wrap': 'wrap' }}>
@@ -226,7 +226,7 @@ export default function DocumentsScreen() {
                     >
                       {file.originalName}
                     </button>
-                    <span class="field-state applied" style={{ 'margin-left': 'auto' }}>VOICE LOCKED ✓</span>
+                    <span class="field-state applied" style={{ 'margin-left': 'auto' }}>Voice locked ✓</span>
                   </div>
                   <div style={{ 'font-size': '10.5px', color: 'var(--ink-3)' }}>
                     Every letter is measured against this. Sounds like you, or it doesn't ship.
@@ -236,23 +236,23 @@ export default function DocumentsScreen() {
             </For>
 
             <div class="validators-note">
-              HOUSE VALIDATORS: ONE PAGE · BANNED WORDS · EM-DASH GATE / ALL BLOCKING
+              Every tailored copy is checked before use: one page, no banned words, no em dashes.
             </div>
           </div>
 
           {/* Right: tailored output */}
           <div class="docs-col">
             <div class="rule-row">
-              <span class="kicker">TAILORED OUTPUT</span>
+              <span class="kicker">Tailored copies</span>
               <span class="rule" />
-              <button class="btn-mono" type="button" onClick={() => void refetchGenerated()}>REFRESH</button>
-              <span class="provenance-tag">EXPORT: PDF VIA LOCAL CONVERTER</span>
+              <button class="btn-mono" type="button" onClick={() => void refetchGenerated()}>Refresh</button>
+              <span class="provenance-tag">Exported to PDF on this computer</span>
             </div>
             <Show
               when={generated().length > 0}
               fallback={
                 <div class="empty-state">
-                  <span>{generated.loading ? 'Loading tailored documents...' : 'Tailored copies appear here as missions run. Paste a job link on Missions to start one.'}</span>
+                  <span>{generated.loading ? 'Loading tailored documents…' : 'Tailored copies appear here as missions run. Paste a job link on Missions to start one.'}</span>
                 </div>
               }
             >
@@ -275,7 +275,7 @@ export default function DocumentsScreen() {
                         </span>
                       </span>
                       <span class="mono-chip">{file.format}</span>
-                      <span class="artifact-check">{file.fileKind === 'RESUME' ? '1 PAGE ✓' : 'VOICE ✓'}</span>
+                      <span class="artifact-check">{file.fileKind === 'RESUME' ? '1 page ✓' : 'Voice ✓'}</span>
                     </button>
                   )}
                 </For>

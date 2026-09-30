@@ -47,7 +47,7 @@ export const AbsoluteLocalPathSchema = z
 
 const StructuredEntryIdField = { id: IdSchema.nullable().optional() };
 const StructuredEducationInputSchema = z.object({ ...StructuredEntryIdField, institution: z.string().min(1), degree: z.string().nullable().optional(), field: z.string().nullable().optional(), gpa: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), details: z.array(z.string()).default([]) });
-const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]) });
+const StructuredExperienceInputSchema = z.object({ ...StructuredEntryIdField, company: z.string().min(1), title: z.string().min(1), location: z.string().nullable().optional(), startDate: z.string().nullable().optional(), endDate: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]), reasonForLeaving: z.string().nullable().optional() });
 const StructuredProjectInputSchema = z.object({ ...StructuredEntryIdField, name: z.string().min(1), role: z.string().nullable().optional(), summary: z.string().nullable().optional(), bullets: z.array(z.string()).default([]), tools: z.array(z.string()).default([]), links: z.array(z.string()).default([]) });
 const StructuredSkillGroupInputSchema = z.object({ ...StructuredEntryIdField, label: z.string().min(1), skills: z.array(z.string()).default([]) });
 
@@ -62,6 +62,85 @@ const contract = <Request extends z.ZodTypeAny, Response extends z.ZodTypeAny>(
   request: Request,
   response: Response
 ): IpcContract<Request, Response> => ({ channel, request, response });
+
+export const AccountStateSchema = z.object({ signedIn: z.boolean(), email: z.string().nullable() });
+export type AccountStateDto = z.infer<typeof AccountStateSchema>;
+export const AccountResultSchema = AccountStateSchema.extend({ ok: z.boolean(), message: z.string() });
+export type AccountResultDto = z.infer<typeof AccountResultSchema>;
+const AccountCredentialsSchema = z
+  .object({ email: z.string().trim().email().max(320), password: z.string().min(8).max(128) })
+  .strict();
+
+const RuleConditionValueSchema = z.string().trim().min(1).max(200);
+const PreferenceRuleConditionsSchema = z
+  .object({ location: RuleConditionValueSchema.optional(), company: RuleConditionValueSchema.optional(), portal: RuleConditionValueSchema.optional() })
+  .strict();
+export const PreferenceRuleSchema = z.object({
+  id: IdSchema,
+  profileId: IdSchema,
+  question: z.string(),
+  answer: z.string(),
+  conditions: PreferenceRuleConditionsSchema,
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type PreferenceRuleDto = z.infer<typeof PreferenceRuleSchema>;
+
+export const JobFilterKindSchema = z.enum(["skip_company", "skip_keyword", "min_salary", "work_arrangement", "place"]);
+export const JobFilterSchema = z.object({
+  id: IdSchema,
+  profileId: IdSchema,
+  kind: JobFilterKindSchema,
+  value: z.string(),
+  enabled: z.boolean(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type JobFilterDto = z.infer<typeof JobFilterSchema>;
+
+const AddressPartSchema = z.string().trim().max(200).default("");
+export const ProfileAddressSchema = z.object({
+  id: IdSchema,
+  profileId: IdSchema,
+  label: z.string(),
+  addressLine1: z.string(),
+  addressLine2: z.string(),
+  city: z.string(),
+  state: z.string(),
+  postalCode: z.string(),
+  country: z.string(),
+  createdAt: z.string(),
+  updatedAt: z.string()
+});
+export type ProfileAddressDto = z.infer<typeof ProfileAddressSchema>;
+
+export const PreferenceProposalSchema = z.discriminatedUnion("type", [
+  z.object({
+    type: z.literal("answer_rule"),
+    question: z.string().min(1).max(500),
+    answer: z.string().min(1).max(2000),
+    conditions: PreferenceRuleConditionsSchema
+  }),
+  z.object({ type: z.literal("job_filter"), kind: JobFilterKindSchema, value: z.string().min(1).max(200) }),
+  z.object({
+    type: z.literal("address"),
+    label: z.string().max(80),
+    addressLine1: z.string().max(200),
+    addressLine2: z.string().max(200),
+    city: z.string().min(1).max(200),
+    state: z.string().max(200),
+    postalCode: z.string().max(20),
+    country: z.string().max(200)
+  })
+]);
+export type PreferenceProposalDto = z.infer<typeof PreferenceProposalSchema>;
+export const PreferenceChatReplySchema = z.object({
+  reply: z.string(),
+  proposals: z.array(PreferenceProposalSchema),
+  source: z.enum(["model", "rules"])
+});
+export type PreferenceChatReplyDto = z.infer<typeof PreferenceChatReplySchema>;
 
 const RunControlResponseSchema = z.object({ accepted: z.boolean(), message: z.string().optional() });
 const RendererAnswerUpdateStatusSchema = z.enum(["EDITED", "REJECTED"]);
@@ -113,9 +192,27 @@ export const IpcChannels = {
   foldersChooseOutputDir: "folders:choose-output-dir",
   chatAppendMessage: "chat:append-message",
   chatList: "chat:list",
+  preferenceRulesList: "preference-rules:list",
+  preferenceRulesUpsert: "preference-rules:upsert",
+  preferenceRulesDelete: "preference-rules:delete",
+  jobFiltersList: "job-filters:list",
+  jobFiltersUpsert: "job-filters:upsert",
+  jobFiltersDelete: "job-filters:delete",
+  profileAddressesList: "profile-addresses:list",
+  profileAddressesUpsert: "profile-addresses:upsert",
+  profileAddressesDelete: "profile-addresses:delete",
+  preferenceChatSend: "preference-chat:send",
   gmailStartOAuth: "gmail:start-oauth",
   gmailGetOAuthStatus: "gmail:get-oauth-status",
   gmailDisconnectOAuth: "gmail:disconnect-oauth",
+  accountGetState: "account:get-state",
+  accountSignUp: "account:sign-up",
+  accountSignIn: "account:sign-in",
+  accountSignInWithGoogle: "account:sign-in-with-google",
+  accountSignOut: "account:sign-out",
+  jevSaveKey: "jev:save-key",
+  jevGetStatus: "jev:get-status",
+  jevClearKey: "jev:clear-key",
   documentsListGenerated: "documents:list-generated",
   systemCheckConverters: "system:check-converters",
   systemCheckHealth: "system:check-health",
@@ -378,6 +475,79 @@ export const IpcContracts = {
     PaginationSchema,
     z.object({ items: z.array(ChatMessageSchema), total: z.number().int().nonnegative() })
   ),
+  preferenceRulesList: contract(
+    IpcChannels.preferenceRulesList,
+    z.object({ profileId: IdSchema }).strict(),
+    z.object({ items: z.array(PreferenceRuleSchema) })
+  ),
+  preferenceRulesUpsert: contract(
+    IpcChannels.preferenceRulesUpsert,
+    z.object({
+      id: IdSchema.optional(),
+      profileId: IdSchema,
+      question: z.string().trim().min(1).max(500),
+      answer: z.string().trim().min(1).max(2000),
+      conditions: PreferenceRuleConditionsSchema.default({}),
+      enabled: z.boolean().default(true)
+    }).strict(),
+    PreferenceRuleSchema
+  ),
+  preferenceRulesDelete: contract(
+    IpcChannels.preferenceRulesDelete,
+    z.object({ id: IdSchema }).strict(),
+    z.object({ deleted: z.boolean() })
+  ),
+  jobFiltersList: contract(
+    IpcChannels.jobFiltersList,
+    z.object({ profileId: IdSchema }).strict(),
+    z.object({ items: z.array(JobFilterSchema) })
+  ),
+  jobFiltersUpsert: contract(
+    IpcChannels.jobFiltersUpsert,
+    z.object({
+      id: IdSchema.optional(),
+      profileId: IdSchema,
+      kind: JobFilterKindSchema,
+      value: z.string().trim().min(1).max(200),
+      enabled: z.boolean().default(true)
+    }).strict(),
+    JobFilterSchema
+  ),
+  jobFiltersDelete: contract(
+    IpcChannels.jobFiltersDelete,
+    z.object({ id: IdSchema }).strict(),
+    z.object({ deleted: z.boolean() })
+  ),
+  profileAddressesList: contract(
+    IpcChannels.profileAddressesList,
+    z.object({ profileId: IdSchema }).strict(),
+    z.object({ items: z.array(ProfileAddressSchema) })
+  ),
+  profileAddressesUpsert: contract(
+    IpcChannels.profileAddressesUpsert,
+    z.object({
+      id: IdSchema.optional(),
+      profileId: IdSchema,
+      label: z.string().trim().max(80).default(""),
+      addressLine1: AddressPartSchema,
+      addressLine2: AddressPartSchema,
+      city: z.string().trim().min(1).max(200),
+      state: AddressPartSchema,
+      postalCode: z.string().trim().max(20).default(""),
+      country: AddressPartSchema
+    }).strict(),
+    ProfileAddressSchema
+  ),
+  profileAddressesDelete: contract(
+    IpcChannels.profileAddressesDelete,
+    z.object({ id: IdSchema }).strict(),
+    z.object({ deleted: z.boolean() })
+  ),
+  preferenceChatSend: contract(
+    IpcChannels.preferenceChatSend,
+    z.object({ profileId: IdSchema, message: z.string().trim().min(1).max(4000) }).strict(),
+    PreferenceChatReplySchema
+  ),
   gmailStartOAuth: contract(
     IpcChannels.gmailStartOAuth,
     z.object({ clientId: z.string().min(1), clientSecret: z.string().min(1) }).strict(),
@@ -393,6 +563,18 @@ export const IpcContracts = {
     EmptyRequestSchema,
     z.object({ ok: z.boolean() })
   ),
+  accountGetState: contract(IpcChannels.accountGetState, EmptyRequestSchema, AccountStateSchema),
+  accountSignUp: contract(IpcChannels.accountSignUp, AccountCredentialsSchema, AccountResultSchema),
+  accountSignIn: contract(IpcChannels.accountSignIn, AccountCredentialsSchema, AccountResultSchema),
+  accountSignInWithGoogle: contract(IpcChannels.accountSignInWithGoogle, EmptyRequestSchema, AccountResultSchema),
+  accountSignOut: contract(IpcChannels.accountSignOut, EmptyRequestSchema, AccountStateSchema),
+  jevSaveKey: contract(
+    IpcChannels.jevSaveKey,
+    z.object({ key: z.string().trim().min(1).max(512) }).strict(),
+    z.object({ configured: z.boolean() })
+  ),
+  jevGetStatus: contract(IpcChannels.jevGetStatus, EmptyRequestSchema, z.object({ configured: z.boolean() })),
+  jevClearKey: contract(IpcChannels.jevClearKey, EmptyRequestSchema, z.object({ configured: z.boolean() })),
   systemCheckConverters: contract(
     IpcChannels.systemCheckConverters,
     EmptyRequestSchema,

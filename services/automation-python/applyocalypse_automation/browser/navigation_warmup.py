@@ -45,6 +45,12 @@ _WEB_SCHEMES = frozenset({"http", "https"})
 # fraction of the budget a page the worker is about to read would get.
 WARM_UP_TIMEOUT_S = 6.0
 
+# How long a failed front door gets for Chrome to commit its error page. goto
+# raises before that commit lands, and a navigation started in the gap is cut
+# off by it. Measured at under 0.1 s; the bound only matters when no error page
+# is coming at all.
+ERROR_PAGE_SETTLE_S = 2.0
+
 # Log-normal seconds between landing and following the link inward. The median
 # sits at e**MU, and the clamp keeps the tail from stalling a run on a page
 # nothing is going to be read from.

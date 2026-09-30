@@ -13,3 +13,7 @@ export * from "./repositories/parsedDocumentRepository";
 export * from "./repositories/auditRepository";
 export * from "./repositories/jobAnalysisRepository";
 export * from "./repositories/tailoringRunRepository";
+export * from "./repositories/preferenceRuleRepository";
+export * from "./repositories/jobFilterRepository";
+export * from "./repositories/profileAddressRepository";
+export * from "./repositories/outreachRepository";

@@ -17,17 +17,20 @@ to both.
 from __future__ import annotations
 
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from docx import Document  # type: ignore
+from docx.enum.text import WD_TAB_ALIGNMENT  # type: ignore
 from docx.oxml.ns import qn  # type: ignore
 from docx.shared import Inches, Pt  # type: ignore
 
 # A leading marker and the space after it. The glyph is dropped because Word's
 # own list style draws the bullet, and keeping both prints two.
-_BULLET_RE = re.compile("^\\s*[•‣▪●◦·⁃*–-]\\s+")
+_BULLET_GLYPHS = "•‣▪●◦·⁃–"
+_BULLET_RE = re.compile(f"^\\s*[{_BULLET_GLYPHS}*-]\\s+")
 # "ABCDEF+Arial-BoldMT" is a subsetted font. Word wants the family, not the tag.
 _SUBSET_PREFIX_RE = re.compile(r"^[A-Z]{6}\+")
 _STYLE_SUFFIX_RE = re.compile(
@@ -41,6 +44,13 @@ DEFAULT_SIZE = 11.0
 HEADING_SIZE_RATIO = 1.08
 # An all-bold line short enough to be a label rather than a sentence.
 HEADING_MAX_CHARS = 60
+# In pypdf's layout rendering, a run of spaces this long inside a line is a
+# column gutter (a right-aligned date or city), not word spacing.
+GUTTER_RE = re.compile(r"(?<=\S) {6,}(?=\S)")
+# Two lines starting this close together start at the same indent.
+INDENT_TOLERANCE_PT = 1.5
+# Where the right-aligned tab stop goes: the page's text width at 0.75" margins.
+TEXT_WIDTH_IN = 7.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,6 +64,8 @@ class PdfLine:
     runs: tuple[PdfRun, ...]
     size: float
     font: str
+    # Where the line's words start, after any bullet marker drawn on its own.
+    text_x: float | None = None
 
     @property
     def text(self) -> str:
@@ -84,11 +96,13 @@ def read_pdf_lines(source_pdf: Path) -> tuple[PdfLine, ...]:
 
     pypdf reports the font and size for every piece of text a page lays down, and
     emits a newline of its own where the page breaks a line. That is enough to
-    recover the structure. The text matrix is deliberately not read: pypdf
-    flushes a run and updates the matrix at different moments, so a run's
+    recover the structure. Lines are never rebuilt or reordered by coordinate:
+    pypdf flushes a run and updates the matrix at different moments, so a run's
     reported position is sometimes the previous one's, and reconstruction by
     coordinate would silently scramble exactly the resumes it looked like it
-    handled best.
+    handled best. Position is only read within a line, for the indent its words
+    start at. Column gutters come from pypdf's layout rendering instead, which
+    spaces text out by position and so shows a gutter as a long run of spaces.
     """
     from pypdf import PdfReader  # type: ignore
 
@@ -97,18 +111,20 @@ def read_pdf_lines(source_pdf: Path) -> tuple[PdfLine, ...]:
     # The style of the line being built, taken from its first non-blank text.
     pending_size = DEFAULT_SIZE
     pending_font = DEFAULT_FONT
+    pending_text_x: float | None = None
 
     def close() -> None:
-        nonlocal pending
+        nonlocal pending, pending_text_x
         if any(run.text.strip() for run in pending):
-            lines.append(PdfLine(runs=tuple(pending), size=pending_size, font=pending_font))
-        pending = []
+            lines.append(PdfLine(runs=tuple(pending), size=pending_size, font=pending_font, text_x=pending_text_x))
+        pending, pending_text_x = [], None
 
-    def visit(text: str, _cm: Any, _tm: Any, font_dict: Any, font_size: Any) -> None:
-        nonlocal pending_size, pending_font
+    def visit(text: str, _cm: Any, tm: Any, font_dict: Any, font_size: Any) -> None:
+        nonlocal pending_size, pending_font, pending_text_x
         size = float(font_size) if isinstance(font_size, (int, float)) and font_size else DEFAULT_SIZE
         raw_font = (font_dict or {}).get("/BaseFont") if isinstance(font_dict, dict) else None
         bold = "bold" in str(raw_font or "").casefold()
+        x = float(tm[4]) if tm and (tm[4] or tm[5]) else None
         for index, part in enumerate(str(text).split("\n")):
             if index:
                 close()
@@ -116,14 +132,113 @@ def read_pdf_lines(source_pdf: Path) -> tuple[PdfLine, ...]:
                 continue
             if part.strip() and not any(run.text.strip() for run in pending):
                 pending_size, pending_font = size, _clean_font(raw_font)
+            if pending_text_x is None and index == 0 and x is not None and part.strip(" -*" + _BULLET_GLYPHS):
+                pending_text_x = x
             pending.append(PdfRun(text=part, bold=bold))
 
     reader = PdfReader(str(source_pdf))
+    gutters: dict[str, list[int]] = {}
     for page in reader.pages:
         page.extract_text(visitor_text=visit)
         close()
+        gutters.update(_layout_gutters(page.extract_text(extraction_mode="layout")))
 
-    return tuple(lines)
+    return _join_wrapped_lines(tuple(_with_gutters(line, gutters) for line in lines))
+
+
+def _squeezed(text: str) -> str:
+    return "".join(text.split())
+
+
+def _layout_gutters(layout_text: str) -> dict[str, list[int]]:
+    """For each line with a gutter: where the gutters fall, counted in the
+    non-space characters before each, keyed by the line's non-space text."""
+    gutters: dict[str, list[int]] = {}
+    for layout_line in layout_text.splitlines():
+        stripped = layout_line.strip()
+        found = [len(_squeezed(stripped[: match.start()])) for match in GUTTER_RE.finditer(stripped)]
+        if found:
+            gutters[_squeezed(layout_line)] = found
+    return gutters
+
+
+def _with_gutters(line: PdfLine, gutters: dict[str, list[int]]) -> PdfLine:
+    """Put a tab at each gutter the layout rendering found in this line."""
+    positions = set(gutters.get(_squeezed(line.text), ()))
+    if not positions:
+        return line
+    runs: list[PdfRun] = []
+    seen = 0
+    for run in line.runs:
+        text = ""
+        for char in run.text:
+            if not char.isspace() and seen in positions:
+                positions.discard(seen)
+                runs.append(PdfRun(text=text.rstrip(), bold=run.bold))
+                runs.append(PdfRun(text="\t", bold=False))
+                text = ""
+            text += char
+            seen += 0 if char.isspace() else 1
+        runs.append(PdfRun(text=text, bold=run.bold))
+    return PdfLine(
+        runs=tuple(run for run in runs if run.text), size=line.size, font=line.font, text_x=line.text_x
+    )
+
+
+def _is_hanging_bullet(line: PdfLine) -> bool:
+    """A bullet whose marker was drawn on its own, so its words sit at an indent."""
+    marker = line.runs[0].text.strip() if line.runs else ""
+    return len(marker) == 1 and marker in _BULLET_GLYPHS + "-*"
+
+
+def _hyphen_break(previous: PdfLine, line: PdfLine) -> bool:
+    text = previous.text.rstrip()
+    return text.endswith("-") and text[:-1].rstrip()[-1:].isalnum() and line.text.lstrip()[:1].isalnum()
+
+
+def _continues(previous: PdfLine, line: PdfLine) -> bool:
+    """Whether `line` is the rest of `previous`, carried over by the page width.
+
+    A plain paragraph that wraps back to the margin looks exactly like the next
+    paragraph, so only the two unambiguous cases are joined: a bullet's words
+    carried onto its hanging indent, and a word hyphenated across the break.
+    """
+    if previous.text_x is None or line.text_x is None or abs(previous.text_x - line.text_x) > INDENT_TOLERANCE_PT:
+        return False
+    if _BULLET_RE.match(line.text) or "\t" in previous.text or line.size != previous.size:
+        return False
+    return _is_hanging_bullet(previous) or _hyphen_break(previous, line)
+
+
+def _joined(previous: PdfLine, line: PdfLine) -> PdfLine:
+    runs = list(previous.runs)
+    while runs and not runs[-1].text.strip():
+        runs.pop()
+    last = runs.pop()
+    if _hyphen_break(previous, line):
+        # "Fine -" + "Tuning" reads "Fine-Tuning": drop any space around the hyphen.
+        head = last.text.rstrip()[:-1].rstrip()
+        if head:
+            runs.append(PdfRun(text=head + "-", bold=last.bold))
+        else:
+            if runs:
+                runs[-1] = PdfRun(text=runs[-1].text.rstrip(), bold=runs[-1].bold)
+            runs.append(PdfRun(text="-", bold=last.bold))
+    else:
+        runs += [PdfRun(text=last.text.rstrip(), bold=last.bold), PdfRun(text=" ", bold=False)]
+    return PdfLine(
+        runs=(*runs, *line.runs), size=previous.size, font=previous.font, text_x=previous.text_x
+    )
+
+
+def _join_wrapped_lines(lines: tuple[PdfLine, ...]) -> tuple[PdfLine, ...]:
+    joined: list[PdfLine] = []
+    for line in lines:
+        if joined and _continues(joined[-1], line):
+            joined[-1] = _joined(joined[-1], line)
+        else:
+            joined.append(line)
+    return tuple(joined)
 
 
 def _body_size(lines: tuple[PdfLine, ...]) -> float:
@@ -183,6 +298,9 @@ def write_candidate_docx(lines: tuple[PdfLine, ...], destination: Path) -> None:
         paragraph = document.add_paragraph(style="List Bullet") if bullet else document.add_paragraph()
         paragraph.paragraph_format.space_before = Pt(6 if heading else 0)
         paragraph.paragraph_format.space_after = Pt(0)
+        if "\t" in line.text:
+            # The gutter's far column sat on the right margin in the PDF.
+            paragraph.paragraph_format.tab_stops.add_tab_stop(Inches(TEXT_WIDTH_IN), WD_TAB_ALIGNMENT.RIGHT)
 
         stripped_marker = False
         for source in line.runs:
@@ -198,6 +316,20 @@ def write_candidate_docx(lines: tuple[PdfLine, ...], destination: Path) -> None:
     document.save(str(destination))
 
 
+def _read_scan(source_pdf: Path) -> tuple[PdfLine, ...]:
+    """Read a text-less PDF with nemotron-parse when an NVIDIA key is saved."""
+    from .nemotron_parse import nvidia_key, read_scanned_pdf_lines
+
+    api_key = nvidia_key()
+    if not api_key:
+        return ()
+    try:
+        return read_scanned_pdf_lines(source_pdf, api_key)
+    except Exception as error:  # noqa: BLE001 - any failure falls back to the scan message
+        print(f"nemotron-parse could not read the scan: {type(error).__name__}", file=sys.stderr)
+        return ()
+
+
 def convert_pdf_to_candidate_docx(source_pdf: Path, output_dir: Path) -> PdfIngestionResult:
     if source_pdf.suffix.lower() != ".pdf":
         raise ValueError("source_pdf must be a PDF")
@@ -209,11 +341,14 @@ def convert_pdf_to_candidate_docx(source_pdf: Path, output_dir: Path) -> PdfInge
 
     lines = read_pdf_lines(source_pdf)
     if not lines:
+        lines = _read_scan(source_pdf)
+    if not lines:
         # A scanned resume is a picture of text. Saying so beats handing back an
         # empty document the user has to open before discovering it is empty.
         raise RuntimeError(
             "This PDF has no selectable text, so it is most likely a scan or an image. "
-            "Upload the Word original, or a PDF exported from it, and we can tailor that."
+            "Upload the Word original, or a PDF exported from it, and we can tailor that. "
+            "With an NVIDIA NIM key saved in Settings, scans are read automatically."
         )
     write_candidate_docx(lines, candidate_path)
 

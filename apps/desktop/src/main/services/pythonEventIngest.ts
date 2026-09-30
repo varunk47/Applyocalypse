@@ -670,6 +670,7 @@ export const ingestPythonEventLine = ({ db, windows, rawLine, safeArtifactRoots 
         uploadedAt: null,
         retentionPolicy: generatedFile.retention_policy,
         deleteAfter: generatedFile.delete_after ?? null,
+        doNotUpload: generatedFile.do_not_upload ?? false,
         deletedAt: null
       });
       const validationReport = preloaded.generatedFile.validationReport;

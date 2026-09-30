@@ -50,9 +50,9 @@ const DEFAULT_RAIL_COPY: RailCopy = {
 
 const RAIL_COPY: Record<string, RailCopy> = {
   READY_TO_SUBMIT: { sub: 'Filled and verified. One last look, then it ships.', action: 'Final review → Submit', kind: 'ready' },
-  BLOCKED_OTP: { sub: 'Portal wants an email code. We paused and stepped back.', action: 'ENTER OTP', kind: 'mono' },
-  BLOCKED_CAPTCHA: { sub: 'Portal raised a human check. We paused and stepped back.', action: 'OPEN PORTAL', kind: 'mono' },
-  BLOCKED_MFA: { sub: 'Portal wants a sign-in approval. We paused and stepped back.', action: 'OPEN PORTAL', kind: 'mono' },
+  BLOCKED_OTP: { sub: 'Portal wants an email code. We paused and stepped back.', action: 'Enter the code', kind: 'mono' },
+  BLOCKED_CAPTCHA: { sub: 'Portal raised a human check. We paused and stepped back.', action: 'Open portal', kind: 'mono' },
+  BLOCKED_MFA: { sub: 'Portal wants a sign-in approval. We paused and stepped back.', action: 'Open portal', kind: 'mono' },
   BLOCKED_AMBIGUOUS_QUESTION: { sub: 'A question needs a human answer before we continue.', action: 'Review question', kind: 'outline' },
   READY_FOR_REVIEW: { sub: 'Résumé + cover letter drafted. Flagged items need a human.', action: 'Review documents', kind: 'outline' },
   WAITING_FOR_USER_EDIT: { sub: 'Something needs your hand before this can continue.', action: 'Review documents', kind: 'outline' },
@@ -76,7 +76,7 @@ const dateKicker = (): string => {
   const now = new Date()
   const day = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })
   const time = now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false })
-  return `${day} · ${time}`.toUpperCase()
+  return `${day} · ${time}`
 }
 
 export default function HomeScreen() {
@@ -87,7 +87,9 @@ export default function HomeScreen() {
   const navigate = useNavigate()
 
   const [jobInput, setJobInput] = createSignal('')
-  const [autoSubmit, setAutoSubmit] = createSignal(false)
+  // Null until the user touches the checkbox; until then it follows the Settings default.
+  const [autoSubmitChoice, setAutoSubmit] = createSignal<boolean | null>(null)
+  const autoSubmit = () => autoSubmitChoice() ?? settingsState.settings['automation.autoSubmitByDefault'] === true
   const [error, setError] = createSignal<string | null>(null)
   const [isSubmitting, setIsSubmitting] = createSignal(false)
   const [nowKicker, setNowKicker] = createSignal(dateKicker())
@@ -259,9 +261,9 @@ export default function HomeScreen() {
           </div>
 
           <div class="rule-row ledger-head">
-            <span class="kicker">IN FLIGHT</span>
+            <span class="kicker">In flight</span>
             <span class="rule" />
-            <span class="ledger-count">{workingRuns().length} WORKING</span>
+            <span class="ledger-count">{workingRuns().length} working</span>
           </div>
 
           <div class="ledger">
@@ -295,7 +297,7 @@ export default function HomeScreen() {
                           />
                         </span>
                         <Show when={live()}>
-                          <span class="row-metric live">LIVE</span>
+                          <span class="row-metric live">Live</span>
                         </Show>
                       </span>
                     </span>
@@ -332,14 +334,14 @@ export default function HomeScreen() {
           </div>
 
           <div class="home-foot">
-            <span>LOCAL VAULT ENCRYPTED · 0 BYTES LEAVE THIS MACHINE</span>
-            <span class="foot-right">{submittedThisWeek()} SUBMITTED THIS WEEK</span>
+            <span>Encrypted on this computer. Nothing leaves it.</span>
+            <span class="foot-right">{submittedThisWeek()} submitted this week</span>
           </div>
         </div>
 
         <aside class="signature-rail" aria-label="Awaiting your signature">
           <div class="rail-head">
-            <span class="kicker kicker-wax">AWAITING YOUR SIGNATURE</span>
+            <span class="kicker kicker-wax">Waiting for you</span>
             <Show when={signatureRuns().length > 0}>
               <span class="rail-count">{signatureRuns().length}</span>
               <button
@@ -349,7 +351,7 @@ export default function HomeScreen() {
                 title="Cancel all paused runs"
                 onClick={() => void cancelPausedRuns()}
               >
-                CLEAR PAUSED
+                Clear paused
               </button>
             </Show>
           </div>
@@ -359,7 +361,7 @@ export default function HomeScreen() {
               return (
                 <div class="rail-card" classList={{ ready: copy().kind === 'ready' }} style={{ 'animation-delay': `${Math.min(0.3 + index() * 0.12, 1)}s` }}>
                   <Show when={copy().kind === 'ready'}>
-                    <span class="ready-stamp">READY</span>
+                    <span class="ready-stamp">Ready</span>
                   </Show>
                   <div class="rail-title">{jobLabel(targetFor(run), run.id)}</div>
                   <div class="rail-sub">{copy().sub}</div>
@@ -381,7 +383,7 @@ export default function HomeScreen() {
           </For>
           <Show when={signatureRuns().length > 8}>
             <button class="btn-mono" type="button" onClick={() => navigate('/history')}>
-              +{signatureRuns().length - 8} MORE IN HISTORY
+              +{signatureRuns().length - 8} more in History
             </button>
           </Show>
           <Show when={!queueState.isLoading && signatureRuns().length === 0}>
@@ -389,7 +391,6 @@ export default function HomeScreen() {
               <span>Nothing needs you right now.</span>
             </div>
           </Show>
-          <div class="rail-quote">"An evening of drudgery, reduced to ten minutes of signatures."</div>
         </aside>
       </div>
     </section>

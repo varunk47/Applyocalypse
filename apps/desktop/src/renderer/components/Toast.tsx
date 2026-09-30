@@ -83,10 +83,10 @@ export const ToastProvider = (props: ParentProps) => {
             return (
               <div ref={el} class="toast" role="status">
                 <Icon size={18} aria-hidden="true" style={{ color: COLOR[item.kind], 'flex-shrink': '0' }} />
-                <span style={{ flex: '1', 'font-size': '0.85rem', color: 'var(--text)' }}>{item.message}</span>
+                <span style={{ flex: '1', 'font-size': '13px' }}>{item.message}</span>
                 <button
                   type="button"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--muted)', padding: '0' }}
+                  style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'inherit', opacity: '0.7', padding: '0' }}
                   aria-label="Dismiss"
                   onClick={() => {
                     if (el) animateOut(el, () => dismiss(item.id))

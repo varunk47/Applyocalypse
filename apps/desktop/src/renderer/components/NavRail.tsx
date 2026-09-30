@@ -54,8 +54,8 @@ export const NavRail = () => {
   })
 
   return (
-    <aside class="nav-rail" aria-label="Applyocalypse navigation">
-      <nav class="nav-list">
+    <header class="nav-rail">
+      <nav class="nav-list" aria-label="Applyocalypse navigation">
         <For each={navItems}>
           {(item) => (
             <button
@@ -69,19 +69,16 @@ export const NavRail = () => {
               <span class="nav-dot" aria-hidden="true" />
               <span>{item.label}</span>
               <Show when={item.path === '/' && missionCount() > 0}>
-                <span class="nav-count">{missionCount()}</span>
+                <span class="nav-count">{missionCount()} need you</span>
               </Show>
             </button>
           )}
         </For>
       </nav>
       <div class="engine-card">
-        <div class="kicker" style={{ 'letter-spacing': '.08em', 'margin-bottom': '6px' }}>
-          ENGINE
-        </div>
         <div class="engine-model">{engineName()}</div>
         <div class="engine-sub">{concurrencyNote()}</div>
       </div>
-    </aside>
+    </header>
   )
 }

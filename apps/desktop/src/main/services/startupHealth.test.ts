@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 let connectedProvider: { provider: string } | null = null;
@@ -38,7 +39,8 @@ const ids = () => checkStartupHealth(db).map((finding) => finding.id);
 beforeEach(() => {
   // A machine with everything it needs, which each test then takes one thing from.
   connectedProvider = { provider: "openai" };
-  workerExecutable = "C:\\app\\worker.exe";
+  // A full path on this OS, so the check looks on disk instead of probing PATH.
+  workerExecutable = resolve("/app/worker.exe");
   convertersAvailable = true;
   vi.mocked(existsSync).mockReturnValue(true);
 });

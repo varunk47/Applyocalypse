@@ -46,6 +46,9 @@ def proposed_answer_for_browser_field(
             source="PROFILE",
             requires_review=True,
         )
+    if is_password_field(field) or is_otp_field(field):
+        # A rule's answer is persisted as a proposal, so it must never carry a password or code.
+        canonical_profile = {key: value for key, value in canonical_profile.items() if key != "preferenceRules"}
     return propose_answer_for_detected_field(
         field_label=field.label,
         field_type=field.field_type,

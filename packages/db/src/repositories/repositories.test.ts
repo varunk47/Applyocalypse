@@ -41,6 +41,8 @@ describe("db repositories", () => {
     const { db } = createDb();
     try {
       const settings = new SettingsRepository(db);
+      // Light is the default until the user picks otherwise.
+      expect(settings.getThemePreference()).toBe("light");
       settings.setThemePreference("dark");
       expect(settings.getThemePreference()).toBe("dark");
     } finally {
@@ -612,6 +614,33 @@ describe("db repositories", () => {
     }
   });
 
+  it("persists a reason for leaving on each job and up to three references", () => {
+    const { db } = createDb();
+    try {
+      const profileRepository = new ProfileRepository(db);
+      const profile = profileRepository.createStarterProfile({ legalName: "Test References" });
+
+      profileRepository.replaceStructuredSections(profile.id, {
+        education: [],
+        experience: [
+          { company: "Acme", title: "Engineer", reasonForLeaving: "Moved cities" },
+          { company: "Initech", title: "Analyst", reasonForLeaving: "  " }
+        ],
+        projects: [],
+        skillGroups: []
+      });
+      const reference = { name: "Ada Lovelace", relationship: "Manager", company: "Acme", title: null, email: "ada@example.com", phone: "555-0100" };
+      profileRepository.upsert({ ...profile, references: [reference] });
+
+      const canonical = profileRepository.getCanonicalProfile(profile.id)!;
+      expect(canonical.experience.map((entry) => entry.reasonForLeaving).sort()).toEqual(["Moved cities", null].sort());
+      expect(canonical.profile.references).toEqual([reference]);
+      expect(() => profileRepository.upsert({ ...profile, references: [reference, reference, reference, reference] })).toThrow();
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
   it("EqualEmploymentDefaultsSchema pre-fills no demographics and rejects invalid values", () => {
     const parsed = EqualEmploymentDefaultsSchema.parse({});
 
@@ -628,8 +657,7 @@ describe("db repositories", () => {
     expect(parsed.hispanicOrLatino).toBeNull();
     expect(parsed.sexualOrientation).toBeNull();
 
-    // The two non-demographic literals stay pinned; they are answers about the
-    // application, not about the applicant.
+    // The two legal history answers default to "No" until the user says otherwise.
     expect(parsed.previouslyEmployedDefault).toBe("No");
     expect(parsed.criminalRecordDefault).toBe("No");
 

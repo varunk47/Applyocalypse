@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { resolveAllowedArtifactPath } from "./artifactProtocol";
 
@@ -11,8 +12,9 @@ vi.mock("electron", () => ({
 
 describe("artifact protocol authorization", () => {
   it("allows DB-known artifact paths without granting the whole containing folder", () => {
-    const knownPath = "C:\\Users\\Ada\\Downloads\\Grace Hopper Example Resume.pdf";
-    const unrelatedPath = "C:\\Users\\Ada\\Downloads\\Bank Statement.pdf";
+    // resolve() makes these absolute on whichever OS runs the test.
+    const knownPath = resolve("/Users/Ada/Downloads/Grace Hopper Example Resume.pdf");
+    const unrelatedPath = resolve("/Users/Ada/Downloads/Bank Statement.pdf");
     const options = {
       isAllowedPath: (localPath: string) => localPath === knownPath
     };

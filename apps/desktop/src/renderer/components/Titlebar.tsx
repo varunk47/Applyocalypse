@@ -9,7 +9,7 @@ export const Titlebar = () => {
         A
       </div>
       <span class="brand-word">Applyocalypse</span>
-      <span class="vault-note">LOCAL VAULT · ENCRYPTED</span>
+      <span class="vault-note">Local vault, encrypted</span>
       <div class="window-controls">
         <button type="button" aria-label="Minimize window" onClick={() => control('minimize')}>
           <span class="glyph-min" />

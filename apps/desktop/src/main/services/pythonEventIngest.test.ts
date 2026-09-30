@@ -176,7 +176,48 @@ describe("python event ingest", () => {
       const row = db.prepare("SELECT * FROM generated_files WHERE id = ?").get(files[0]!.id) as Record<string, unknown>;
       expect(files).toHaveLength(1);
       expect(files[0]?.format).toBe("MD");
+      expect(files[0]?.doNotUpload).toBe(false);
       expect(row).not.toHaveProperty("bytes");
+    } finally {
+      closeApplyocalypseDatabase(db);
+    }
+  });
+
+  it("persists a file the worker marks do-not-upload", () => {
+    const { db, runId } = createRun();
+    try {
+      const artifactPath = join(tempDirs.at(-1)!, "Mary Jackson Example Resume rebuilt.pdf");
+      writeFileSync(artifactPath, "%PDF-1.7", "utf8");
+
+      ingestPythonEventLine({
+        db,
+        windows: () => [],
+        safeArtifactRoots: [tempDirs.at(-1)!],
+        rawLine: JSON.stringify({
+          event_type: "RESUME_RENDERED",
+          run_id: runId,
+          step_id: null,
+          timestamp: "2026-01-01T00:00:00.000Z",
+          severity: "INFO",
+          message: "Rebuilt resume rendered for comparison",
+          machine_state: { format: "PDF" },
+          ui_state: { current_step: "document_review" },
+          payload: {
+            file_kind: "RESUME",
+            format: "PDF",
+            filename: "Mary Jackson Example Resume rebuilt.pdf",
+            local_path: artifactPath,
+            sha256: "e".repeat(64),
+            size_bytes: 8,
+            retention_policy: "DELETE_AFTER_RETENTION",
+            delete_after: "2026-01-15T00:00:00.000Z",
+            review_only: true,
+            do_not_upload: true
+          }
+        })
+      });
+
+      expect(new RunRepository(db).listGeneratedFiles(runId)[0]?.doNotUpload).toBe(true);
     } finally {
       closeApplyocalypseDatabase(db);
     }
