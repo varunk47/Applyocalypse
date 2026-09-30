@@ -50,8 +50,8 @@ const saveProposal = async (profileId: string, proposal: PreferenceProposalDto):
     case 'job_filter':
       return { type: proposal.type, id: (await api.jobFilters.upsert({ profileId, kind: proposal.kind, value: proposal.value })).id }
     case 'address': {
-      const { type: _type, ...address } = proposal
-      return { type: proposal.type, id: (await api.profileAddresses.upsert({ profileId, ...address })).id }
+      const { type, ...address } = proposal
+      return { type, id: (await api.profileAddresses.upsert({ profileId, ...address })).id }
     }
   }
 }
@@ -81,7 +81,8 @@ export const undoProposal = async (profileId: string, turnId: string, index: num
   const outcome = chatTurns.turns.find((t) => t.id === turnId)?.outcomes[index]
   if (outcome && outcome !== 'dismissed') await forgetPreference(profileId, outcome)
   setChatTurns('turns', (turn) => turn.id === turnId, 'outcomes', (outcomes) => {
-    const { [index]: _removed, ...rest } = outcomes
+    const rest = { ...outcomes }
+    delete rest[index]
     return rest
   })
 }
