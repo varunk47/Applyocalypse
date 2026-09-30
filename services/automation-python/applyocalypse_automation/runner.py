@@ -42,8 +42,8 @@ from .field_resolution import (
     resolve_secret_reviewed_value,
 )
 from .jev_run import JEV_GOAL, AdapterJevDriver, jev_ask, jev_ready, personal_values
-from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
 from .job_filters import evaluate_job_filters, with_job_address
+from .otp import GmailOtpResult, read_gmail_otp_from_env, redact_link, select_trusted_verification_link
 from .preference_rules import with_job_context
 from .secret_env import apply_provider_secrets_to_env
 from .submission_receipt import (
