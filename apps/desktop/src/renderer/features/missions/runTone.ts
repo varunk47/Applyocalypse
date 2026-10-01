@@ -47,3 +47,29 @@ const STAGE_BY_STATUS: Record<string, RunStage> = {
 }
 
 export const runStage = (status: string): RunStage => STAGE_BY_STATUS[status] ?? { done: 0, current: 0 }
+
+const LABELS: Record<string, string> = {
+  SUBMITTED: 'Sent',
+  COMPLETED: 'Sent',
+  FAILED: 'Failed',
+  CANCELLED: 'Withdrawn',
+  READY_TO_SUBMIT: 'Ready to sign',
+  READY_FOR_REVIEW: 'Review documents',
+  WAITING_FOR_USER_EDIT: 'Waiting on you',
+  BLOCKED_OTP: 'Needs a code',
+  BLOCKED_CAPTCHA: 'Needs a human check',
+  BLOCKED_MFA: 'Needs a sign-in approval',
+  BLOCKED_AMBIGUOUS_QUESTION: 'Needs an answer',
+  PAUSED: 'Paused',
+  PENDING: 'Queued',
+  CLAIMED: 'Starting',
+  PREPARING: 'Starting',
+  PARSING_JD: 'Reading the posting',
+  ANALYZING: 'Checking the fit',
+  TAILORING_RESUME: 'Tailoring',
+  GENERATING_COVER_LETTER: 'Writing the letter',
+  RUNNING_AUTOMATION: 'Filling the portal',
+}
+
+/** A short status in plain words, for lists and pills. */
+export const statusLabel = (status: string): string => LABELS[status] ?? 'In progress'

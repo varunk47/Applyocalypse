@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { runStage, runTone } from './runTone'
+import { runStage, runTone, statusLabel } from './runTone'
 
 describe('runTone', () => {
   it.each([
@@ -40,5 +40,21 @@ describe('runStage', () => {
     ['FAILED', { done: 0, current: null }],
   ])('%s', (status, stage) => {
     expect(runStage(status)).toEqual(stage)
+  })
+})
+
+describe('statusLabel', () => {
+  it.each([
+    ['SUBMITTED', 'Sent'],
+    ['COMPLETED', 'Sent'],
+    ['FAILED', 'Failed'],
+    ['CANCELLED', 'Withdrawn'],
+    ['READY_TO_SUBMIT', 'Ready to sign'],
+    ['BLOCKED_OTP', 'Needs a code'],
+    ['PENDING', 'Queued'],
+    ['TAILORING_RESUME', 'Tailoring'],
+    ['SOMETHING_NEW', 'In progress'],
+  ])('%s reads as %s', (status, label) => {
+    expect(statusLabel(status)).toBe(label)
   })
 })

@@ -3,6 +3,7 @@ import { createStore, produce } from 'solid-js/store'
 import { KeyRound, Minus, Plus, Save, ShieldCheck, X } from 'lucide-solid'
 import {
   deriveWorkAuthorization,
+  profileReadiness,
   readWorkAuthorization,
   type CanonicalProfile,
   type SponsorshipNeed,
@@ -104,6 +105,18 @@ export default function ProfileScreen() {
     })
   })
 
+  const readiness = () => profileReadiness(state.canonicalProfile)
+  const initials = () =>
+    (state.profile?.displayName || state.profile?.legalName || '?')
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((word) => word.charAt(0).toUpperCase())
+      .join('')
+  const contactLine = () =>
+    [state.profile?.email, state.profile?.phone, state.profile?.location].filter(Boolean).join(' · ') ||
+    'Add your email, phone and city below'
+
   createEffect(() => {
     const canonical = state.canonicalProfile
     if (!canonical) return
@@ -177,32 +190,53 @@ export default function ProfileScreen() {
 
   return (
     <section class="settings-panel surface-panel surface-panel-active profile-screen" data-gsap="panel" data-view-panel>
-      <div>
+      <header class="page-head">
         <h1 class="page-title">Profile</h1>
         <p class="page-sub">The facts every application draws from. Tailoring rewrites the wording, never these.</p>
-      </div>
+      </header>
+
+      <Show when={state.profile}>
+        <div class="card profile-summary">
+          <span class="profile-avatar" aria-hidden="true">{initials()}</span>
+          <div class="profile-summary-text">
+            <strong>{state.profile?.displayName || state.profile?.legalName}</strong>
+            <span>{contactLine()}</span>
+          </div>
+          <Show
+            when={readiness().isReady}
+            fallback={
+              <span class="status-pill tone-sign">
+                {readiness().gaps.length} {readiness().gaps.length === 1 ? 'thing' : 'things'} to add before applying
+              </span>
+            }
+          >
+            <span class="status-pill tone-sent">Ready to apply</span>
+          </Show>
+        </div>
+      </Show>
 
       <Show
         when={state.profile}
         fallback={
-          <div class="starter-profile">
-            <h2>Create master profile</h2>
+          <div class="card starter-profile profile-editor starter-form">
+            <h2>Create your profile</h2>
+            <p class="fine-print">Start with the basics. Resume details can be added after.</p>
             <label><span>Legal name</span><input value={form.legalName} onInput={(e) => setForm('legalName', e.currentTarget.value)} /></label>
             <label><span>Email</span><input value={form.email} onInput={(e) => setForm('email', e.currentTarget.value)} /></label>
             <label><span>Application email</span><input type="email" value={form.applicationEmail} autocomplete="username" onInput={(e) => setForm('applicationEmail', e.currentTarget.value)} /></label>
             <label><span>Application password</span><input type="password" value={form.applicationPassword} autocomplete="new-password" onInput={(e) => setForm('applicationPassword', e.currentTarget.value)} /></label>
+            <p class="fine-print">The application password needs 12 or more characters, with upper and lower case, a number and a symbol.</p>
             <label class="toggle-row"><input type="checkbox" checked={form.gmailOtpEnabled} onChange={(e) => setForm('gmailOtpEnabled', e.currentTarget.checked)} /><span>Use Gmail OTP extraction</span></label>
-            <p class="fine-print">Password policy: 12+ chars, uppercase, lowercase, number, symbol.</p>
             <label><span>Location</span><input value={form.location} onInput={(e) => setForm('location', e.currentTarget.value)} /></label>
-            <button class="secondary-action" type="button" disabled={state.isLoading || !form.legalName.trim() || !form.applicationEmail.trim() || !applicationPasswordIsValid(form.applicationPassword)} onClick={submitStarterProfile}>
+            <button class="btn-wax" type="button" disabled={state.isLoading || !form.legalName.trim() || !form.applicationEmail.trim() || !applicationPasswordIsValid(form.applicationPassword)} onClick={submitStarterProfile}>
               <ShieldCheck size={17} aria-hidden="true" /><span>Save profile</span>
             </button>
           </div>
         }
       >
         {/* ── Section 1: Identity ── */}
-        <details open>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin-bottom': '0.75rem' }}>Identity</summary>
+        <details class="profile-section" open>
+          <summary class="profile-section-head">Identity</summary>
           <div class="starter-profile profile-editor">
             <label><span>Display name</span><input value={form.profileDisplayName} onInput={(e) => setForm('profileDisplayName', e.currentTarget.value)} /></label>
             <label><span>Legal name</span><input value={form.profileLegalName} onInput={(e) => setForm('profileLegalName', e.currentTarget.value)} /></label>
@@ -214,13 +248,13 @@ export default function ProfileScreen() {
               setStatus={(value) => setForm('workAuthStatus', value)}
               setSponsorship={(value) => setForm('workAuthSponsorship', value)}
             />
-            <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>{state.isLoading ? 'Saving…' : 'Save identity'}</span></button>
+            <button class="btn-wax" type="button" disabled={state.isLoading} onClick={submitProfileEdits}><Save size={17} aria-hidden="true" /><span>{state.isLoading ? 'Saving…' : 'Save identity'}</span></button>
           </div>
         </details>
 
         {/* ── Section 2: Experience ── */}
-        <details open>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>
+        <details class="profile-section" open>
+          <summary class="profile-section-head">
             Experience ({structured.experience.length})
           </summary>
           <For each={structured.experience}>
@@ -276,8 +310,8 @@ export default function ProfileScreen() {
         </details>
 
         {/* ── Section 3: Education ── */}
-        <details>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>
+        <details class="profile-section">
+          <summary class="profile-section-head">
             Education ({structured.education.length})
           </summary>
           <For each={structured.education}>
@@ -301,8 +335,8 @@ export default function ProfileScreen() {
         </details>
 
         {/* ── Section 4: Projects ── */}
-        <details>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>
+        <details class="profile-section">
+          <summary class="profile-section-head">
             Projects ({structured.projects.length})
           </summary>
           <For each={structured.projects}>
@@ -346,8 +380,8 @@ export default function ProfileScreen() {
         </details>
 
         {/* ── Section 5: Skills ── */}
-        <details>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>
+        <details class="profile-section">
+          <summary class="profile-section-head">
             Skills ({structured.skillGroups.reduce((sum, g) => sum + g.skills.length, 0)} skills)
           </summary>
           <For each={structured.skillGroups}>
@@ -391,9 +425,8 @@ export default function ProfileScreen() {
             <Plus size={14} /><span>Add skill group</span>
           </button>
           <button
-            class="secondary-action"
+            class="btn-wax profile-save"
             type="button"
-            style={{ 'margin-top': '1rem' }}
             disabled={!state.profile || state.isLoading}
             onClick={() => {
               if (!state.profile) return
@@ -411,8 +444,8 @@ export default function ProfileScreen() {
         </details>
 
         {/* ── Section 6: Legal answers and references ── */}
-        <details>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>
+        <details class="profile-section">
+          <summary class="profile-section-head">
             Legal and references ({background.references.length} of {MAX_PROFILE_REFERENCES})
           </summary>
           <div class="starter-profile profile-editor">
@@ -449,13 +482,13 @@ export default function ProfileScreen() {
                 <Plus size={12} aria-hidden="true" /><span>Add a reference</span>
               </button>
             </Show>
-            <button class="secondary-action" type="button" disabled={state.isLoading} onClick={submitBackground}><Save size={17} aria-hidden="true" /><span>Save legal and references</span></button>
+            <button class="btn-wax" type="button" disabled={state.isLoading} onClick={submitBackground}><Save size={17} aria-hidden="true" /><span>Save legal and references</span></button>
           </div>
         </details>
 
         {/* ── Section 7: Application credentials ── */}
-        <details>
-          <summary class="panel-kicker" style={{ cursor: 'pointer', 'margin': '1rem 0 0.75rem' }}>Application identity</summary>
+        <details class="profile-section">
+          <summary class="profile-section-head">Application identity</summary>
           <div class="starter-profile credential-editor">
             <div style={{ display: 'flex', 'align-items': 'center', gap: '0.5rem', 'margin-bottom': '0.5rem' }}>
               <KeyRound size={16} aria-hidden="true" />
@@ -466,9 +499,9 @@ export default function ProfileScreen() {
             </div>
             <label><span>Application email</span><input type="email" value={form.profileApplicationEmail} autocomplete="username" onInput={(e) => setForm('profileApplicationEmail', e.currentTarget.value)} /></label>
             <label><span>Application password</span><input type="password" value={form.profileApplicationPassword} autocomplete="new-password" onInput={(e) => setForm('profileApplicationPassword', e.currentTarget.value)} /></label>
+            <p class="fine-print">12 or more characters, with upper and lower case, a number and a symbol.</p>
             <label class="toggle-row"><input type="checkbox" checked={form.profileGmailOtpEnabled} onChange={(e) => setForm('profileGmailOtpEnabled', e.currentTarget.checked)} /><span>Use Gmail OTP extraction</span></label>
-            <p class="fine-print">12+ chars, uppercase, lowercase, number, symbol.</p>
-            <button class="secondary-action" type="button" disabled={state.isLoading || !form.profileApplicationEmail.trim() || !applicationPasswordIsValid(form.profileApplicationPassword)} onClick={submitApplicationCredentials}>
+            <button class="btn-wax" type="button" disabled={state.isLoading || !form.profileApplicationEmail.trim() || !applicationPasswordIsValid(form.profileApplicationPassword)} onClick={submitApplicationCredentials}>
               <ShieldCheck size={17} aria-hidden="true" /><span>Save application identity</span>
             </button>
           </div>
