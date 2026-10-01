@@ -122,3 +122,11 @@ wrong. Entries say what happened, not who to blame.
   stdin until the 120 s timeout. So did a `python - <<EOF || venv-python - <<EOF2`
   chain, and an `rtk grep -A` on one file. *Rule:* one interpreter per heredoc,
   no bare `cat >`; use the Grep tool for context searches.
+- **The app did not start for three days and nobody noticed.** Bundling
+  supabase-js into the main process moved electron-vite's `__dirname` shim into
+  a doc comment, and every check that followed (vitest, typecheck, screenshots
+  in a browser preview) passed without ever launching Electron. *Rule:* after a
+  main-process or dependency change, build and boot the real app (the
+  `desktop-boot-smoke` path against `out/`, with `APPLYO_TEST_USER_DATA_DIR`)
+  before calling it done. Main-process code derives paths from
+  `import.meta.url`, never `__dirname`.
