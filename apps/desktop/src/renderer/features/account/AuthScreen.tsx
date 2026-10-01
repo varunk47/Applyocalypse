@@ -65,7 +65,10 @@ export const AuthScreen = () => {
   return (
     <div class="auth-screen">
       <section class="auth-story" aria-labelledby="auth-story-title">
-        <div class="auth-mark" aria-hidden="true">A</div>
+        <div class="auth-brand">
+          <span class="auth-mark" aria-hidden="true">A</span>
+          <span class="auth-word">Applyocalypse</span>
+        </div>
         <h1 id="auth-story-title" class="auth-title">
           Apply with a co-pilot, <em>not an autopilot.</em>
         </h1>

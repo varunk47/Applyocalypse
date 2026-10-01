@@ -2751,16 +2751,18 @@ h1, h2, h3 { text-wrap: balance; }
   padding: 48px clamp(24px, 6vw, 88px);
 }
 
+.auth-brand { display: flex; align-items: center; gap: 12px; }
 .auth-mark {
   display: grid;
   place-items: center;
-  width: 44px;
-  height: 44px;
-  border-radius: 12px;
+  width: 40px;
+  height: 40px;
+  border-radius: 11px;
   background: var(--ink);
   color: var(--paper);
-  font: 560 24px/1 var(--display);
+  font: 800 20px/1 var(--sans);
 }
+.auth-word { font: 700 20px/1.2 var(--sans); letter-spacing: -0.015em; color: var(--ink); }
 
 .auth-title {
   margin: 0;

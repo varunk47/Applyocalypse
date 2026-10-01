@@ -128,9 +128,10 @@ const boot = async (): Promise<void> => {
                 const api = globalThis.applyocalypse;
                 return {
                   hasShell: Boolean(document.querySelector(".app-shell")),
-                  // innerText reflects text-transform, and the titlebar
-                  // brand is uppercased, so compare case-insensitively.
+                  // innerText reflects text-transform, so compare case-insensitively.
                   hasBrand: bodyText.toLowerCase().includes("applyocalypse"),
+                  // A fresh install is signed out, so it opens on the sign-in screen.
+                  hasAuthScreen: Boolean(document.querySelector(".auth-screen")),
                   navItemCount: document.querySelectorAll("[data-gsap='nav-item']").length,
                   panelCount: document.querySelectorAll("[data-gsap='panel']").length,
                   hasPreloadApi: Boolean(api?.theme?.getInitialState && api?.jobs?.enqueue && api?.runs?.approve),
@@ -144,7 +145,7 @@ const boot = async (): Promise<void> => {
               const deadline = Date.now() + 10_000;
               const poll = () => {
                 const smoke = sample();
-                if (smoke.panelCount >= 2 || Date.now() > deadline) {
+                if (smoke.panelCount >= 2 || smoke.hasAuthScreen || Date.now() > deadline) {
                   resolve(smoke);
                   return;
                 }
@@ -159,18 +160,19 @@ const boot = async (): Promise<void> => {
           const smoke = result as {
             hasShell?: boolean;
             hasBrand?: boolean;
+            hasAuthScreen?: boolean;
             navItemCount?: number;
             panelCount?: number;
             hasPreloadApi?: boolean;
             htmlTheme?: string | null;
           };
+          // Signed in: the sidebar's destinations carry the nav-item marker,
+          // and the titlebar plus the routed screen are the two panels.
+          const shellReady = (smoke.navItemCount ?? 0) >= 5 && (smoke.panelCount ?? 0) >= 2;
           const passed =
             smoke.hasShell === true &&
             smoke.hasBrand === true &&
-            // Dossier nav: brand mark + 5 destinations carry the nav-item marker.
-            (smoke.navItemCount ?? 0) >= 5 &&
-            // Routed screens mount one view panel at a time: topbar + active screen.
-            (smoke.panelCount ?? 0) >= 2 &&
+            (shellReady || smoke.hasAuthScreen === true) &&
             smoke.hasPreloadApi === true &&
             (smoke.htmlTheme === "dark" || smoke.htmlTheme === "light");
           clearTimeout(timeout);

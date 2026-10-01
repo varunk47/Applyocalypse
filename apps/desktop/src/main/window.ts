@@ -1,6 +1,10 @@
 import { BrowserWindow, app } from "electron";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ThemeState } from "@applyocalypse/shared-types";
+
+// The bundle is an ES module, so there is no __dirname; see noCommonJsGlobals.test.ts.
+const bundleDir = dirname(fileURLToPath(import.meta.url));
 
 export const createMainWindow = (themeState: ThemeState): BrowserWindow => {
   const window = new BrowserWindow({
@@ -9,11 +13,11 @@ export const createMainWindow = (themeState: ThemeState): BrowserWindow => {
     minWidth: 1080,
     minHeight: 760,
     title: "Applyocalypse",
-    backgroundColor: themeState.activeTheme === "dark" ? "#111214" : "#F3F1EC",
+    backgroundColor: themeState.activeTheme === "dark" ? "#141312" : "#F2EFE7",
     show: false,
     frame: false,
     webPreferences: {
-      preload: join(__dirname, "../preload/index.js"),
+      preload: join(bundleDir, "../preload/index.js"),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -35,7 +39,7 @@ export const createMainWindow = (themeState: ThemeState): BrowserWindow => {
       }
     });
   } else {
-    void window.loadFile(join(__dirname, "../renderer/index.html"));
+    void window.loadFile(join(bundleDir, "../renderer/index.html"));
     window.webContents.on("will-navigate", (event, targetUrl) => {
       if (!targetUrl.startsWith("file://")) {
         event.preventDefault();
